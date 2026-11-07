@@ -1,0 +1,25 @@
+{
+  "name": "zks-po-pc",
+  "productName": "ZKS PO",
+  "version": "1.0.0",
+  "description": "ZKS PO na komputer: odpowiednik aplikacji na Androida (Electron).",
+  "main": "src/main/main.cjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "pl.zks.po.pc",
+    "productName": "ZKS PO",
+    "files": ["src/**/*", "web/**/*", "package.json"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

@@ -1,0 +1,121 @@
+'use strict';
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage, clipboard, Menu } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { pathToFileURL } = require('url');
+const { callApi } = require('./apiCore.cjs');
+const { createStore } = require('./settings.cjs');
+
+const WEB_SCHEME = 'zks-web';
+const WEB_ROOT = path.join(__dirname, '..', '..', 'web');
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: WEB_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+]);
+
+let store;
+let mainWindow;
+
+/** Zwraca bezpieczną nazwę pliku (bez ścieżki). */
+function safeName(name) {
+  const base = path.basename(String(name || 'plik')).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  return base || 'plik';
+}
+
+/** Rozwiązuje adres zks-web://app/… do pliku w katalogu web/; null przy próbie wyjścia poza katalog. */
+function resolveWebPath(requestUrl) {
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(requestUrl).pathname); } catch (e) { return null; }
+  if (pathname.includes('\0') || pathname.includes('\\')) return null;
+  const target = path.normalize(path.join(WEB_ROOT, pathname));
+  if (target !== WEB_ROOT && !target.startsWith(WEB_ROOT + path.sep)) return null;
+  return target;
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: '#808080',
+    title: 'ZKS PO',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  Menu.setApplicationMenu(null);
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Zewnętrzne linki otwieramy w przeglądarce systemowej, nigdy w oknie aplikacji.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
+  });
+}
+
+app.whenReady().then(() => {
+  store = createStore(app.getPath('userData'), safeStorage);
+
+  protocol.handle(WEB_SCHEME, (request) => {
+    const file = resolveWebPath(request.url);
+    if (!file || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      return new Response('Not found', { status: 404 });
+    }
+    return net.fetch(pathToFileURL(file).toString());
+  });
+
+  ipcMain.handle('settings:get', () => store.load());
+  ipcMain.handle('settings:save', (_e, cfg) => { store.save(cfg || {}); return true; });
+  ipcMain.handle('api:call', (_e, fn, args, opts) => {
+    if (typeof fn !== 'string' || !/^[A-Za-z0-9_]{1,80}$/.test(fn)) {
+      return { ok: false, code: 'UNKNOWN_FN', error: 'Nieprawidłowa nazwa funkcji.' };
+    }
+    const timeoutMs = opts && Number.isFinite(opts.timeoutMs) ? Math.min(opts.timeoutMs, 600000) : undefined;
+    return callApi(store.load(), fn, Array.isArray(args) ? args : [], { fetch: (u, o) => net.fetch(u, o), timeoutMs });
+  });
+
+  ipcMain.handle('file:save', async (_e, name, mime, base64) => {
+    const bytes = Buffer.from(String(base64 || ''), 'base64');
+    const res = await dialog.showSaveDialog(mainWindow, { defaultPath: safeName(name) });
+    if (res.canceled || !res.filePath) return false;
+    fs.writeFileSync(res.filePath, bytes);
+    return true;
+  });
+  ipcMain.handle('file:saveText', async (_e, name, text) => {
+    const res = await dialog.showSaveDialog(mainWindow, { defaultPath: safeName(name) });
+    if (res.canceled || !res.filePath) return false;
+    fs.writeFileSync(res.filePath, String(text || ''), 'utf8');
+    return true;
+  });
+  ipcMain.handle('file:printHtml', async (_e, html) => {
+    const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+    try {
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(String(html || '')));
+      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+      const res = await dialog.showSaveDialog(mainWindow, { defaultPath: 'raport.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+      if (res.canceled || !res.filePath) return false;
+      fs.writeFileSync(res.filePath, pdf);
+      return true;
+    } finally {
+      win.destroy();
+    }
+  });
+  ipcMain.handle('shell:open', (_e, url) => {
+    if (/^https?:\/\//i.test(String(url))) return shell.openExternal(String(url));
+    return false;
+  });
+  ipcMain.handle('clipboard:write', (_e, text) => { clipboard.writeText(String(text || '')); return true; });
+
+  createWindow();
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+module.exports = { safeName, resolveWebPath };
