@@ -7,18 +7,22 @@ import { mountGrafik } from './views/grafik.js';
 import { mountZakupy } from './views/zakupy.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
+import { mountToolTrack } from './views/tooltrack.js';
+import { mountHarm } from './views/harm.js';
+import { mountPlan } from './views/plan.js';
+import { mountHelp } from './views/help.js';
 
 /** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
-  { id: 'plan', title: 'Plan', perm: 'plan' },
+  { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'toolbuilder', title: 'ToolBuilder', style: 'green' },
   { id: 'assemtool', title: 'Assem.Tool', style: 'green' },
-  { id: 'tooltrack', title: 'ToolTrack', style: 'green' },
+  { id: 'tooltrack', title: 'ToolTrack', style: 'green', mount: mountToolTrack },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
-  { id: 'harmonogram', title: 'Harmonogram' },
-  { id: 'help', title: 'Help' },
+  { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
+  { id: 'help', title: 'Help', mount: mountHelp },
   { id: 'symulator', title: 'Symulator', web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', web: 'symulator-num.html' },
   { id: 'pomiary', title: 'Pomiary', web: 'karta-pomiaru.html', gas: true },

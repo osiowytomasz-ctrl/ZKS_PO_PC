@@ -104,3 +104,90 @@ test('Zakupy: widoki, sortowanie dat i naturalne', () => {
   assert.equal(Z.sortSummary('ordered', [{ key: 'kod', ascending: false }]), 'Kod ↓');
   assert.match(Z.shareText('ordered', ord), /^Zamówione\n\nData \| Kod \| Ilość \| ZMW \| Opis\n01\.09\.2026 \| K10/);
 });
+
+import * as T from '../src/renderer/js/logic/tooltrack.js';
+test('ToolTrack: filtry kaskadowe, dynamiczny, ukryte, ostrzeżenia', () => {
+  const tools = [
+    { productCode: 'A 1', columnD: 'fre', columnE: 'wsp', columnF: '10', columnP: 'X', location: 'Correa' },
+    { productCode: 'B 2', columnD: 'opr', columnE: 'wsp', columnN: 'HSK', columnP: 'Y', location: 'Union' },
+    { productCode: 'C 3', columnD: 'gwi', columnE: 'wsp', location: 'Union' },
+    { productCode: 'D 4', columnD: 'fre', columnE: 'wsp', location: 'Zapas' },
+  ];
+  assert.deepEqual(tools.filter(T.isListed).map((t) => t.productCode), ['A 1', 'B 2']);
+  const listed = tools.filter(T.isListed);
+  assert.equal(T.dynamicIsMounting('opr'), true);
+  assert.equal(T.dynamicIsMounting(''), null);
+  const f = T.withFilter(T.emptyFilters(), 'group', 'opr');
+  assert.deepEqual(T.filterOptions(listed, f, 'dynamic'), ['HSK']);
+  assert.deepEqual(T.filterTools(listed, f).map((t) => t.productCode), ['B 2']);
+  assert.deepEqual(T.filterOptions(listed, f, 'group'), ['fre', 'opr']);
+  assert.equal(T.findByCode(tools, ' a   1 ').productCode, 'A 1');
+  const byCode = new Map(tools.map((t) => [T.normCode(t.productCode), { ...t, partStatusColor: '#ff0000' }]));
+  assert.equal(T.hasPartWarning(tools[0], { 'a 1': { partsCutting: ['B 2'] } }, byCode), true);
+  assert.equal(T.wearPercent(0.5), 50);
+  assert.equal(T.wearBand(75), 'high');
+  assert.equal(T.rAlphaText({ columnG: '', columnH: '0,4' }), '0.40');
+});
+
+import * as H from '../src/renderer/js/logic/harm.js';
+test('Harmonogram: oś, realizacja, dostawa, zależności, sortowanie', () => {
+  const data = {
+    rows: [
+      { lp: '1', komis: 'K2', stanowisko: 'S1', start: '2026-11-08 08:00', koniec: '2026-11-08 12:00', godziny: '4', dostawa: '2026-11-08 06:00', wysylka: '2026-11-08 10:00' },
+      { lp: '2', z1: '1', komis: 'K10', stanowisko: 'S1', start: '2026-11-08 12:00', koniec: '2026-11-09 12:00', godziny: '24' },
+      { lp: '3', komis: 'K1', stanowisko: 'S2', start: '', koniec: '' },
+    ],
+    rapData: { K2: { S1: 2 } },
+  };
+  const now = new Date(Date.UTC(2026, 10, 8, 9, 30));
+  const c = H.buildChart(data, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now);
+  assert.equal(c.items.length, 2);
+  assert.equal(c.items[0].pct, 50);
+  assert.deepEqual(c.items[0].delivery.map((d) => d.kind), ['green', 'red']);
+  assert.equal(c.items[0].startHours, 0);           // przycięte do osi (09:00)
+  assert.equal(c.deps.length, 1);
+  assert.equal(c.firstDayHours, 15);
+  const sorted = H.sortRows(data.rows, { komis: 'asc', start: null, station: null });
+  assert.deepEqual(sorted.map((r) => r.komis), ['K1', 'K2', 'K10']);
+  assert.equal(H.parseHours('4,5 h'), 4.5);
+  assert.equal(H.shortDate('2026-11-08 08:30'), '08.11.26 08');
+  assert.equal(H.dayKind(new Date(Date.UTC(2026, 10, 8)), new Set()), 'sun');
+  assert.deepEqual(H.cycleSort(H.emptySorts(), 'komis').komis, 'asc');
+});
+
+import * as P from '../src/renderer/js/logic/plan.js';
+test('Plan: bloki, linie z kolorami, HTML do zapisu', () => {
+  const grid = { values: [['a'], ['b'], ['c'], ['d']], blocks: [{ id: 'z1', headerRow: 0, lastRow: 2 }] };
+  assert.deepEqual(P.visibleRows(grid, new Set()), [0, 3]);
+  assert.deepEqual(P.visibleRows(grid, new Set(['z1'])), [0, 1, 2, 3]);
+  const old = P.splitLines([{ text: '1. a\n2. b', color: '#ff0000' }]);
+  assert.equal(old.length, 2);
+  const next = P.composeLines(old, '1. a\n2. zmiana\n3. nowa', '#0000ff');
+  assert.equal(next[0][0].color, '#ff0000');
+  assert.equal(next[1][0].color, '#0000ff');
+  assert.equal(P.toHtml([[{ text: 'x<y', color: '#000000' }], []]), '<span style="color:#000000;">x‹y</span><br>');
+  assert.equal(P.displayDate('2026-11-08'), '08-11-2026');
+});
+
+import * as K from '../src/renderer/js/logic/help.js';
+test('Help: parser wyrażeń i kalkulatory', () => {
+  assert.equal(K.evalExpr('2+3*4'), 14);
+  assert.equal(K.evalExpr('2^3^2'), 512);
+  assert.equal(K.evalExpr('2^-1'), 0.5);
+  assert.ok(Math.abs(K.evalExpr('pi*100') - 314.159265) < 1e-5);
+  assert.equal(K.evalExpr('sqrt(16)+abs(-1)'), 5);
+  assert.equal(K.evalExpr('1,5*2'), 3);
+  assert.equal(K.evalExpr('2+'), null);
+  assert.equal(K.evalExpr('1/0'), null);
+  assert.equal(K.evalExpr('nic(2)'), null);
+  assert.equal(K.feed('1.6', '0.8').text, 'Ra = 1.6 µm, rε = 0.8 mm, Posuw F = 0.144 mm/obr'.replace('0.144', K.feed('1.6', '0.8').text.match(/F = (\S+)/)[1]));
+  const c = K.chords('100', '8', false, '', ['2', '5', '9']);
+  assert.equal(c.angleText, '45.000000');
+  assert.equal(c.lines[0].text, '38.268');
+  assert.equal(c.lines[1].text, '100.000');
+  assert.equal(c.lines[2].isError, true);
+  assert.match(K.chords('100', '8', true, '50', ['2']).error, /> 360°/);
+  const p = K.coordinates('100', '4', '', false, '');
+  assert.equal(p.lines[1], 'N2 X=0.000 Y=50.000 ; Kąt=90.000000');
+  assert.equal(K.linearFeed('360', '100').text, 'F° = 360 °/min, Ø = 100 mm, Fmm = 314.159 mm/min');
+});
