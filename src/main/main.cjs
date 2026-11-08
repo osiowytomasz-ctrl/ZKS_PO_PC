@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage, 
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const crypto = require('crypto');
 const { callApi } = require('./apiCore.cjs');
 const { createStore } = require('./settings.cjs');
 
@@ -14,6 +15,13 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let store;
+
+/** Plik pamięci podręcznej dla wywołania; klucz zawiera adres i klucz użytkownika, więc dane różnych osób się nie mieszają. */
+function cacheFile(fn, args) {
+  const cfg = store.load();
+  const h = crypto.createHash('sha256').update(JSON.stringify([cfg.url, cfg.key, fn, args])).digest('hex').slice(0, 40);
+  return path.join(app.getPath('userData'), 'cache', h + '.json');
+}
 let mainWindow;
 
 /** Zwraca bezpieczną nazwę pliku (bez ścieżki). */
@@ -77,8 +85,22 @@ app.whenReady().then(() => {
       return { ok: false, code: 'UNKNOWN_FN', error: 'Nieprawidłowa nazwa funkcji.' };
     }
     const timeoutMs = opts && Number.isFinite(opts.timeoutMs) ? Math.min(opts.timeoutMs, 600000) : undefined;
-    return callApi(store.load(), fn, Array.isArray(args) ? args : [], { fetch: (u, o) => net.fetch(u, o), timeoutMs });
+    const list = Array.isArray(args) ? args : [];
+    return callApi(store.load(), fn, list, { fetch: (u, o) => net.fetch(u, o), timeoutMs }).then((r) => {
+      if (r.ok && opts && opts.cache) {
+        try {
+          const f = cacheFile(fn, list);
+          fs.mkdirSync(path.dirname(f), { recursive: true });
+          fs.writeFileSync(f, JSON.stringify({ t: Date.now(), data: r.data }), { mode: 0o600 });
+        } catch (e) { /* brak miejsca lub uprawnień: działamy bez pamięci podręcznej */ }
+      }
+      return r;
+    });
   });
+  ipcMain.handle('cache:get', (_e, fn, args) => {
+    try { return JSON.parse(fs.readFileSync(cacheFile(String(fn), Array.isArray(args) ? args : []), 'utf8')); } catch (e) { return null; }
+  });
+  ipcMain.handle('cache:clear', () => { try { fs.rmSync(path.join(app.getPath('userData'), 'cache'), { recursive: true, force: true }); return true; } catch (e) { return false; } });
 
   ipcMain.handle('file:save', async (_e, name, mime, base64) => {
     const bytes = Buffer.from(String(base64 || ''), 'base64');

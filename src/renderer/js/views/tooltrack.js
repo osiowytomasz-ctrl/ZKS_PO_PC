@@ -1,4 +1,4 @@
-import { h, clear, api, toast, confirmBox, alertBox } from '../ui.js';
+import { h, clear, api, apiCached, toast, confirmBox, alertBox } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as T from '../logic/tooltrack.js';
 import { parseSheetColor } from '../logic/common.js';
@@ -15,7 +15,7 @@ export function mountToolTrack(el, ctx) {
     clear(listBox); listBox.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie katalogu narzędzi…'));
     try {
       const cat = await toolCatalog(force);
-      try { const l = await api('getStAllowedLocations'); if (l && l.length) st.locations = l.filter((x) => String(x).trim()); } catch (e) { /* domyślne */ }
+      try { await apiCached('getStAllowedLocations', [], (l) => { if (l && l.length) st.locations = l.filter((x) => String(x).trim()); }); } catch (e) { /* domyślne */ }
       st.details = cat.detailsMap || {};
       st.all = (cat.tools || []).filter((t) => String(t.productCode || '').trim());
       st.byCode = new Map(st.all.map((t) => [T.normCode(t.productCode), t]));

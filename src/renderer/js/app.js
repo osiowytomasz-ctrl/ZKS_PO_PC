@@ -1,4 +1,5 @@
-import { h, clear, api, toast } from './ui.js';
+import { h, clear, api, apiCached, toast } from './ui.js';
+import { preload } from './catalog.js';
 import { permissionsSummary } from './logic/common.js';
 import { mountHome } from './views/home.js';
 import { mountSettings } from './views/settings.js';
@@ -37,7 +38,7 @@ export const ctx = {
   home: () => go('home'),
   async loadUser() {
     try {
-      ctx.user = await api('api_whoami');
+      await apiCached('api_whoami', [], (u) => { ctx.user = u; });
       ctx.userError = null;
     } catch (e) {
       ctx.user = null;
@@ -89,4 +90,5 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   const cfg = await window.zks.getSettings();
   if (cfg.url && cfg.key) await ctx.loadUser();
   go(cfg.url && cfg.key ? 'home' : 'settings');
+  if (cfg.url && cfg.key) { preload(); apiCached('getProductCodes', [], () => {}).catch(() => {}); }
 })();

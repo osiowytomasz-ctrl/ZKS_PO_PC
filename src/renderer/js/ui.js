@@ -32,6 +32,29 @@ export async function api(fn, args = [], opts = {}) {
   return r.data;
 }
 
+/**
+ * Odczyt z pamięcią podręczną (stale-while-revalidate): jeśli są zapisane dane z poprzedniego razu, `onData(dane, {cached:true, age})`
+ * wywoływane jest od razu, a potem `onData(świeże, {cached:false})`, gdy dojdą z serwera. Zwraca obietnicę rozwiązywaną przy
+ * pierwszych danych (z pamięci albo z serwera). Błąd serwera przy istniejących danych z pamięci to tylko komunikat.
+ */
+export async function apiCached(fn, args, onData, opts = {}) {
+  const cached = await window.zks.cacheGet(fn, args || []);
+  let resolveFirst, rejectFirst, settled = false;
+  const first = new Promise((res, rej) => { resolveFirst = res; rejectFirst = rej; });
+  if (cached && cached.data !== undefined) {
+    onData(cached.data, { cached: true, age: Date.now() - cached.t });
+    settled = true; resolveFirst(cached.data);
+  }
+  api(fn, args || [], { ...opts, cache: true }).then((data) => {
+    onData(data, { cached: false });
+    if (!settled) { settled = true; resolveFirst(data); }
+  }).catch((e) => {
+    if (settled) toast('Nie udało się odświeżyć danych: ' + e.message + ' (widać dane z pamięci)', true);
+    else rejectFirst(e);
+  });
+  return first;
+}
+
 let toastTimer;
 export function toast(message, isError = false) {
   document.querySelectorAll('.toast').forEach((n) => n.remove());

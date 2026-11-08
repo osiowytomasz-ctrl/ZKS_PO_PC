@@ -1,4 +1,4 @@
-import { h, clear, api, modal } from '../ui.js';
+import { h, clear, api, apiCached, modal } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
 
@@ -13,7 +13,7 @@ export function mountHarm(el, ctx) {
 
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie harmonogramu…'));
-    try { st.data = await api('getHarmData', [], { timeoutMs: 180000 }); draw(); }
+    try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000 }); }
     catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
 

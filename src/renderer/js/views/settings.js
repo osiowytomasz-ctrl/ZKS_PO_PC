@@ -33,7 +33,8 @@ export async function mountSettings(el, ctx) {
     h('label', { class: 'row muted' }, show, 'Pokaż klucz'),
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn primary', onclick: check }, 'Zapisz i sprawdź połączenie'),
-      h('button', { class: 'btn', onclick: async () => { await save(); await ctx.loadUser(); ctx.go('home'); } }, 'Zapisz i wróć')),
+      h('button', { class: 'btn', onclick: async () => { await save(); await ctx.loadUser(); ctx.go('home'); } }, 'Zapisz i wróć'),
+      h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną')),
     status,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
 }

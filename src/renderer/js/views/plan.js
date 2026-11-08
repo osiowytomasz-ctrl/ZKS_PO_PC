@@ -1,4 +1,4 @@
-import { h, clear, api, toast, modal, field, confirmBox, alertBox } from '../ui.js';
+import { h, clear, api, apiCached, toast, modal, field, confirmBox, alertBox } from '../ui.js';
 import * as P from '../logic/plan.js';
 import { parseSheetColor } from '../logic/common.js';
 
@@ -14,7 +14,7 @@ export function mountPlan(el, ctx) {
 
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie planu…'));
-    try { st.grid = await api('api_getPlanGrid', [], { timeoutMs: 180000 }); st.changes = new Map(); draw(); }
+    try { st.changes = new Map(); await apiCached('api_getPlanGrid', [], (g, meta) => { st.grid = g; st.fresh = !meta.cached; if (st.fresh) st.changes = new Map(); draw(); }, { timeoutMs: 180000 }); }
     catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
 
@@ -33,7 +33,7 @@ export function mountPlan(el, ctx) {
     const g = st.grid;
     const widths = P.columnWidths(g);
     const rows = P.visibleRows(g, st.expanded);
-    const canEdit = !!g.canEdit && ctx.level('plan') === 'write';
+    const canEdit = !!g.canEdit && ctx.level('plan') === 'write' && st.fresh;
     const first = g.firstVisibleCol ?? 1;
     const tbody = h('tbody', {});
     for (const r of rows) {
@@ -62,7 +62,7 @@ export function mountPlan(el, ctx) {
       tbody.append(tr);
     }
     clear(body); body.append(h('table', { class: 't' }, tbody));
-    info.textContent = canEdit ? '' : 'tylko odczyt';
+    info.textContent = !st.fresh ? 'dane z pamięci, odświeżanie… (edycja po odświeżeniu)' : canEdit ? '' : 'tylko odczyt';
     saveBtn.disabled = st.saving || !st.changes.size || !canEdit;
     saveBtn.textContent = st.changes.size ? `Zapisz zmiany (${st.changes.size})` : 'Zapisz zmiany';
   }

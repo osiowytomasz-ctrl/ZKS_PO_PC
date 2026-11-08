@@ -1,4 +1,4 @@
-import { h, clear, api, toast, modal, field, filterHeader, columnFilterDialog, confirmBox } from '../ui.js';
+import { h, clear, api, apiCached, toast, modal, field, filterHeader, columnFilterDialog, confirmBox } from '../ui.js';
 import * as Z from '../logic/zakupy.js';
 import { updateSorts, sortLabels, formatDate } from '../logic/common.js';
 import { resolveCode, parseQuantity } from '../logic/scanner.js';
@@ -15,10 +15,12 @@ export function mountZakupy(el, ctx) {
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie zakupów…'));
     try {
-      const data = await api('getZakupyData');
-      st.rows = data.rows || []; st.exactRows = !!data.exactRows;
-      notice.textContent = canWrite && !st.exactRows ? 'Serwer nie podaje dokładnych numerów wierszy: zapisy są wyłączone (tylko odczyt). Zaktualizuj wdrożenie skryptu.' : '';
-      draw();
+      st.fresh = false;
+      await apiCached('getZakupyData', [], (data, meta) => {
+        st.rows = data.rows || []; st.exactRows = !!data.exactRows; st.fresh = !meta.cached;
+        notice.textContent = canWrite && !st.exactRows ? 'Serwer nie podaje dokładnych numerów wierszy: zapisy są wyłączone (tylko odczyt). Zaktualizuj wdrożenie skryptu.' : '';
+        draw();
+      });
     } catch (e) {
       clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów')));
     }
@@ -26,13 +28,13 @@ export function mountZakupy(el, ctx) {
 
   async function ensureArchive() {
     if (st.archiveLoaded) return;
-    try { const d = await api('getZakupyArchiveData'); st.archive = d.rows || []; st.archiveLoaded = true; }
+    try { await apiCached('getZakupyArchiveData', [], (d) => { st.archive = d.rows || []; st.archiveLoaded = true; if (st.view === 'archive') draw(); }); }
     catch (e) { toast('Błąd archiwum: ' + e.message, true); }
   }
 
   async function ensureCodes() {
     if (st.codes) return;
-    try { st.codes = (await api('getZakupyProductCodes')).filter((c) => String(c).trim()); } catch (e) { st.codes = []; }
+    try { await apiCached('getZakupyProductCodes', [], (l) => { st.codes = (l || []).filter((c) => String(c).trim()); }); } catch (e) { st.codes = []; }
   }
 
   function drawTabs() {
@@ -72,11 +74,11 @@ export function mountZakupy(el, ctx) {
     }
     clear(body);
     body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, thead), tbody));
-    info.textContent = `Pozycji: ${rows.length}` + (rows.length !== src.length ? ` z ${src.length}` : '') + (st.sorts.length ? '  ·  Sortowanie: ' + Z.sortSummary(st.view, st.sorts) : '');
+    info.textContent = (st.fresh ? '' : 'Dane z pamięci, odświeżanie… (zapis po odświeżeniu)  ·  ') + `Pozycji: ${rows.length}` + (rows.length !== src.length ? ` z ${src.length}` : '') + (st.sorts.length ? '  ·  Sortowanie: ' + Z.sortSummary(st.view, st.sorts) : '');
   }
 
   function openRow(row) {
-    const editable = canWrite && st.exactRows && st.view === 'ordered' && !Z.isBought(row);
+    const editable = canWrite && st.exactRows && st.fresh && st.view === 'ordered' && !Z.isBought(row);
     if (editable) { ensureCodes().then(() => realizeDialog(row)); return; }
     const ro = (label, v) => h('div', { class: 'row', style: { margin: '3px 0' } }, h('b', { style: { width: '150px' } }, label), h('span', {}, v || '—'));
     const m = modal(st.view === 'archive' ? 'Archiwum: szczegóły' : Z.isBought(row) ? 'Zakupione: szczegóły' : 'Zamówione: szczegóły', h('div', {},

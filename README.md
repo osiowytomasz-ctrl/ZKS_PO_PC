@@ -46,3 +46,10 @@ Klucz jest zapisywany szyfrowany przez system (`safeStorage`), jeśli system to 
 - Plan: bez dopisywania komisów do sąsiedniej kolumny przy edycji.
 - Symulatory to oryginalne strony HTML (nie natywne jak w telefonie) i ładują biblioteki z internetu.
 - Kamera: tylko tam, gdzie system ma `BarcodeDetector`; zwykle używa się skanera USB (działa jak klawiatura).
+
+## Szybkość
+
+Odczyty z arkusza są zapamiętywane na dysku (`userData/cache`, osobno dla każdego adresu i klucza). Przy ponownym wejściu w moduł
+dane pojawiają się od razu z pamięci, a świeże dociągają się w tle. Edycja i zapis w Grafiku, Planie i Zakupach włączają się dopiero
+po odświeżeniu, żeby nie zapisać zmian na starych danych. Katalog narzędzi i listy kodów wczytują się w tle zaraz po starcie.
+Pamięć można wyczyścić w Ustawieniach. Najwolniejszy jest sam backend Apps Script (czytanie arkusza), czego aplikacja nie przyspieszy.

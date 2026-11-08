@@ -1,4 +1,4 @@
-import { h, clear, api, toast } from '../ui.js';
+import { h, clear, api, apiCached, toast } from '../ui.js';
 import { MODULES } from '../app.js';
 import { filterParts, levelsPresent, LEVELS, levelOf } from '../logic/home.js';
 import { parseSheetColor, contrastColor } from '../logic/common.js';
@@ -33,7 +33,7 @@ export function mountHome(el, ctx) {
     listBox.append(h('div', { class: 'table-wrap', style: { maxHeight: 'calc(100vh - 360px)', minHeight: '160px' } },
       h('table', { class: 't', style: { width: '100%' } },
         h('thead', {}, h('tr', {}, ...['KOD części', 'Stan', 'Zapas', 'Dost'].map((t) => h('th', {}, t)))), tbody)));
-    listBox.append(h('div', { class: 'muted', style: { marginTop: '4px' } }, `Pozycji: ${shown.length}${shown.length !== state.parts.length ? ' z ' + state.parts.length : ''}`));
+    listBox.append(h('div', { class: 'muted', style: { marginTop: '4px' } }, `Pozycji: ${shown.length}${shown.length !== state.parts.length ? ' z ' + state.parts.length : ''}` + (state.stale ? '  ·  dane z pamięci, odświeżanie…' : '')));
   };
 
   const codeInput = h('input', { type: 'search', placeholder: 'Szukaj kodu części…', style: { padding: '4px 8px', width: '240px' }, oninput: () => { state.code = codeInput.value; renderList(); } });
@@ -48,9 +48,11 @@ export function mountHome(el, ctx) {
     try {
       if (!ctx.user) await ctx.loadUser();
       draw();
-      const res = await api('getHomeMissingPartsFromNdCacheV2');
-      state.parts = Array.isArray(res) ? res : (res && res.rows) || [];
-      fillLevels();
+      await apiCached('getHomeMissingPartsFromNdCacheV2', [], (res, meta) => {
+        state.parts = Array.isArray(res) ? res : (res && res.rows) || [];
+        state.loading = false; state.error = null; state.stale = meta.cached;
+        fillLevels(); renderList();
+      });
     } catch (e) {
       state.error = e.message;
     }

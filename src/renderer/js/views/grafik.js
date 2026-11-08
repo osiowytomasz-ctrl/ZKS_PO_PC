@@ -1,4 +1,4 @@
-import { h, clear, api, toast, modal, field, filterHeader, columnFilterDialog, confirmBox } from '../ui.js';
+import { h, clear, api, apiCached, toast, modal, field, filterHeader, columnFilterDialog, confirmBox } from '../ui.js';
 import * as G from '../logic/grafik.js';
 import { updateSorts, sortLabels, parseSheetColor, filterSummary } from '../logic/common.js';
 import { sortSummary } from '../logic/tableFilter.js';
@@ -27,18 +27,16 @@ export function mountGrafik(el, ctx) {
 
   async function load(s, e) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…')); message.textContent = '';
+    st.changes = new Map(); st.filters = {}; st.sorts = []; st.fresh = false;
+    const show = (range) => (data, meta) => { st.data = data; st.loaded = range; st.fresh = !meta.cached; if (st.fresh) st.changes = new Map(); draw(); };
     try {
-      let data;
       try {
-        data = await api('getGrData', [s, e]);
+        await apiCached('getGrData', [s, e], show({ start: s, end: e }));
       } catch (err) {
         // Gdy arkusz nie ma dat z zakresu, pokazujemy cały grafik (jak w aplikacji na Androida).
-        if (/zakres/i.test(err.message)) { data = await api('getGrData', ['', '']); s = ''; e = ''; startIn.value = ''; endIn.value = ''; }
+        if (/zakres/i.test(err.message)) { startIn.value = ''; endIn.value = ''; await apiCached('getGrData', ['', ''], show({ start: '', end: '' })); }
         else throw err;
       }
-      st.data = data; st.loaded = { start: s, end: e }; st.changes = new Map();
-      st.filters = {}; st.sorts = [];
-      draw();
     } catch (err) {
       clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, err.message, ' ', h('button', { class: 'btn small', onclick: () => load(startIn.value, endIn.value) }, 'Ponów')));
     }
@@ -57,7 +55,7 @@ export function mountGrafik(el, ctx) {
     const cols = G.columns(data, visible);
     const labels = sortLabels(st.sorts);
     const rows = G.gridSorted(data, cols, st.sorts, G.gridVisibleRows(data, cols, st.filters));
-    const canEdit = canWrite && data.canEdit;
+    const canEdit = canWrite && data.canEdit && st.fresh;
 
     const thead = h('tr', {}, ...cols.map((c, i) => filterHeader(c, {
       filtered: !!st.filters[c.key], label: labels[c.key], vertical: i >= 2,
@@ -86,7 +84,7 @@ export function mountGrafik(el, ctx) {
     body.append(h('table', { class: 't' }, h('thead', {}, thead), tbody));
     info.textContent = `Wierszy: ${rows.length}` + (G.dataRows(data).length !== rows.length ? ` z ${G.dataRows(data).length}` : '') +
       (st.sorts.length ? '  ·  Sortowanie: ' + sortSummary(cols, Object.fromEntries(cols.map((c) => [c.key, c.title])), st.sorts) : '') +
-      (canEdit ? '' : '  ·  tylko odczyt');
+      (!st.fresh ? '  ·  dane z pamięci, odświeżanie… (edycja po odświeżeniu)' : canEdit ? '' : '  ·  tylko odczyt');
     saveBtn.disabled = st.saving || st.changes.size === 0 || !canEdit;
     discardBtn.disabled = st.changes.size === 0;
     saveBtn.textContent = st.changes.size ? `Zapisz zmiany (${st.changes.size})` : 'Zapisz zmiany';

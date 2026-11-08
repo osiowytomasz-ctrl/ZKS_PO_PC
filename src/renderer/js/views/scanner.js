@@ -1,4 +1,4 @@
-import { h, clear, field, api, toast, alertBox, confirmBox } from '../ui.js';
+import { h, clear, field, api, apiCached, toast, alertBox, confirmBox } from '../ui.js';
 import { resolveCode, suggestions, parseQuantity, LOCK_SECONDS } from '../logic/scanner.js';
 
 export function mountScanner(el, ctx) {
@@ -88,7 +88,7 @@ export function mountScanner(el, ctx) {
     h('div', { class: 'row' }, save, camBtn)));
   code.focus();
 
-  api('getProductCodes').then((list) => { codes = (list || []).filter((c) => String(c).trim()); redraw(); })
+  apiCached('getProductCodes', [], (list) => { codes = (list || []).filter((c) => String(c).trim()); redraw(); })
     .catch((e) => { msg.className = 'err'; msg.textContent = 'Nie wczytano listy kodów: ' + e.message; });
 
   return () => { clearTimeout(timer); stopCamera(); };

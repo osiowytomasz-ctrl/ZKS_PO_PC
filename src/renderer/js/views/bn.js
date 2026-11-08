@@ -1,8 +1,7 @@
-import { h, clear, api, modal } from '../ui.js';
+import { h, clear, apiCached, modal } from '../ui.js';
 import * as B from '../logic/builder.js';
 
 const LABELS = { group: 'Grupa', type: 'Rodzaj', diameter: 'Ø', length: 'Długość' };
-const CACHE_KEY = 'zks_bn_cache';
 
 export function mountBn(el, ctx) {
   const st = { rows: [], filters: { group: '', type: '', diameter: '', length: '' }, fromCache: false, loading: false };
@@ -10,15 +9,12 @@ export function mountBn(el, ctx) {
   const filtersBox = h('div', { class: 'row' });
   const listBox = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0 } });
 
-  const readCache = () => { try { const r = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); return r && Array.isArray(r.rows) ? r.rows : null; } catch (e) { return null; } };
-  const writeCache = (rows) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ rows })); } catch (e) { /* za duże dane: pomijamy pamięć podręczną */ } };
-
   async function refresh() {
     if (st.loading) return;
     st.loading = true; info.textContent = 'Pobieranie zespołów z arkusza BN (może potrwać)…';
-    try { const d = await api('getBNbaseData', [], { timeoutMs: 300000 }); st.rows = d.rows || []; st.fromCache = false; writeCache(st.rows); info.textContent = ''; }
-    catch (e) { info.textContent = ''; clear(listBox); listBox.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message)); st.loading = false; return; }
-    st.loading = false; draw();
+    try { await apiCached('getBNbaseData', [], (d, meta) => { st.rows = d.rows || []; st.fromCache = meta.cached; draw(); }, { timeoutMs: 300000 }); }
+    catch (e) { info.textContent = ''; clear(listBox); listBox.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message)); }
+    st.loading = false;
   }
 
   function draw() {
@@ -40,7 +36,7 @@ export function mountBn(el, ctx) {
     clear(listBox);
     listBox.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...['Kody zespołu', 'Grupa', 'Rodzaj', 'Ø', 'Długość', 'Komis _ KTK _ operacja'].map((x) => h('th', {}, x)))), tbody),
       !shown.length ? h('div', { class: 'muted', style: { padding: '10px' } }, st.rows.length ? 'Brak zespołów dla wybranych filtrów.' : 'Brak danych. Kliknij „Odśwież BN”.') : null);
-    info.textContent = `Zespołów: ${shown.length}` + (st.fromCache ? ' (z pamięci; „Odśwież BN” pobierze aktualne)' : '');
+    info.textContent = `Zespołów: ${shown.length}` + (st.fromCache ? '  ·  dane z pamięci, odświeżanie…' : '');
   }
 
   function detail(r) {
@@ -54,6 +50,5 @@ export function mountBn(el, ctx) {
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: refresh }, 'Odśwież BN')), filtersBox, listBox);
-  const cached = readCache();
-  if (cached && cached.length) { st.rows = cached; st.fromCache = true; draw(); } else refresh();
+  refresh();
 }
