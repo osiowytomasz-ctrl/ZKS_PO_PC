@@ -13,13 +13,31 @@
   "build": {
     "appId": "pl.zks.po.pc",
     "productName": "ZKS PO",
-    "files": ["src/**/*", "web/**/*", "package.json"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "artifactName": "ZKS-PO-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "src/**/*",
+      "web/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
+    },
+    "portable": {
+      "artifactName": "ZKS-PO-portable.${ext}"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
-  }
+  },
+  "author": "ZKS"
 }
