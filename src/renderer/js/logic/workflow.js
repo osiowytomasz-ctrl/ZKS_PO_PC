@@ -58,9 +58,9 @@ export function cellStyle(values, col, sheetRow, rules = FORMAT_RULES) {
   return out;
 }
 
-/** Wiersz z serwera ({row, cells:[A..]}) → wartości po literach z kolumną H policzoną lokalnie. */
-export function toRecord(cells) {
-  const rec = {};
+/** Wiersz z serwera ({row, cells:[A..], runs:{E,F}}) → wartości po literach z kolumną H policzoną lokalnie. */
+export function toRecord(cells, runs = {}) {
+  const rec = { runs: runs || {} };
   COLS.forEach((c, i) => { rec[c] = String(cells[i] ?? ''); });
   rec.sheetH = rec.H;                         // wartość z arkusza (do porównania)
   rec.H = category(rec.A, rec.D, rec.F);
@@ -70,4 +70,108 @@ export function toRecord(cells) {
 /** Ile wierszy ma kategorię inną niż w arkuszu (kontrola zgodności z formułą; puste H z arkusza pomijamy). */
 export function mismatches(records) {
   return records.filter((r) => r.sheetH !== '' && r.sheetH !== r.H);
+}
+
+// ---- edycja: status, tekst z formatowaniem, składanie zapisu ----
+export const STATUS_COLS = ['A', 'B', 'C'];
+export const TEXT_COLS = ['E', 'F'];
+export const STATUS_LABELS = { A: 'Zakończone', B: 'W trakcie', C: 'Wstrzymane' };
+
+/** Status wiersza: pierwsza z kolumn A, B, C z „x”, albo ''. */
+export function statusOf(rec) {
+  return STATUS_COLS.find((c) => String(rec[c] ?? '').trim().toLowerCase() === 'x') || '';
+}
+/** Kliknięcie w A/B/C: kliknięty status włącza się, a kliknięcie aktywnego go czyści (jest tylko jeden status). */
+export const toggleStatus = (current, col) => (current === col ? '' : col);
+
+const emptyStyle = { bold: false, italic: false, underline: false, strike: false, color: null };
+const styleKey = (r) => [r.bold ? 1 : 0, r.italic ? 1 : 0, r.underline ? 1 : 0, r.strike ? 1 : 0, r.color || ''].join('|');
+
+/** Fragmenty bez pustych, ze wszystkimi polami stylu; sąsiednie o tym samym stylu są scalane. */
+export function normalizeRuns(runs) {
+  const out = [];
+  for (const r of runs || []) {
+    const text = String(r.text ?? '');
+    if (!text) continue;
+    const color = /^#[0-9a-f]{6}$/i.test(String(r.color || '')) && String(r.color).toLowerCase() !== '#000000' ? String(r.color).toLowerCase() : null;
+    const run = { text, bold: !!r.bold, italic: !!r.italic, underline: !!r.underline, strike: !!r.strike, color };
+    const last = out[out.length - 1];
+    if (last && styleKey(last) === styleKey(run)) last.text += text; else out.push(run);
+  }
+  return out;
+}
+export const runsText = (runs) => (runs || []).map((r) => r.text).join('');
+export const runsEqual = (a, b) => JSON.stringify(normalizeRuns(a)) === JSON.stringify(normalizeRuns(b));
+
+/** Fragmenty komórki z serwera albo cały tekst jako jeden fragment bez formatowania. */
+export function cellRuns(rec, col) {
+  const server = rec.runs && rec.runs[col];
+  if (server && server.length) return normalizeRuns(server);
+  return normalizeRuns([{ text: rec[col] ?? '', ...emptyStyle }]);
+}
+
+/** Rekord z naniesioną niezapisaną zmianą (status, tekst E/F); H liczone ponownie. */
+export function effective(rec, change) {
+  if (!change) return rec;
+  const out = { ...rec, runs: { ...rec.runs } };
+  if (change.status !== undefined) STATUS_COLS.forEach((c) => { out[c] = c === change.status ? 'x' : ''; });
+  for (const col of TEXT_COLS) {
+    if (change.cells && change.cells[col]) { out.runs[col] = change.cells[col]; out[col] = runsText(change.cells[col]); }
+  }
+  out.H = category(out.A, out.D, out.F);
+  return out;
+}
+
+/** Zmiana w jednej komórce tekstowej; zwraca nowy zbiór zmian (zmiana równa oryginałowi jest usuwana). */
+export function stageText(changes, rec, col, runs) {
+  const next = new Map(changes);
+  const cur = { ...(next.get(rec.row) || {}), cells: { ...((next.get(rec.row) || {}).cells || {}) } };
+  const orig = cellRuns(rec, col);
+  if (runsEqual(runs, orig)) delete cur.cells[col]; else cur.cells[col] = normalizeRuns(runs);
+  return finishStage(next, rec.row, cur);
+}
+export function stageStatus(changes, rec, col) {
+  const next = new Map(changes);
+  const cur = { ...(next.get(rec.row) || {}), cells: { ...((next.get(rec.row) || {}).cells || {}) } };
+  const shown = statusOf(effective(rec, next.get(rec.row)));
+  const status = toggleStatus(shown, col);
+  if (status === statusOf(rec)) delete cur.status; else cur.status = status;
+  return finishStage(next, rec.row, cur);
+}
+function finishStage(next, row, cur) {
+  if (cur.status === undefined && !Object.keys(cur.cells).length) next.delete(row); else next.set(row, cur);
+  return next;
+}
+
+/** Zmiany → lista dla api_saveWorkflow; `expect` chroni przed nadpisaniem tekstu zmienionego w arkuszu przez kogoś innego. */
+export function buildItems(changes, records) {
+  const byRow = new Map(records.map((r) => [r.row, r]));
+  const items = [];
+  for (const [row, ch] of changes) {
+    const rec = byRow.get(row);
+    if (!rec) continue;
+    const item = { row };
+    if (ch.status !== undefined) item.status = ch.status;
+    const cells = {}, expect = {};
+    for (const col of TEXT_COLS) {
+      if (!ch.cells || !ch.cells[col]) continue;
+      cells[col] = { text: runsText(ch.cells[col]), runs: normalizeRuns(ch.cells[col]) };
+      expect[col] = rec[col];
+    }
+    if (Object.keys(cells).length) { item.cells = cells; item.expect = expect; }
+    items.push(item);
+  }
+  return items;
+}
+
+/** Nowe zadanie: komis (E), zadanie (F) jako fragmenty z formatowaniem i opcjonalny status. */
+export function newItem(eRuns, fRuns, status = '') {
+  const cells = {};
+  for (const [col, runs] of [['E', eRuns], ['F', fRuns]]) {
+    const n = normalizeRuns(runs);
+    if (runsText(n).trim()) cells[col] = { text: runsText(n), runs: n };
+  }
+  const item = { row: null, cells };
+  if (status) item.status = status;
+  return item;
 }

@@ -1,36 +1,24 @@
-# Funkcja backendu dla Workflow (karta Z)
+# Backend Workflow (karta Z)
 
-Aplikacja pobiera surowe wartości karty Z jednym zapytaniem, a kategorię (kolumna H) i kolorowanie liczy sama
-(Apps Script nie zwraca wyników formatowania warunkowego). Funkcję trzeba dodać do Apps Script
-(`moja-aplikacja/Api.js`) i wdrożyć nową wersję („Zarządzaj wdrożeniami” → Nowa wersja).
+Kod backendu jest w pliku `backend/Workflow.gs` (odczyt `api_getWorkflow_`, zapis `api_saveWorkflow_`, test `api_testWorkflow`).
+Jest sprawdzony testami na atrapie arkusza (`test/workflow-backend.test.js`).
 
-1. Wklej gdzieś w `Api.js`:
-
-```js
-/** Workflow: surowe wartości karty Z (wiersze od 2, kolumny A–H) jednym odczytem. */
-var API_WORKFLOW_SHEET = 'Z';   // <- nazwa karty z workflow; zmień, jeśli inna
-function api_getWorkflow_() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(API_WORKFLOW_SHEET);
-  if (!sheet) throw new Error('Nie znaleziono karty: ' + API_WORKFLOW_SHEET);
-  var last = sheet.getLastRow();
-  var headers = sheet.getRange(1, 1, 1, 8).getDisplayValues()[0];
-  if (last < 2) return { headers: headers, rows: [] };
-  var values = sheet.getRange(2, 1, last - 1, 8).getDisplayValues();
-  var rows = [];
-  for (var i = 0; i < values.length; i++) {
-    var cells = values[i];
-    if (cells.join('') !== '') rows.push({ row: i + 2, cells: cells });
-  }
-  return { headers: headers, rows: rows };
-}
-```
-
-2. Dopisz do białej listy `API_FUNCS` (obok innych, np. `getZakupyProductCodes`):
+1. Wklej całą zawartość `backend/Workflow.gs` do projektu Apps Script (np. na końcu `Api.gs`).
+   **Usuń wcześniejszą wersję** `api_getWorkflow_`, `API_WORKFLOW_SHEET` i `api_testWorkflow`, żeby nie było duplikatów.
+2. W `API_FUNCS` (w `Api.gs`) ustaw dwa wpisy:
 
 ```js
   api_getWorkflow: {
     run: function () { return api_getWorkflow_(); }
   },
+  api_saveWorkflow: {
+    write: true,
+    run: function (a, ctx) { return api_saveWorkflow_(a[0], ctx); }
+  },
 ```
 
-Jeśli inne wpisy mają pole `perm`, nie dodawaj go (odczyt dla każdego z ważnym kluczem) albo zdecyduj o uprawnieniu.
+3. Wdróż **Nową wersję** na wdrożeniu używanym przez aplikację (Wdróż → Zarządzaj wdrożeniami → ołówek → Nowa wersja).
+
+Reguły zapisu: status w A/B/C jest wyłączny (jeden `x`), data (D) i zlecający (G) uzupełniają się tylko gdy są puste (data z godziną, zlecający to
+nazwa użytkownika z klucza), formuła kategorii (H) jest kopiowana do nowego wiersza, a edycja tekstu E/F jest odrzucana, jeśli ktoś zmienił tę
+komórkę w arkuszu od ostatniego odświeżenia. Nowe zadania trafiają do pierwszego wiersza z pustymi kolumnami A–G.

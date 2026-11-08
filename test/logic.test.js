@@ -299,3 +299,40 @@ test('Workflow: formatowanie warunkowe, zakresy i priorytet', () => {
   assert.equal(W.cellStyle(mx, 'B', 5).background, '#b7b7b7');
   assert.equal(W.mismatches([{ sheetH: 'Mistrz', H: 'Mistrz' }, { sheetH: 'Urlop', H: 'zz' }, { sheetH: '', H: 'zz' }]).length, 1);
 });
+
+test('Workflow: status, fragmenty tekstu, zmiany i zapis', () => {
+  const rec = { ...W.toRecord(['', 'x', '', '2021-01-01', 'K1', 'zadanie', 'Jan', ''], { F: [{ text: 'za', bold: true }, { text: 'danie' }] }), row: 5 };
+  assert.equal(W.statusOf(rec), 'B');
+  assert.equal(W.toggleStatus('B', 'B'), '');
+  assert.equal(W.toggleStatus('B', 'C'), 'C');
+  // status: kliknięcie A wyłącza B (jeden status), ponowne kliknięcie A czyści, powrót do oryginału usuwa zmianę
+  let ch = W.stageStatus(new Map(), rec, 'A');
+  assert.equal(ch.get(5).status, 'A');
+  let eff = W.effective(rec, ch.get(5));
+  assert.equal(eff.A, 'x'); assert.equal(eff.B, '');
+  ch = W.stageStatus(ch, rec, 'A');
+  assert.equal(ch.get(5).status, '');
+  ch = W.stageStatus(ch, rec, 'B');
+  assert.equal(ch.size, 0);
+  // tekst: scalanie i porównanie z oryginałem
+  assert.deepEqual(W.normalizeRuns([{ text: 'a' }, { text: 'b' }, { text: '', bold: true }, { text: 'c', bold: true, color: '#FF0000' }]).map((r) => r.text), ['ab', 'c']);
+  assert.equal(W.normalizeRuns([{ text: 'x', color: '#000000' }])[0].color, null);
+  assert.equal(W.runsEqual(W.cellRuns(rec, 'F'), [{ text: 'za', bold: true }, { text: 'da' }, { text: 'nie' }]), true);
+  assert.equal(W.cellRuns(rec, 'E')[0].text, 'K1');
+  assert.deepEqual(W.cellRuns({ E: '', runs: {} }, 'E'), []);
+  ch = W.stageText(new Map(), rec, 'F', [{ text: 'zadanie', bold: true }]);
+  assert.equal(ch.get(5).cells.F[0].bold, true);
+  eff = W.effective(rec, ch.get(5));
+  assert.equal(eff.F, 'zadanie');
+  assert.equal(W.stageText(ch, rec, 'F', W.cellRuns(rec, 'F')).size, 0);          // powrót do oryginału
+  // H przeliczane po zmianie tekstu i statusu
+  const ch2 = W.stageText(new Map(), rec, 'F', [{ text: 'Mistrz' }]);
+  assert.equal(W.effective(rec, ch2.get(5)).H, 'Mistrz');
+  // składanie zapisu
+  ch = W.stageStatus(W.stageText(new Map(), rec, 'F', [{ text: 'nowe', italic: true }]), rec, 'C');
+  const items = W.buildItems(ch, [rec]);
+  assert.deepEqual(items, [{ row: 5, status: 'C', cells: { F: { text: 'nowe', runs: [{ text: 'nowe', bold: false, italic: true, underline: false, strike: false, color: null }] } }, expect: { F: 'zadanie' } }]);
+  const ni = W.newItem([{ text: ' 604-01 ' }], [{ text: 'Zad', bold: true }], 'B');
+  assert.equal(ni.row, null); assert.equal(ni.status, 'B'); assert.equal(ni.cells.E.text, ' 604-01 '); assert.equal(ni.cells.F.runs[0].bold, true);
+  assert.deepEqual(W.newItem([], [{ text: '  ' }]).cells, {});
+});
