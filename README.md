@@ -62,4 +62,5 @@ Stan zsynchronizowany z gałęzią Androida `claude/great-babbage-dgqc7x` do com
 Kategoria zadania (kolumna H) i kolorowanie są liczone lokalnie z surowych wartości (`src/renderer/js/logic/workflow.js`), bo Apps Script nie zwraca
 wyników formatowania warunkowego. Edycja: kliknięcie w A/B/C ustawia status (`x`, jeden naraz), E i F mają edytor tekstu z formatowaniem
 (pogrubienie, kursywa, podkreślenie, przekreślenie, kolor), data (D) i zlecający (G) uzupełniają się automatycznie tylko gdy są puste.
+Edycja jest w samej tabeli jak w arkuszu: strzałki, Tab, Home/End poruszają po komórkach, Enter lub F2 (albo pisanie) zaczyna edycję tekstu z paskiem formatowania nad tabelą, Enter zatwierdza, Alt+Enter dodaje linię, Esc anuluje, Spacja lub x ustawia status.
 Backend: `backend/Workflow.gs` (instrukcja w `docs/WORKFLOW_API.md`).
