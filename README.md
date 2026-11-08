@@ -56,3 +56,8 @@ po odświeżeniu, żeby nie zapisać zmian na starych danych. Katalog narzędzi 
 Pamięć można wyczyścić w Ustawieniach. Najwolniejszy jest sam backend Apps Script (czytanie arkusza), czego aplikacja nie przyspieszy.
 
 Stan zsynchronizowany z gałęzią Androida `claude/great-babbage-dgqc7x` do commita `0b31147` (7.11.2026).
+
+## Workflow (karta Z)
+
+Kategoria zadania (kolumna H) i kolorowanie są liczone lokalnie z surowych wartości (`src/renderer/js/logic/workflow.js`), bo Apps Script nie zwraca
+wyników formatowania warunkowego. Wymaga funkcji `api_getWorkflow` w backendzie: patrz `docs/WORKFLOW_API.md`.

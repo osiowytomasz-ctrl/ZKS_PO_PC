@@ -253,3 +253,49 @@ test('Skaner: filterCodes', async () => {
   assert.deepEqual(filterCodes('', ['a', 'b']), ['a', 'b']);
   assert.deepEqual(filterCodes(' B ', ['ab', 'cd', 'B1']), ['ab', 'B1']);
 });
+
+import * as W from '../src/renderer/js/logic/workflow.js';
+test('Workflow: kategoria zgodna z formułą z kolumny H', () => {
+  assert.equal(W.category('', '', 'Mistrz zmiany'), 'Mistrz');
+  assert.equal(W.category('x', '', 'Mistrz zmiany'), 'Mvistrz');
+  assert.equal(W.category('', '', 'URLOP'), 'Urlop');
+  assert.equal(W.category('x', '', 'zakup śrub'), 'Zvakup');
+  for (const t of ['modernizacja', 'rysowanie', 'oprzyrządowanie', 'projektowanie', 'modelowanie', 'CAD', '3D']) assert.equal(W.category('', '', t + ' x'), 'projektowanie');
+  assert.equal(W.category('x', '', 'projekt 3d'), 'pvrojektowanie');
+  assert.equal(W.category('', '', 'obróbka'), 'obrobka');                  // zawiera „obr”
+  assert.equal(W.category('', '', 'obr. detalu'), 'obrobka');
+  assert.equal(W.category('', '', 'Poprawa programu'), 'Kor prog');
+  assert.equal(W.category('x', '', 'korekta'), 'Kvor prog');
+  assert.equal(W.category('', '', 'zlecenie 12'), 'zlec prac');
+  assert.equal(W.category('', '', 'audit'), 'audit');
+  assert.equal(W.category('x', '', 'odbicia'), 'ovdbicia');
+  assert.equal(W.category('', 'coś', 'inne'), 'inne');
+  assert.equal(W.category('x', 'coś', 'inne'), 'ivnne');
+  assert.equal(W.category('', '', 'inne'), 'zz');
+  // kolejność: pierwszy pasujący warunek wygrywa
+  assert.equal(W.category('', '', 'mistrz zakup'), 'Mistrz');
+  assert.equal(W.category('', '', 'urlop obr'), 'Urlop');
+});
+
+test('Workflow: formatowanie warunkowe, zakresy i priorytet', () => {
+  const rec = (o) => W.toRecord(['', '', '', '', '', '', '', ''].map((_, i) => o[W.COLS[i]] ?? ''));
+  const a = rec({ A: 'X', F: 'cokolwiek' });
+  assert.deepEqual(W.cellStyle(a, 'A', 2), { background: '#b7b7b7' });
+  assert.deepEqual(W.cellStyle(a, 'H', 460), { background: '#b7b7b7' });
+  assert.equal(W.cellStyle(a, 'H', 461), null);                       // poza zakresem 2–460
+  assert.equal(W.cellStyle(a, 'H', 1), null);
+  const c = rec({ C: 'x' });
+  assert.equal(W.cellStyle(c, 'A', 5), null);                          // reguła C=x zaczyna się od kolumny C
+  assert.equal(W.cellStyle(c, 'B', 5), null);
+  assert.deepEqual(W.cellStyle(c, 'C', 5), { background: '#000000', color: '#ffffff', bold: true });
+  const b = rec({ B: 'x' });
+  assert.equal(W.cellStyle(b, 'A', 5), null);
+  assert.equal(W.cellStyle(b, 'B', 5).background, '#fce8b2');
+  const both = rec({ B: 'x', C: 'x' });
+  assert.equal(W.cellStyle(both, 'D', 5).background, '#000000');       // C=x ma wyższy priorytet niż B=x
+  const m = rec({ F: 'Mistrz' });                                      // H policzone lokalnie = „Mistrz”
+  assert.deepEqual(W.cellStyle(m, 'F', 5), { background: '#a4c2f4', bold: true, italic: true });
+  const mx = rec({ A: 'x', F: 'Mistrz' });                              // H = „Mvistrz”, więc bez niebieskiego
+  assert.equal(W.cellStyle(mx, 'B', 5).background, '#b7b7b7');
+  assert.equal(W.mismatches([{ sheetH: 'Mistrz', H: 'Mistrz' }, { sheetH: 'Urlop', H: 'zz' }, { sheetH: '', H: 'zz' }]).length, 1);
+});

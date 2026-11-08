@@ -1,5 +1,6 @@
 import { h, clear, api, apiCached, toast } from '../ui.js';
 import { MODULES } from '../app.js';
+import { createWorkflow } from './workflow.js';
 import { filterParts, levelsPresent, LEVELS, levelOf } from '../logic/home.js';
 import { parseSheetColor, contrastColor } from '../logic/common.js';
 
@@ -67,11 +68,10 @@ export function mountHome(el, ctx) {
       h('h2', { style: { margin: 0 } }, 'Braki części'), h('span', { class: 'grow' }),
       codeInput, levelSel, h('button', { class: 'btn', onclick: refresh }, 'Odśwież')),
     listBox);
-  const workflow = h('div', { class: 'panel', style: { maxWidth: '900px', margin: '0 auto' } },
-    h('h2', {}, 'Workflow'), h('p', {}, 'Moduł w budowie. Tu pojawią się zadania wspólne dla wszystkich.'));
+  const wf = createWorkflow(); const workflow = wf.node; let wfLoaded = false;
   const drawTabs = () => {
     clear(tabs);
-    for (const [id, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) tabs.append(h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; drawTabs(); braki.style.display = id === 'braki' ? '' : 'none'; workflow.style.display = id === 'workflow' ? '' : 'none'; } }, label));
+    for (const [id, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) tabs.append(h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; drawTabs(); if (id === 'workflow' && !wfLoaded) { wfLoaded = true; wf.refresh(); } braki.style.display = id === 'braki' ? '' : 'none'; workflow.style.display = id === 'workflow' ? '' : 'none'; } }, label));
   };
   drawTabs(); workflow.style.display = 'none';
   el.append(grid, tabs, braki, workflow);
