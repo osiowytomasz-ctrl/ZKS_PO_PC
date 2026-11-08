@@ -35,9 +35,19 @@ export function createWorkflow() {
       }, { timeoutMs: 120000 });
     } catch (e) {
       clear(body);
+      const cfg = await window.zks.getSettings();
+      const m = /\/s\/([^/]+)\//.exec(cfg.url || '');
+      const dep = m ? m[1] : '';
+      const tail = dep ? `…${dep.slice(-8)} (długość ${dep.length})` : '(nie rozpoznano adresu)';
       const missing = e.code === 'UNKNOWN_FN';
-      body.append(h('div', { class: missing ? 'muted' : 'err', style: { padding: '12px' } },
-        missing ? 'Serwer nie ma jeszcze funkcji api_getWorkflow. Wklej ją do Apps Script według docs/WORKFLOW_API.md w repozytorium i wdróż nową wersję.' : e.message));
+      body.append(h('div', { style: { padding: '12px' } },
+        h('div', { class: missing ? '' : 'err' }, missing
+          ? 'Serwer, z którym łączy się aplikacja, odpowiedział, że nie zna funkcji api_getWorkflow.'
+          : 'Błąd: ' + e.message),
+        h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } },
+          `Kod odpowiedzi: ${e.code || '—'}\nKomunikat serwera: ${e.message}\nWdrożenie, z którym łączy się aplikacja: ${tail}`),
+        missing ? h('div', { class: 'muted', style: { marginTop: '8px' } },
+          'Co sprawdzić: w Apps Script → Wdróż → Zarządzaj wdrożeniami znajdź wdrożenie, którego adres kończy się jak wyżej, i wybierz w nim Wersja: Nowa wersja → Wdróż. Wdrożenie z innym końcem adresu nie ma znaczenia.') : null));
       info.textContent = '';
     }
   }
