@@ -191,3 +191,26 @@ test('Help: parser wyrażeń i kalkulatory', () => {
   assert.equal(p.lines[1], 'N2 X=0.000 Y=50.000 ; Kąt=90.000000');
   assert.equal(K.linearFeed('360', '100').text, 'F° = 360 °/min, Ø = 100 mm, Fmm = 314.159 mm/min');
 });
+
+import * as B from '../src/renderer/js/logic/builder.js';
+test('ToolBuilder i BN: łańcuch mocowań, ścieżka, długość, filtry', () => {
+  const all = [
+    { productCode: 'TR9', columnD: 'fre', columnE: 'wsp', columnF: '10', columnJ: '50', columnM: 'HSK', columnP: 'X', location: 'Correa' },
+    { productCode: 'OP 1', columnD: 'opr', columnE: 'hsk', columnN: 'hsk ', columnM: 'M63', columnJ: '100.4', location: 'Union' },
+    { productCode: 'TR10', columnD: 'fre', columnE: 'wsp', columnF: '8', columnN: 'HSK', location: 'Zapas' },
+  ];
+  assert.equal(B.isListed(all[2]), false);
+  assert.deepEqual(B.nextCandidates(all, [all[0]]).map((t) => t.productCode), ['OP 1', 'TR10']);
+  assert.deepEqual(B.nextCandidates(all, [all[0], all[1]]).length, 0);
+  assert.equal(B.selectionPath([all[0], all[1]]), 'fre/wsp/10/x');
+  assert.equal(B.selectionPath([all[1]]), 'opr/hsk/hsk');
+  assert.equal(B.codesText([all[0], all[1]]), 'TR9; OP 1');
+  assert.equal(B.totalLength([all[0], all[1]]), 150);
+  assert.deepEqual(B.sorted(all).map((t) => t.productCode), ['OP 1', 'TR9', 'TR10']);
+  const f = { ...B.emptyFilters(), diameter: '10.0' };
+  assert.deepEqual(B.filterTools(all, f).map((t) => t.productCode), ['TR9']);
+  const rows = [{ columnJ: 'G', columnK: 'R', firstTool: { columnF: '10', teamTotalLength: '', columnJ: '50', code: 'A', bnTeamCode: 'A; B ' } }];
+  assert.deepEqual(B.bnTeamCodes(rows[0]), ['A', 'B']);
+  assert.equal(B.bnValue(rows[0], 'length'), '50');
+  assert.equal(B.bnFilter(rows, { group: 'g', type: '', diameter: '', length: '' }).length, 1);
+});

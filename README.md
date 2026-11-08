@@ -27,10 +27,22 @@ Klucz jest zapisywany szyfrowany przez system (`safeStorage`), jeśli system to 
 | Zakupy (zamówione, zakupione, archiwum, dodawanie, realizacja) | gotowy |
 | Pomiary (karta pomiaru, HTML z Androida) | gotowy |
 | Symulator, SymulatorNUM (wersje HTML; wymagają internetu dla bibliotek) | gotowy |
-| Plan, ToolTrack, ToolBuilder, Assem.Tool, Harmonogram, Help | w budowie (kolejny etap) |
+| ToolTrack (filtry kaskadowe, skaner USB, zapis lokalizacji) | gotowy |
+| Harmonogram (wykres Gantta, filtry, sortowanie, dostawy, zależności) | gotowy |
+| Plan (bloki zmian, edycja tekstu z kolorami, daty, pracownicy) | gotowy |
+| Help (posuw Ra/R, cięciwy, współrzędne otworów, F° → Fmm) | gotowy |
+| ToolBuilder (łańcuch mocowań, zapis do BN) | gotowy |
+| Assem.Tool (lista zespołów BN, filtry, szczegóły, pamięć podręczna) | gotowy, bez rysunków 2D/3D |
 
 ## Budowa
 
 - `src/main` – proces główny: okno, szyfrowane ustawienia, klient API (`apiCore.cjs`), zapis plików i PDF.
 - `src/renderer` – interfejs: `js/logic` to czysta logika (odpowiedniki `*Logic.kt`), `js/views` to ekrany.
 - `web` – strony HTML (Pomiary, symulatory) serwowane pod `zks-web://`; `lib/desktop-bridge.js` zastępuje natywny most Androida.
+
+## Różnice względem aplikacji na Androida
+
+- Brak rysunków 2D/3D narzędzi (ToolBuilder, Assem.Tool, okno części na ekranie głównym) i filtrów z katalogu na ekranie głównym.
+- Plan: bez dopisywania komisów do sąsiedniej kolumny przy edycji.
+- Symulatory to oryginalne strony HTML (nie natywne jak w telefonie) i ładują biblioteki z internetu.
+- Kamera: tylko tam, gdzie system ma `BarcodeDetector`; zwykle używa się skanera USB (działa jak klawiatura).

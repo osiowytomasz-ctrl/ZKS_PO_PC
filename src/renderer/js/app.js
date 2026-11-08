@@ -11,14 +11,16 @@ import { mountToolTrack } from './views/tooltrack.js';
 import { mountHarm } from './views/harm.js';
 import { mountPlan } from './views/plan.js';
 import { mountHelp } from './views/help.js';
+import { mountBuilder } from './views/builder.js';
+import { mountBn } from './views/bn.js';
 
 /** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
-  { id: 'toolbuilder', title: 'ToolBuilder', style: 'green' },
-  { id: 'assemtool', title: 'Assem.Tool', style: 'green' },
+  { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', mount: mountBuilder },
+  { id: 'assemtool', title: 'Assem.Tool', style: 'green', mount: mountBn },
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', mount: mountToolTrack },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
   { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
