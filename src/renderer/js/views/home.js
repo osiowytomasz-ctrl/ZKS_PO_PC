@@ -4,12 +4,12 @@ import { filterParts, levelsPresent, LEVELS, levelOf } from '../logic/home.js';
 import { parseSheetColor, contrastColor } from '../logic/common.js';
 
 export function mountHome(el, ctx) {
-  const state = { parts: null, loading: false, error: null, code: '', level: '' };
+  const state = { parts: null, loading: false, error: null, code: '', level: '', tab: 'braki' };
 
   const grid = h('div', { class: 'grid-modules' });
   const draw = () => {
     clear(grid);
-    for (const m of MODULES) {
+    for (const m of MODULES.filter((x) => !x.inToolRoom)) {
       const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
       grid.append(h('button', { class: 'mod ' + (m.style || ''), disabled: !!denied, onclick: () => ctx.go(m.id) }, m.title));
     }
@@ -61,11 +61,19 @@ export function mountHome(el, ctx) {
   }
 
   draw();
-  el.append(grid,
-    h('div', { class: 'panel', style: { maxWidth: '900px', margin: '0 auto' } },
-      h('div', { class: 'row', style: { marginBottom: '8px' } },
-        h('h2', { style: { margin: 0 } }, 'Braki części'), h('span', { class: 'grow' }),
-        codeInput, levelSel, h('button', { class: 'btn', onclick: refresh }, 'Odśwież')),
-      listBox));
+  const tabs = h('div', { class: 'tabs', style: { maxWidth: '900px', margin: '0 auto 6px' } });
+  const braki = h('div', { class: 'panel', style: { maxWidth: '900px', margin: '0 auto' } },
+    h('div', { class: 'row', style: { marginBottom: '8px' } },
+      h('h2', { style: { margin: 0 } }, 'Braki części'), h('span', { class: 'grow' }),
+      codeInput, levelSel, h('button', { class: 'btn', onclick: refresh }, 'Odśwież')),
+    listBox);
+  const workflow = h('div', { class: 'panel', style: { maxWidth: '900px', margin: '0 auto' } },
+    h('h2', {}, 'Workflow'), h('p', {}, 'Moduł w budowie. Tu pojawią się zadania wspólne dla wszystkich.'));
+  const drawTabs = () => {
+    clear(tabs);
+    for (const [id, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) tabs.append(h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; drawTabs(); braki.style.display = id === 'braki' ? '' : 'none'; workflow.style.display = id === 'workflow' ? '' : 'none'; } }, label));
+  };
+  drawTabs(); workflow.style.display = 'none';
+  el.append(grid, tabs, braki, workflow);
   refresh();
 }

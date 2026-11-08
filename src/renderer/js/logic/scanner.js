@@ -28,3 +28,9 @@ export function parseQuantity(input) {
   const n = Number(text);
   return Number.isFinite(n) && n > 0 ? text : null;
 }
+
+/** Wszystkie kody zawierające wpisany tekst (bez limitu, do przewijanej listy); pusty tekst = cała lista. */
+export function filterCodes(input, codes) {
+  const wanted = normalize(input);
+  return wanted ? codes.filter((c) => normalize(c).includes(wanted)) : codes;
+}

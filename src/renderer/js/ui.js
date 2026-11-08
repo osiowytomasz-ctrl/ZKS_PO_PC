@@ -96,6 +96,17 @@ export function confirmBox(title, message, okLabel = 'OK') {
   });
 }
 
+/** Okno z kilkoma przyciskami: options = [[etykieta, wartość], …]; ostatni jest główny. Zamknięcie okna zwraca null. */
+export function choiceBox(title, message, options) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const m = modal(title, h('div', {}, h('p', { style: { whiteSpace: 'pre-wrap' } }, message),
+      h('div', { class: 'actions', style: { flexWrap: 'wrap' } }, ...options.map(([label, value], i) =>
+        h('button', { class: 'btn' + (i === options.length - 1 ? ' primary' : ''), onclick: () => { finish(value); m.close(); } }, label)))), { onClose: () => finish(null) });
+  });
+}
+
 /** Pole formularza z etykietą. */
 export function field(label, input) {
   return h('label', { class: 'f' }, h('span', {}, label), input);

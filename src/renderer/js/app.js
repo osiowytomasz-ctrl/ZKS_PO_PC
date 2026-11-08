@@ -14,21 +14,26 @@ import { mountPlan } from './views/plan.js';
 import { mountHelp } from './views/help.js';
 import { mountBuilder } from './views/builder.js';
 import { mountBn } from './views/bn.js';
+import { mountToolRoom } from './views/toolroom.js';
 
 /** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
-  { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', mount: mountBuilder },
-  { id: 'assemtool', title: 'Assem.Tool', style: 'green', mount: mountBn },
-  { id: 'tooltrack', title: 'ToolTrack', style: 'green', mount: mountToolTrack },
+  { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
   { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
   { id: 'help', title: 'Help', mount: mountHelp },
   { id: 'symulator', title: 'Symulator', web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', web: 'symulator-num.html' },
   { id: 'pomiary', title: 'Pomiary', web: 'karta-pomiaru.html', gas: true },
+  // Przyciski ekranu Narzędziownia (nie ma ich na ekranie głównym).
+  { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', inToolRoom: true, mount: mountBuilder },
+  { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
+  { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
+  { id: 'zniszczone', title: 'Zniszczone', style: 'green', inToolRoom: true, disabled: true },
+  { id: 'pomiarowka', title: 'Pomiarówka', style: 'green', inToolRoom: true, disabled: true },
 ];
 
 export const ctx = {
@@ -54,10 +59,16 @@ const root = document.getElementById('app');
 let cleanup = null;
 let current = 'home';
 
+/** Moduły z Narzędziowni wracają do Narzędziowni, reszta do ekranu głównego. */
+function backTarget(id) {
+  const mod = MODULES.find((m) => m.id === id);
+  return mod && mod.inToolRoom ? 'narzedziownia' : 'home';
+}
+
 function topbar(title, showBack) {
   const who = ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '';
   return h('div', { class: 'topbar' },
-    showBack ? h('button', { onclick: () => go('home'), title: 'Wróć do ekranu głównego' }, '← Wróć') : null,
+    showBack ? h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć') : null,
     h('h1', {}, title),
     h('span', { class: 'who' }, who),
     current !== 'settings' ? h('button', { onclick: () => go('settings') }, 'Ustawienia') : null);

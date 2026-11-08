@@ -1,5 +1,5 @@
 import { h, clear, field, api, apiCached, toast, alertBox, confirmBox } from '../ui.js';
-import { resolveCode, suggestions, parseQuantity, LOCK_SECONDS } from '../logic/scanner.js';
+import { resolveCode, filterCodes, parseQuantity, LOCK_SECONDS } from '../logic/scanner.js';
 
 export function mountScanner(el, ctx) {
   let codes = [];
@@ -8,7 +8,7 @@ export function mountScanner(el, ctx) {
 
   const code = h('input', { type: 'text', placeholder: 'Kod produktu (zeskanuj lub wpisz)', autocomplete: 'off', spellcheck: 'false' });
   const qty = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Ilość', value: '1' });
-  const sugg = h('div', { class: 'suggest' });
+  const sugg = h('div', { class: 'opts', style: { maxHeight: '180px', background: '#fff' } });
   const msg = h('div', { style: { margin: '8px 0', whiteSpace: 'pre-wrap' } });
   const save = h('button', { class: 'btn primary', onclick: submit }, 'Zapisz');
   const video = h('video', { style: { width: '100%', maxHeight: '300px', background: '#000', display: 'none' }, muted: true, playsinline: true });
@@ -16,7 +16,9 @@ export function mountScanner(el, ctx) {
 
   const redraw = () => {
     clear(sugg);
-    for (const s of suggestions(code.value, codes)) sugg.append(h('button', { onclick: () => { code.value = s; redraw(); qty.focus(); qty.select(); } }, s));
+    const list = code.value.trim() && codes.includes(code.value.trim()) ? [] : filterCodes(code.value, codes);
+    sugg.style.display = list.length ? '' : 'none';
+    for (const s of list.slice(0, 500)) sugg.append(h('div', { style: { padding: '3px 6px', cursor: 'pointer', borderBottom: '1px solid #eee' }, onclick: () => { code.value = s; redraw(); qty.focus(); qty.select(); } }, s));
   };
   code.addEventListener('input', redraw);
   code.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const r = resolveCode(code.value, codes); if (r) code.value = r; redraw(); qty.focus(); qty.select(); } });

@@ -95,8 +95,8 @@ const zrows = [
 ];
 
 test('Zakupy: widoki, sortowanie dat i naturalne', () => {
-  assert.equal(Z.source(zrows, [], 'ordered').length, 2);
-  assert.equal(Z.source(zrows, [], 'bought').length, 1);
+  assert.equal(Z.source(zrows, [], 'ordered').length, 2);   // bez PZ
+  assert.equal(Z.source(zrows, [], 'bought').length, 1);    // z PZ
   const ord = Z.shown(zrows, [], 'ordered', {}, [{ key: 'zamowiono', ascending: true }]);
   assert.deepEqual(ord.map((r) => r.columnC), ['K10', 'K1']);
   const byCode = Z.shown(zrows, [], 'ordered', {}, [{ key: 'kod', ascending: true }]);
@@ -213,4 +213,43 @@ test('ToolBuilder i BN: łańcuch mocowań, ścieżka, długość, filtry', () =
   assert.deepEqual(B.bnTeamCodes(rows[0]), ['A', 'B']);
   assert.equal(B.bnValue(rows[0], 'length'), '50');
   assert.equal(B.bnFilter(rows, { group: 'g', type: '', diameter: '', length: '' }).length, 1);
+});
+
+test('Zakupy: PZ, korekta, ilość pozostała, tabela dodawania', () => {
+  assert.equal(Z.lacksPz({ columnE: '' }), true);
+  assert.equal(Z.lacksPz({ columnE: ' PZ1 ' }), false);
+  assert.equal(Z.needsCorrection({ columnE: '', columnB: '2026-11-01', columnJ: 'x' }), true);
+  assert.equal(Z.needsCorrection({ columnE: '', columnB: '' }), false);
+  assert.equal(Z.source([{ columnE: '', columnJ: 'x' }], [], 'ordered').length, 1);   // x bez PZ nadal zamówione
+  assert.equal(Z.remainingQuantity('10', '5'), '5');
+  assert.equal(Z.remainingQuantity('10,5', '5'), '5,5');
+  assert.equal(Z.remainingQuantity('10', '10'), null);
+  assert.equal(Z.remainingQuantity('10', '12'), null);
+  assert.equal(Z.remainingQuantity('abc', '1'), null);
+  assert.equal(Z.remainingQuantity('0,3', '0,1'), '0,2');
+  const now = new Date(2026, 10, 8);
+  assert.equal(Z.zmwTemplate(now), '/11/26');
+  assert.equal(Z.isZmwEmpty('/11/26'), true);
+  assert.equal(Z.isZmwEmpty('1234/11/26'), false);
+  assert.equal(Z.zmwToSend('/11/26'), '');
+  assert.equal(Z.zmwToSend(' 12/11/26 '), '12/11/26');
+  let d = Z.emptyDraft(now);
+  assert.equal(d.length, 10);
+  assert.equal(Z.validateDraft(d), 'Tabela jest pusta.');
+  d[3] = { ...d[3], opis: 'x' };
+  assert.equal(Z.validateDraft(d), 'Wiersz 4: uzupełnij ilość.');
+  d[3] = { ...d[3], ilosc: '0' };
+  assert.equal(Z.validateDraft(d), 'Wiersz 4: nieprawidłowa ilość.');
+  d[3] = { ...d[3], ilosc: '2,5', kod: '' };
+  assert.equal(Z.validateDraft(d), null);               // kod może być pusty
+  assert.equal(Z.compactDraft(d, now)[0].opis, 'x');
+  assert.equal(Z.filledCount(Z.compactDraft(d, now)), 1);
+  assert.equal(Z.parseDraft('zły json', now).length, 10);
+  assert.equal(Z.parseDraft(JSON.stringify([{ kod: 'A', ilosc: '1' }]), now)[0].zmw, '/11/26');
+});
+
+test('Skaner: filterCodes', async () => {
+  const { filterCodes } = await import('../src/renderer/js/logic/scanner.js');
+  assert.deepEqual(filterCodes('', ['a', 'b']), ['a', 'b']);
+  assert.deepEqual(filterCodes(' B ', ['ab', 'cd', 'B1']), ['ab', 'B1']);
 });

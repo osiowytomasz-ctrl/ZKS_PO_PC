@@ -24,9 +24,10 @@ Klucz jest zapisywany szyfrowany przez system (`safeStorage`), jeśli system to 
 | Ustawienia i sprawdzenie połączenia | gotowy |
 | Skaner (skaner USB jako klawiatura, kamera tam, gdzie jest `BarcodeDetector`) | gotowy |
 | Grafik (filtry, sortowanie, edycja, zakres dat, zoom Ctrl+kółko) | gotowy |
-| Zakupy (zamówione, zakupione, archiwum, dodawanie, realizacja) | gotowy |
+| Zakupy (zamówione = bez PZ, zakupione = z PZ, archiwum; czerwone pozycje do korekty; tabela dodawania 10 wierszy; realizacja z kopią pozostałej ilości) | gotowy |
 | Pomiary (karta pomiaru, HTML z Androida) | gotowy |
 | Symulator, SymulatorNUM (wersje HTML; wymagają internetu dla bibliotek) | gotowy |
+| Narzędziownia (ekran z ToolBuilder, Assem.Tool, ToolTrack; Zniszczone i Pomiarówka w budowie) | gotowy |
 | ToolTrack (filtry kaskadowe, skaner USB, zapis lokalizacji) | gotowy |
 | Harmonogram (wykres Gantta, filtry, sortowanie, dostawy, zależności) | gotowy |
 | Plan (bloki zmian, edycja tekstu z kolorami, daty, pracownicy) | gotowy |
@@ -53,3 +54,5 @@ Odczyty z arkusza są zapamiętywane na dysku (`userData/cache`, osobno dla każ
 dane pojawiają się od razu z pamięci, a świeże dociągają się w tle. Edycja i zapis w Grafiku, Planie i Zakupach włączają się dopiero
 po odświeżeniu, żeby nie zapisać zmian na starych danych. Katalog narzędzi i listy kodów wczytują się w tle zaraz po starcie.
 Pamięć można wyczyścić w Ustawieniach. Najwolniejszy jest sam backend Apps Script (czytanie arkusza), czego aplikacja nie przyspieszy.
+
+Stan zsynchronizowany z gałęzią Androida `claude/great-babbage-dgqc7x` do commita `0b31147` (7.11.2026).
