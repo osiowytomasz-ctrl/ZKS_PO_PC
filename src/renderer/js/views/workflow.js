@@ -2,7 +2,7 @@ import { h, clear, api, apiCached, toast, modal, field, confirmBox, alertBox } f
 import * as W from '../logic/workflow.js';
 import { parseSheetColor } from '../logic/common.js';
 
-const HEADERS = { A: 'Zakończone', B: 'W trakcie', C: 'Wstrzymane', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
+const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
 
 // ---- edytor tekstu z formatowaniem (jak w Excelu / Arkuszach Google) ----
 const emptyStyle = { bold: false, italic: false, underline: false, strike: false, color: null };
@@ -104,8 +104,9 @@ export function createWorkflow() {
         if (dirty) { style.outline = '2px solid #e65100'; style.outlineOffset = '-2px'; }
         const auto = changed && eff[col] === '' && (col === 'D' || col === 'G');
         const td = h('td', { style, title: isStatus ? `Kliknij, aby ustawić: ${W.STATUS_LABELS[col]}` : '' });
+        if (isStatus) { td.style.width = '26px'; td.style.minWidth = '26px'; td.style.padding = '3px 2px'; }
         if (auto) td.append(h('span', { class: 'muted', style: { fontStyle: 'italic' } }, '(auto)'));
-        else if (isText) td.append(cellContent(eff, col, s)); else td.textContent = eff[col];
+        else if (isText) td.append(cellContent(eff, col, s)); else td.textContent = col === 'D' ? W.fmtDate(eff[col]) : eff[col];
         if (isStatus) td.addEventListener('click', () => { if (!st.fresh) return toast('Edycja po odświeżeniu danych.', true); if (!st.saving) { st.changes = W.stageStatus(st.changes, rec, col); draw(); } });
         else if (isText) td.addEventListener('click', () => { if (!st.fresh) return toast('Edycja po odświeżeniu danych.', true); if (!st.saving) editText(rec, col); });
         tr.append(td);
@@ -113,7 +114,9 @@ export function createWorkflow() {
       tbody.append(tr);
     }
     clear(body);
-    body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...W.COLS.map((c) => h('th', { title: W.STATUS_LABELS[c] || '' }, HEADERS[c])))), tbody));
+    body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...W.COLS.map((c) => (W.STATUS_COLS.includes(c)
+      ? h('th', { title: W.STATUS_LABELS[c], style: { width: '26px', minWidth: '26px', padding: '4px 2px', fontSize: '11px', verticalAlign: 'bottom' } }, h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block', whiteSpace: 'nowrap' } }, HEADERS[c]))
+      : h('th', {}, HEADERS[c]))))), tbody));
     const bad = W.mismatches(st.records).length;
     info.textContent = `Wierszy: ${recs.length}${recs.length !== st.records.length ? ' z ' + st.records.length : ''}` + (st.fresh ? '' : '  ·  dane z pamięci, odświeżanie… (edycja po odświeżeniu)') + (bad ? `  ·  niezgodne z kolumną H w arkuszu: ${bad}` : '');
     saveBtn.disabled = !canEdit() || !st.changes.size;

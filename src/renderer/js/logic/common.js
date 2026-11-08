@@ -27,7 +27,7 @@ export function normalize(value) {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-const ISO = /(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?)?/;
+const ISO = /(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?)?/;
 const PL = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})(?:[ T](\d{1,2})(?::(\d{2}))?)?/;
 
 /** Data z arkusza: `yyyy-MM-dd[ HH[:mm]]` albo `d.M.yyyy[ HH[:mm]]` (też z `-` i `/`). Zwraca Date (UTC) albo null. */

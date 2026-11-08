@@ -336,3 +336,13 @@ test('Workflow: status, fragmenty tekstu, zmiany i zapis', () => {
   assert.equal(ni.row, null); assert.equal(ni.status, 'B'); assert.equal(ni.cells.E.text, ' 604-01 '); assert.equal(ni.cells.F.runs[0].bold, true);
   assert.deepEqual(W.newItem([], [{ text: '  ' }]).cells, {});
 });
+
+test('Workflow: format daty RRRR.MM.DD', () => {
+  assert.equal(W.fmtDate('2021-01-01'), '2021.01.01');
+  assert.equal(W.fmtDate('2026.11.08 18:12'), '2026.11.08 18:12');
+  assert.equal(W.fmtDate('2026-11-08 09:05'), '2026.11.08 09:05');
+  assert.equal(W.fmtDate('7.1.2026'), '2026.01.07');
+  assert.equal(W.fmtDate(''), '');
+  assert.equal(W.fmtDate('brak'), 'brak');
+  assert.equal(formatDate('2026.11.08'), '08.11.2026');                // inne moduły czytają też ten zapis
+});

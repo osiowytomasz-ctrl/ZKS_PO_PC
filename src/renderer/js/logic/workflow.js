@@ -1,3 +1,4 @@
+import { parseDate } from './common.js';
 // Workflow (karta Z): kategoria zadania z formuły w kolumnie H oraz kolorowanie wg formatowania warunkowego arkusza.
 // Wszystko liczone lokalnie z surowych wartości, bo Apps Script nie zwraca wyników formatowania warunkowego.
 
@@ -174,4 +175,14 @@ export function newItem(eRuns, fRuns, status = '') {
   const item = { row: null, cells };
   if (status) item.status = status;
   return item;
+}
+
+/** Data w formacie RRRR.MM.DD (z godziną „RRRR.MM.DD GG:MM”, gdy wartość ją zawiera); tekst bez daty zostaje bez zmian. */
+export function fmtDate(raw) {
+  const text = String(raw ?? '').trim();
+  const d = parseDate(text);
+  if (!d) return text;
+  const p = (n) => String(n).padStart(2, '0');
+  const date = `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())}`;
+  return /\d{1,2}:\d{2}/.test(text) ? `${date} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` : date;
 }

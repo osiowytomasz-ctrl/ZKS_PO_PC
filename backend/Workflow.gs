@@ -6,7 +6,7 @@
 var API_WORKFLOW_SHEET = 'Z';          // <- nazwa karty z workflow
 var WF_STATUS_COLS = ['A', 'B', 'C'];  // tylko jedna z nich może mieć „x”
 var WF_TEXT_COLS = ['E', 'F'];         // kolumny tekstowe z formatowaniem
-var WF_DATE_FORMAT = 'yyyy-mm-dd hh:mm';
+var WF_DATE_FORMAT = 'yyyy.mm.dd hh:mm';
 var WF_MAX_ITEMS = 100;
 var WF_MAX_TEXT = 20000;
 

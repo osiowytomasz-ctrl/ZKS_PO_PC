@@ -77,7 +77,7 @@ test('Workflow backend: status jest wyłączny, data i zlecający tylko gdy pust
   call(env, 'api_saveWorkflow_', [{ row: 2, status: 'C' }], { name: 'Tomasz', email: 't@x' });
   assert.deepEqual([1, 2, 3].map((c) => env.grid[2][c].v), ['', '', 'x']);
   assert.match(String(env.grid[2][4].v), /^\d{4}-\d\d-\d\d \d\d:\d\d$/);       // data uzupełniona
-  assert.equal(env.grid[2][4].fmt, 'yyyy-mm-dd hh:mm');
+  assert.equal(env.grid[2][4].fmt, 'yyyy.mm.dd hh:mm');
   assert.equal(env.grid[2][7].v, 'Tomasz');                                    // zlecający uzupełniony
   call(env, 'api_saveWorkflow_', [{ row: 3, status: '' }], { name: 'Tomasz' });
   assert.deepEqual([1, 2, 3].map((c) => env.grid[3][c].v), ['', '', '']);
