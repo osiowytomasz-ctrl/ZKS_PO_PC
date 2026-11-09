@@ -3,7 +3,7 @@ import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
 
 // Wymiary przy skali 100% (px). Skala zmienia je wszystkie razem, jak w aplikacji na Androida.
-const BASE = { hour: 1.5, row: 22, font: 11, head: 78, startW: 92, endW: 92, stationW: 48 };
+const BASE = { hour: 0.75, row: 22, font: 11, head: 78, startW: 92, endW: 92, stationW: 48 };
 const ZAK_CELL = '#00b050';
 const BLACK_TEXT_STATIONS = new Set(['3Co', '1Si', '5Śl']);
 
