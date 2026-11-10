@@ -29,15 +29,30 @@ function mountHarmView(el, ctx, live) {
     if (!d.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Baza jest pusta. Użyj „Import z arkusza”.')); info.textContent = 'Operacji: 0'; return; }
     draw();
   };
-  async function loadGrafik(force) {
-    try { await apiCached('getGrafNorm', [], (g) => { live_.days = daysByKeyOf(parseGrafik(g)); recompute(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force, callArgs: force ? ['fresh'] : undefined }); }
+  // Grafik: po wejściu pokazuje zapamiętany od razu, ale zawsze dopyta arkusz (fresh); potem sprawdza arkusz co 20 s i przelicza, gdy się zmienił.
+  let grJson = '', grTimer = null;
+  const applyGrafik = (g, quiet) => {
+    const j = JSON.stringify(g);
+    if (j === grJson) return false;
+    grJson = j; live_.days = daysByKeyOf(parseGrafik(g)); recompute();
+    if (!quiet) toast('Grafik zaktualizowany');
+    return true;
+  };
+  async function loadGrafik() {
+    try { await apiCached('getGrafNorm', [], (g) => { applyGrafik(g, true); }, { timeoutMs: 180000, maxAge: 0, force: true, callArgs: ['fresh'] }); }
     catch (e) { toast('Grafik: ' + e.message); }
+    if (grTimer) clearInterval(grTimer);
+    grTimer = setInterval(async () => {
+      if (!el.isConnected) { clearInterval(grTimer); if (stop) stop(); return; }
+      if (document.hidden) return;
+      try { const g = await api('getGrafNorm', ['fresh'], { timeoutMs: 60000 }); applyGrafik(g, false); } catch { /* następna próba za 20 s */ }
+    }, 20000);
   }
   async function loadLive(force = false) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
     try {
       if (stop) stop();
-      loadGrafik(force);
+      loadGrafik();
       stop = await watchHarm((m) => { live_.m = m; recompute(); },
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => loadLive(true) }, 'Ponów'))); }

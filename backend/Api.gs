@@ -1235,7 +1235,7 @@ function api_getGrafNorm_(fresh) {
     while (r.length && !String(r[r.length - 1]).trim()) r.pop();   // obcięcie pustych kolumn z prawej
     out.rows.push(r);
   }
-  api_cachePut_('grafnorm:v1', out, API_HARM_TTL);
+  api_cachePut_('grafnorm:v1', out, 15);
   return out;
 }
 
