@@ -1,4 +1,8 @@
-import { h, clear, api, apiCached, modal } from '../ui.js';
+import { h, clear, api, apiCached, modal, toast } from '../ui.js';
+import { watchHarm, importOps, importGrafik } from '../harmStore.js';
+import { buildHarmData } from '../logic/harmModel.js';
+import { importOperations } from '../logic/harmImport.js';
+import { parseGrafikText } from '../logic/harmModel.js';
 import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
 import { HARM_MAX_AGE } from '../prefetch.js';
@@ -8,12 +12,44 @@ const BASE = { hour: 0.75, row: 22, font: 11, head: 78, startW: 92, endW: 92, st
 const ZAK_CELL = '#00b050';
 const BLACK_TEXT_STATIONS = new Set(['3Co', '1Si', '5Śl']);
 
-export function mountHarm(el, ctx) {
+export function mountHarm(el, ctx) { return mountHarmView(el, ctx, false); }
+export function mountHarmLive(el, ctx) { return mountHarmView(el, ctx, true); }
+
+function mountHarmView(el, ctx, live) {
   const st = { data: null, filters: { komis: new Set(), station: new Set() }, sorts: H.emptySorts(), daysBack: 3, scale: 1 };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, position: 'relative' } });
   const info = h('span', { class: 'muted' });
 
+  let stop = null, model = null;
+  async function loadLive() {
+    clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
+    try {
+      if (stop) stop();
+      stop = await watchHarm((m) => {
+        model = m;
+        const d = buildHarmData(m.opsByLp, m.daysByKey, m.cfg, H.localNow().getTime());
+        st.data = d;
+        if (!d.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Baza jest pusta. Użyj „Import grafiku z pliku” i „Import operacji z pliku”.')); info.textContent = 'Operacji: 0'; return; }
+        draw();
+      }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
+    } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: loadLive }, 'Ponów'))); }
+  }
+  const pickFile = (onText) => { const inp = h('input', { type: 'file', accept: '.txt,.csv,.tsv,text/plain,text/csv' }); inp.onchange = async () => { const f = inp.files[0]; if (f) onText(await f.text()); }; inp.click(); };
+  const importGr = () => pickFile(async (text) => {
+    const p = parseGrafikText(text);
+    if (!p.days.length) { toast(p.warnings[0] || 'Brak danych'); return; }
+    try { const r = await importGrafik(p); toast(`Zaimportowano grafik: ${r.days} dni`); } catch (e) { toast('Błąd importu: ' + (e.code || e.message)); }
+  });
+  const importOp = () => pickFile(async (text) => {
+    const r = importOperations(text);
+    if (!r.operations.length) { toast(r.warnings[0] || 'Brak operacji'); return; }
+    const ok = window.confirm(`Zaimportować ${r.operations.length} operacji? Obecne operacje w bazie zostaną ZASTĄPIONE.` + (r.warnings.length ? `\n\nOstrzeżeń: ${r.warnings.length}\n` + r.warnings.slice(0, 5).join('\n') : ''));
+    if (!ok) return;
+    try { const x = await importOps(r.operations); toast(`Zaimportowano ${x.operations} operacji`); } catch (e) { toast('Błąd importu: ' + (e.code || e.message)); }
+  });
+
   async function load(force = false) {
+    if (live) return loadLive();
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie harmonogramu…'));
     try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force, callArgs: force ? ['fresh'] : undefined }); }
     catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
@@ -136,6 +172,6 @@ export function mountHarm(el, ctx) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     fK, fS, ...Object.values(sortBtns),
     h('button', { class: 'btn small', onclick: () => { st.filters = { komis: new Set(), station: new Set() }; st.sorts = H.emptySorts(); draw(); } }, 'Wyczyść'),
-    h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
+    h('span', { class: 'grow' }), info, ...(live ? [h('button', { class: 'btn small', onclick: importGr }, 'Import grafiku z pliku'), h('button', { class: 'btn small', onclick: importOp }, 'Import operacji z pliku')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
   load();
 }

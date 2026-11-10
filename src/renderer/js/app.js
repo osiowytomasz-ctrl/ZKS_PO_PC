@@ -10,7 +10,7 @@ import { mountZakupy } from './views/zakupy.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
 import { mountToolTrack } from './views/tooltrack.js';
-import { mountHarm } from './views/harm.js';
+import { mountHarm, mountHarmLive } from './views/harm.js';
 import { mountPlan } from './views/plan.js';
 import { mountHelp } from './views/help.js';
 import { mountBuilder } from './views/builder.js';
@@ -25,6 +25,7 @@ export const MODULES = [
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
   { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
+  { id: 'harmonogram-fb', title: 'Harmonogram (Firebase)', mount: mountHarmLive },
   { id: 'help', title: 'Help', mount: mountHelp },
   { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', inHelp: true, web: 'symulator-num.html' },
