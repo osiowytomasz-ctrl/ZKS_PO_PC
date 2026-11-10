@@ -145,3 +145,31 @@ test('prawdziwe dane: start z poprzedników zgadza się z arkuszem dla wszystkic
     assert.ok(Math.abs(toSerial(s) - Number(want)) < 1e-6, `klucz ${r.lp}: ${r.key} vs ${toSerial(s)}`);
   }
 });
+
+// ---- koniec operacji i godziny dzienne na prawdziwym grafiku (pliki lokalne, poza repozytorium) ----
+const GRAF = new URL('./fixtures/graf-norm.txt', import.meta.url).pathname;
+test('prawdziwe dane: godziny dzienne z kodów i koniec operacji zgodne z arkuszem', { skip: (!fs.existsSync(GRAF) || !fs.existsSync(SAMPLE)) && 'brak plików z danymi' }, () => {
+  const lines = fs.readFileSync(GRAF, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => l.split('\t'));
+  const head = lines[0], names = head.slice(1, 7);
+  const slotCols = head.map((h, i) => ({ h, i })).filter((x) => x.i >= 8 && x.h);
+  const pd = (t) => { const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(t); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) : null; };
+  const days = Object.fromEntries(names.map((n) => [n, []]));
+  let bad = 0;
+  for (const r of lines.slice(1)) {
+    const date = pd(r[7]); if (date == null) continue;
+    names.forEach((st, k) => {
+      const codes = Array(9).fill('');
+      for (const c of slotCols) { const n = slotNumber(c.h, st); if (n) codes[n - 1] = r[c.i] || ''; }
+      const want = Number(r[1 + k]) || 0;
+      if (stationHours(st, codes) !== want) bad++;
+      days[st].push({ date, hours: want });
+    });
+  }
+  assert.equal(bad, 0);
+  const capacity = Object.fromEntries(names.map((n) => [n, buildCapacity(days[n])]));
+  const rows = JSON.parse(fs.readFileSync(SAMPLE, 'utf8'));
+  const ops = rows.map((r) => ({ lp: r.lp, preds: r.z, startManual: parseDt(r.startManual), hours: Number(String(r.hours).replace(',', '.')) || null, endManual: parseDt(r.endManual), station: r.station }));
+  const res = computeSchedule(ops, capacity);
+  const diffs = rows.filter((r) => (res.get(r.lp).end ?? null) !== (parseDt(r.endCalc) ?? null)).map((r) => r.lp);
+  assert.deepEqual(diffs, []);
+});
