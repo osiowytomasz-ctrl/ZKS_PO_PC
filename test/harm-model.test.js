@@ -29,14 +29,16 @@ test('opsFromSheetRows: bierze dane ręczne, pomija wyliczane', () => {
     { lp: '1', z1: '', z2: '', z3: '', z4: '', client: 'KL', komis: 'K1', element: 'E1', stanowisko: '1Si', start: '01.11.2026 06:00', startManual: '02.11.2026 06:00', godziny: '8,5', endManual: '', koniec: '03.11.2026 06:00', wysylka: '10.11.2026', dostawa: '', zak: '', stanowiskoBg: '#ff0000', stanowiskoColor: '#000000' },
     { lp: '2', z1: '1', z2: '9', komis: 'K1', element: 'E2', stanowisko: '2Un', godziny: '4', endManual: '05.11.2026 12:00', zak: 'zak.' },
     { lp: '2', komis: 'K', element: 'dubel', stanowisko: '2Un' },
+    { lp: '', rowIndex: 40, komis: 'K9', element: 'zakończona bez numeru', stanowisko: '3Co', godziny: '46', endManual: '12.05.2026 14:00' },
   ];
   const r = opsFromSheetRows(rows);
-  assert.equal(r.operations.length, 2);
+  assert.equal(r.operations.length, 3);
+  assert.equal(r.operations[2].lp, 's40'); assert.equal(chunkId('s40'), 's0000'); assert.equal(chunkId('s125'), 's0002');
   const o1 = r.operations[0];
   assert.equal(o1.hours, 8.5); assert.equal(o1.startManual, Date.UTC(2026, 10, 2, 6)); assert.equal(o1.client, 'KL'); assert.equal(o1.wysylka, Date.UTC(2026, 10, 10));
   assert.ok(!('start' in o1) && !('koniec' in o1));
-  assert.deepEqual(r.operations[1].preds, ['1', '9']); assert.equal(r.operations[1].endManual, Date.UTC(2026, 10, 5, 12)); assert.equal(r.operations[1].status, 'zak.');
-  assert.equal(r.stations.length, 2);
+  assert.deepEqual(r.operations[1].preds, ['1', '9']); assert.equal(r.operations[1].endManual, Date.UTC(2026, 10, 5, 12)); assert.ok(!('status' in r.operations[1]));
+  assert.ok(!JSON.stringify(r.operations).match(/#ff0000|color|Bg/i));   // żadnych kolorów
   assert.ok(r.warnings.some((w) => w.includes('powtórzony')) && r.warnings.some((w) => w.includes('poprzednik 9')));
 });
 

@@ -25,8 +25,8 @@ export async function watchHarm(onChange, onError) {
 
 const clean = (o) => { const r = {}; for (const [k, v] of Object.entries(o)) if (v !== undefined) r[k] = v; return r; };
 
-/** Import operacji z arkusza (wynik opsFromSheetRows): zastępuje całą zawartość harm_ops; zapisuje stanowiska z kolorami i święta. */
-export async function importOps(operations, stations, holidays) {
+/** Import operacji z arkusza (wynik opsFromSheetRows): zastępuje całą zawartość harm_ops. Tylko suche dane; stary config/main (kolory) jest usuwany. */
+export async function importOps(operations) {
   const { sdk, db } = await firebase();
   const chunks = new Map();
   for (const o of operations) {
@@ -40,10 +40,7 @@ export async function importOps(operations, stations, holidays) {
   old.forEach((d) => { if (!chunks.has(d.id)) writes.push((b) => b.delete(d.ref)); });
   for (const [id, ops] of chunks) writes.push((b) => b.set(sdk.doc(db, 'harm_ops', id), { ops }));
   await commit(sdk, db, writes);
-  const cfg = {};
-  if (stations && stations.length) cfg.stations = stations;
-  if (holidays) cfg.holidays = holidays;
-  if (Object.keys(cfg).length) await sdk.setDoc(sdk.doc(db, 'config', 'main'), cfg, { merge: true });
+  try { await sdk.deleteDoc(sdk.doc(db, 'config', 'main')); } catch { /* brak dokumentu */ }
   return { chunks: chunks.size, operations: operations.length };
 }
 

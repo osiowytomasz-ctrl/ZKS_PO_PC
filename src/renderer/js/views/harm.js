@@ -65,7 +65,7 @@ function mountHarmView(el, ctx, live) {
       if (!r.operations.length) { toast(r.warnings[0] || 'Brak operacji'); return; }
       const ok = window.confirm(`Zaimportować ${r.operations.length} operacji z arkusza? Obecne operacje w bazie zostaną ZASTĄPIONE.` + (r.warnings.length ? `\n\nOstrzeżeń: ${r.warnings.length}\n` + r.warnings.slice(0, 5).join('\n') : ''));
       if (!ok) return;
-      const x = await importOps(r.operations, r.stations, d.holidays || []);
+      const x = await importOps(r.operations);
       toast(`Zaimportowano ${x.operations} operacji`);
     } catch (e) { toast('Błąd importu: ' + (e.code || e.message)); }
   };

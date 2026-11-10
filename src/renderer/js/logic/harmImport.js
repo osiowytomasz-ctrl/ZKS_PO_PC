@@ -104,17 +104,19 @@ export function importOperations(text) {
 }
 
 /**
- * Operacje z odpowiedzi API getHarmData (wiersze arkusza): bierzemy TYLKO dane wpisane ręcznie – numer, poprzedniki, klient, komis, opis, stanowisko,
- * start ręczny (J), godziny (K), koniec ręczny (L), wysyłka (R), dostawa (X), status (T). Start i koniec wyliczane z formuł są pomijane.
- * Zwraca też listę stanowisk z kolorami z arkusza.
+ * Operacje z odpowiedzi API getHarmData (wiersze arkusza od wiersza 14, pod nagłówkami). Do bazy trafiają WYŁĄCZNIE suche dane tekstowe
+ * z kolumn A–H, J–L, R, X i AB: numer (A), poprzedniki (B–E), klient (F), komis (G), opis (H), start ręczny (J), godziny (K),
+ * koniec ręczny (L), zakończenie/wysyłka (R), dostawa (X), stanowisko (AB). Kolumny wyliczane (I, M, S, T…) i kolory/czcionki nie są brane.
  */
 export function opsFromSheetRows(rows) {
-  const ops = [], warnings = [], seen = new Set(), stations = new Map();
+  const ops = [], warnings = [], seen = new Set();
   for (const r of rows || []) {
-    const lp = String(r.lp ?? '').trim();
-    if (!/^\d+$/.test(lp)) continue;
     const station = String(r.stanowisko ?? '').trim(), element = String(r.element ?? '').trim();
-    if (!station && !element) continue;
+    if (!station && !element && !String(r.komis ?? '').trim()) continue;
+    // Operacje zakończone często nie mają numeru w kolumnie A: dostają numer techniczny „s<wiersz arkusza>”.
+    let lp = String(r.lp ?? '').trim();
+    if (!lp) { if (r.rowIndex == null) continue; lp = 's' + r.rowIndex; }
+    if (!/^(\d+|s\d+)$/.test(lp)) { warnings.push(`Pominięto wiersz z numerem „${lp}” (oczekiwana liczba).`); continue; }
     if (seen.has(lp)) { warnings.push(`Numer operacji ${lp} powtórzony (liczy się pierwsza).`); continue; }
     seen.add(lp);
     const dt = (key) => { const raw = String(r[key] ?? '').trim(); const v = parseDateTime(raw); if (raw && v == null) warnings.push(`Operacja ${lp}: nie rozpoznano daty „${raw}” (${key}).`); return v; };
@@ -123,12 +125,11 @@ export function opsFromSheetRows(rows) {
     ops.push({
       lp, preds: [r.z1, r.z2, r.z3, r.z4].map((x) => String(x ?? '').trim()).filter(Boolean), client: String(r.client ?? '').trim(),
       komis: String(r.komis ?? '').trim(), element, station, hours, startManual: dt('startManual'), endManual: dt('endManual'),
-      wysylka: dt('wysylka'), dostawa: dt('dostawa'), status: String(r.zak ?? '').trim(),
+      wysylka: dt('wysylka'), dostawa: dt('dostawa'),
     });
-    if (station && !stations.has(station)) stations.set(station, { name: station, bg: r.stanowiskoBg || '#cccccc', color: r.stanowiskoColor || '#000000' });
   }
   const known = new Set(ops.map((o) => o.lp));
   for (const o of ops) for (const p of o.preds) if (!known.has(p)) warnings.push(`Operacja ${o.lp}: poprzednik ${p} nie występuje w danych.`);
   if (!ops.length) warnings.push('Nie znaleziono żadnych operacji.');
-  return { operations: ops, stations: [...stations.values()], warnings };
+  return { operations: ops, warnings };
 }

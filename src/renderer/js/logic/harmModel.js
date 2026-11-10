@@ -2,11 +2,16 @@
 //  - harm_ops/{chunk}: { ops: { "<lp>": {preds, client, komis, element, station, hours, startManual, endManual, wysylka, dostawa, status} } }
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
 //  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
-//  - config/main: { stations: [{name, bg, color}], holidays: ["RRRR-MM-DD"] }
+//  - W bazie są wyłącznie suche dane tekstowe/liczbowe (bez kolorów i czcionek).
 import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, DAY_MS } from './schedule.js';
 
 export const CHUNK = 50;
-export const chunkId = (lp) => (/^\d+$/.test(String(lp)) ? 'c' + String(Math.floor(Number(lp) / CHUNK)).padStart(4, '0') : 'cx');
+export const chunkId = (lp) => {
+  const t = String(lp);
+  if (/^\d+$/.test(t)) return 'c' + String(Math.floor(Number(t) / CHUNK)).padStart(4, '0');
+  const m = /^s(\d+)$/.exec(t);          // numer techniczny operacji bez numeru w arkuszu: s<wiersz>
+  return m ? 's' + String(Math.floor(Number(m[1]) / CHUNK)).padStart(4, '0') : 'cx';
+};
 
 const p2 = (n) => String(n).padStart(2, '0');
 export const dayKey = (ms) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`; };
@@ -57,7 +62,7 @@ export function capacityFrom(daysByKey, stationNames) {
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
  */
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
-  const stations = (cfg && cfg.stations && cfg.stations.length) ? cfg.stations : DEFAULT_STATIONS;
+  const stations = DEFAULT_STATIONS;   // kolory i czcionki nie są w bazie (ustalimy później); tu tylko domyślne wyświetlanie
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
   const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => Number(a.lp) - Number(b.lp) || String(a.lp).localeCompare(b.lp));
   const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
@@ -73,11 +78,11 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   for (const { o, r, zak } of keyed) {
     const sl = look[o.station] || {};
     rows.push({
-      lp: o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
+      lp: /^s\d+$/.test(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
       komis: o.komis || '', element: o.element || '', stanowisko: o.station || '', godziny: o.hours == null ? '' : String(o.hours),
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),
       zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
   }
-  return { rows, holidays: (cfg && cfg.holidays) || [], rapData: {}, result };
+  return { rows, holidays: [], rapData: {}, result };
 }
