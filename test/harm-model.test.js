@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
 // tekst graf_norm (arkusz) → kształt odpowiedzi API getGrafNorm: kolumny od H w prawo
@@ -37,7 +37,7 @@ test('opsFromSheetRows: bierze dane ręczne, pomija wyliczane', () => {
   const o1 = r.operations[0];
   assert.equal(o1.hours, 8.5); assert.equal(o1.startManual, Date.UTC(2026, 10, 2, 6)); assert.equal(o1.client, 'KL'); assert.equal(o1.wysylka, Date.UTC(2026, 10, 10));
   assert.ok(!('start' in o1) && !('koniec' in o1));
-  assert.deepEqual(r.operations[1].preds, ['1', '9']); assert.equal(r.operations[1].endManual, Date.UTC(2026, 10, 5, 12)); assert.ok(!('status' in r.operations[1]));
+  assert.deepEqual(r.operations[1].preds, ['1', '9']); assert.equal(r.operations[1].endManual, Date.UTC(2026, 10, 5, 12)); assert.equal(r.operations[1].status, 'zak.'); assert.equal(r.operations[0].status, '');
   assert.ok(!JSON.stringify(r.operations).match(/#ff0000|color|Bg/i));   // żadnych kolorów
   assert.ok(r.warnings.some((w) => w.includes('powtórzony')) && r.warnings.some((w) => w.includes('poprzednik 9')));
 });
@@ -54,4 +54,14 @@ test('prawdziwe dane: model buduje wiersze zgodne z arkuszem', { skip: !(fs.exis
   const byLp = new Map(data.rows.map((r) => [r.lp, r]));
   const bad = want.filter((w) => { const r = byLp.get(w.lp); return !r || r.start !== (w.startCalc || '').slice(0, 16) || r.koniec !== (w.endCalc || '').slice(0, 16); }).map((w) => w.lp);
   assert.deepEqual(bad.slice(0, 5), []);
+});
+
+test('klucz „Stat.” (kolumna S): zakończone, stanowisko + numer startu, 0ZZ', () => {
+  const day = Date.UTC(2026, 10, 14, 14);           // 46340,5833333333
+  const mk = (o, start) => buildHarmData({ 1: { preds: [], hours: 8, ...o } }, {}, null, Date.UTC(2026, 10, 10)).rows[0].key;
+  assert.equal(mk({ station: '2Un', element: 'x', status: 'zak.' }), '00Zak');
+  assert.equal(mk({ station: '2Un', element: 'x', startManual: day }), '2Un46340,5833333333');
+  assert.equal(mk({ station: '2Un', element: 'x', startManual: Date.UTC(2029, 0, 1) }), '0ZZ');           // poza horyzontem 417 dni
+  assert.equal(mk({ station: '2Un', element: '' }), '0ZZZ');                                              // brak startu i opisu
+  assert.equal(mk({ station: '', element: 'x', startManual: day }), '0ZZ');
 });

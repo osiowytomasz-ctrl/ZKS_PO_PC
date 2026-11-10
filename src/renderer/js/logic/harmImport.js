@@ -105,8 +105,8 @@ export function importOperations(text) {
 
 /**
  * Operacje z odpowiedzi API getHarmData (wiersze arkusza od wiersza 14, pod nagłówkami). Do bazy trafiają WYŁĄCZNIE suche dane tekstowe
- * z kolumn A–H, J–L, R, X i AB: numer (A), poprzedniki (B–E), klient (F), komis (G), opis (H), start ręczny (J), godziny (K),
- * koniec ręczny (L), zakończenie/wysyłka (R), dostawa (X), stanowisko (AB). Kolumny wyliczane (I, M, S, T…) i kolory/czcionki nie są brane.
+ * z kolumn A–H, J–L, R, T, X i AB: numer (A), poprzedniki (B–E), klient (F), komis (G), opis (H), start ręczny (J), godziny (K),
+ * koniec ręczny (L), zakończenie/wysyłka (R), status (T), dostawa (X), stanowisko (AB). Kolumny wyliczane (I, M, S, T…) i kolory/czcionki nie są brane.
  */
 export function opsFromSheetRows(rows) {
   const ops = [], warnings = [], seen = new Set();
@@ -125,7 +125,7 @@ export function opsFromSheetRows(rows) {
     ops.push({
       lp, preds: [r.z1, r.z2, r.z3, r.z4].map((x) => String(x ?? '').trim()).filter(Boolean), client: String(r.client ?? '').trim(),
       komis: String(r.komis ?? '').trim(), element, station, hours, startManual: dt('startManual'), endManual: dt('endManual'),
-      wysylka: dt('wysylka'), dostawa: dt('dostawa'),
+      wysylka: dt('wysylka'), dostawa: dt('dostawa'), status: String(r.zak ?? '').trim(),
     });
   }
   const known = new Set(ops.map((o) => o.lp));

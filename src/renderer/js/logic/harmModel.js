@@ -3,7 +3,9 @@
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
 //  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
 //  - W bazie są wyłącznie suche dane tekstowe/liczbowe (bez kolorów i czcionek).
-import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, DAY_MS } from './schedule.js';
+import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, DAY_MS } from './schedule.js';
+
+export const HORIZON_DAYS = 417;   // komórka S12 arkusza: operacje startujące dalej niż tyle dni od dziś trafiają za stanowiska
 
 export const CHUNK = 50;
 export const chunkId = (lp) => {
@@ -57,6 +59,13 @@ export function capacityFrom(daysByKey, stationNames) {
   return out;
 }
 
+/** Klucz „Stat.” z kolumny S: „00Zak” dla zakończonych, stanowisko + numer seryjny startu w horyzoncie, w pozostałych „0ZZ” (+ „Z” bez opisu). */
+export function statKey(o, r, key) {
+  if (key.group === 0) return '00Zak';
+  if (key.group === 2) return String(o.station) + String(Number(toSerial(r.start).toFixed(10))).replace('.', ',');
+  return '0ZZ' + (String(o.element ?? '').trim() ? '' : 'Z');
+}
+
 /**
  * Z operacji (mapa lp → operacja), dni grafiku i konfiguracji robi dane dla widoku Harmonogramu (ten sam kształt co z arkusza).
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
@@ -70,14 +79,15 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const result = computeSchedule(list, capacity);
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};
-    const zak = String(o.status || '').trim().toLowerCase() === 'zak.' || o.endManual != null ? 'zak.' : String(o.status || '');
-    return { o, r, zak, key: sortKey({ station: o.station, element: o.element, zak }, r.start, 36500, nowMs) };
+    const zak = String(o.status || '').trim().toLowerCase() === 'zak.' ? 'zak.' : String(o.status || '');
+    return { o, r, zak, key: sortKey({ station: o.station, element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };
   });
   keyed.sort((a, b) => compareKeys(a.key, b.key));
   const rows = [];
-  for (const { o, r, zak } of keyed) {
+  for (const { o, r, zak, key } of keyed) {
     const sl = look[o.station] || {};
     rows.push({
+      id: o.lp, hours: o.hours == null ? '' : String(o.hours), station: o.station || '', client: o.client || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
       lp: /^s\d+$/.test(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
       komis: o.komis || '', element: o.element || '', stanowisko: o.station || '', godziny: o.hours == null ? '' : String(o.hours),
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),

@@ -17,19 +17,19 @@ export function mountHarmLive(el, ctx) { return mountHarmView(el, ctx, true); }
 
 function mountHarmView(el, ctx, live) {
   const st = { data: null, filters: { komis: new Set(), station: new Set() }, sorts: H.emptySorts(), daysBack: 3, scale: 1 };
-  const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, position: 'relative' } });
+  const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative' } });
   const info = h('span', { class: 'muted' });
 
   let stop = null;
   const live_ = { m: null, days: null };
-  let tableMode = false;
-  const tbl = live ? createTable() : null;
+  let dataOpen = false;
+  const tbl = live ? createTable({ onFilterChange: () => { if (st.data) draw(); } }) : null;
   const recompute = () => {
     if (!live_.m) return;
     if (!live_.days) { info.textContent = 'Pobieranie grafiku…'; }
     const d = buildHarmData(live_.m.opsByLp, live_.days || {}, live_.m.cfg, H.localNow().getTime());
     st.data = d;
-    if (tableMode) { tbl.update({ opsByLp: live_.m.opsByLp, result: d.result }); return; }
+    if (dataOpen) tbl.update({ opsByLp: live_.m.opsByLp, rows: d.rows });
     if (!d.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Baza jest pusta. Użyj „Import z arkusza”.')); info.textContent = 'Operacji: 0'; return; }
     draw();
   };
@@ -61,13 +61,13 @@ function mountHarmView(el, ctx, live) {
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => loadLive(true) }, 'Ponów'))); }
   }
-  const modeBtn = live ? h('button', { class: 'btn small primary', title: 'Przełącza między wykresem a tabelą danych (edycja)', onclick: () => {
-    tableMode = !tableMode;
-    modeBtn.textContent = tableMode ? 'Pokaż wykres' : 'Edytuj dane (tabela)';
-    clear(body);
-    if (tableMode) { body.style.overflow = 'hidden'; body.style.display = 'flex'; body.append(tbl.el); } else { body.style.overflow = ''; body.style.display = ''; }
-    recompute();
-  } }, 'Edytuj dane (tabela)') : null;
+  const modeBtn = live ? h('button', { class: 'btn small primary', title: 'Pokazuje albo ukrywa panel z danymi do edycji obok wykresu', onclick: () => {
+    dataOpen = !dataOpen;
+    modeBtn.textContent = dataOpen ? 'Ukryj dane' : 'Pokaż dane';
+    pane.style.display = dataOpen ? 'flex' : 'none';
+    if (dataOpen && st.data) tbl.update({ opsByLp: live_.m.opsByLp, rows: st.data.rows });
+    if (st.data) draw();
+  } }, 'Pokaż dane') : null;
   const importSheet = async () => {
     try {
       toast('Pobieranie z arkusza…');
@@ -111,13 +111,14 @@ function mountHarmView(el, ctx, live) {
   }
 
   function draw() {
-    if (tableMode) return;   // w trybie tabeli przyciski wykresu nie przerysowują widoku
     const sc = st.scale;
     const HOUR = BASE.hour * sc, ROW = Math.round(BASE.row * sc), FONT = BASE.font * sc, HEAD = Math.round(BASE.head * sc);
     const SW = Math.round(BASE.startW * sc), EW = Math.round(BASE.endW * sc), TW = Math.round(BASE.stationW * sc);
-    const LEFT = SW + EW + TW;
+    const LEFT = dataOpen ? 0 : SW + EW + TW;   // przy otwartym panelu danych Start/Koniec są w tabeli, więc nie powielamy ich na wykresie
     const now = H.localNow();
-    const chart = H.buildChart(st.data, st.filters, st.sorts, st.daysBack, now);
+    const allowed = dataOpen ? tbl.allowed() : null;
+    const dataF = allowed ? { ...st.data, rows: st.data.rows.filter((r) => allowed.has(r.id)) } : st.data;
+    const chart = H.buildChart(dataF, st.filters, st.sorts, st.daysBack, now);
     const holidays = H.holidaySet(st.data.holidays);
     const n = chart.items.length;
     const chartW = Math.ceil((chart.firstDayHours + chart.totalDays * 24) * HOUR);
@@ -182,7 +183,7 @@ function mountHarmView(el, ctx, live) {
 
     const sy = body.scrollTop, sx = body.scrollLeft;
     clear(body);
-    body.append(h('div', { style: { display: 'flex', width: (LEFT + chartW) + 'px', minHeight: '100%' } }, left, chartEl));
+    body.append(h('div', { style: { display: 'flex', width: (LEFT + chartW) + 'px', minHeight: '100%' } }, ...(dataOpen ? [chartEl] : [left, chartEl])));
     body.scrollTop = sy; body.scrollLeft = sx;
     info.textContent = `Operacji: ${n}`;
     daysLabel.textContent = st.daysBack + ' dni';
@@ -200,12 +201,14 @@ function mountHarmView(el, ctx, live) {
   for (const k of ['komis', 'start', 'station']) sortBtns[k] = h('button', { class: 'btn small', onclick: () => { st.sorts = H.cycleSort(st.sorts, k); draw(); } }, k);
   const fK = h('button', { class: 'btn small', onclick: () => openFilter('komis', 'Filtr: komis', st.data.rows.map((r) => r.komis)) }, 'Filtr komis');
   const fS = h('button', { class: 'btn small', onclick: () => openFilter('station', 'Filtr: stanowisko', st.data.rows.map((r) => r.stanowisko)) }, 'Filtr stanowisko');
+  const pane = live ? h('div', { style: { display: 'none', width: '55%', flex: 'none', minWidth: 0, flexDirection: 'column' } }, tbl.el) : null;
+  const split = h('div', { style: { display: 'flex', flex: 1, minHeight: 0, gap: '6px' } }, body, ...(pane ? [pane] : []));
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' },
     h('button', { class: 'btn small', onclick: () => { if (st.daysBack > 0) { st.daysBack--; draw(); } } }, '−'), daysLabel, h('button', { class: 'btn small', onclick: () => { if (st.daysBack < 30) { st.daysBack++; draw(); } } }, '+'), h('span', { class: 'muted' }, 'dni wstecz'),
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     fK, fS, ...Object.values(sortBtns),
     h('button', { class: 'btn small', onclick: () => { st.filters = { komis: new Set(), station: new Set() }; st.sorts = H.emptySorts(); draw(); } }, 'Wyczyść'),
-    h('span', { class: 'grow' }), info, ...(live ? [modeBtn, h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
+    h('span', { class: 'grow' }), info, ...(live ? [modeBtn, h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), split);
   load();
 }
