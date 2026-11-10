@@ -1,8 +1,4 @@
-import { h, clear, api, apiCached, modal, toast } from '../ui.js';
-import { watchHarm, importOps } from '../harmStore.js';
-import { buildHarmData, parseGrafik, daysByKeyOf } from '../logic/harmModel.js';
-import { createTable } from './harmTable.js';
-import { opsFromSheetRows } from '../logic/harmImport.js';
+import { h, clear, api, apiCached, modal } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
 import { HARM_MAX_AGE } from '../prefetch.js';
@@ -12,77 +8,12 @@ const BASE = { hour: 0.75, row: 22, font: 11, head: 78, startW: 92, endW: 92, st
 const ZAK_CELL = '#00b050';
 const BLACK_TEXT_STATIONS = new Set(['3Co', '1Si', '5Śl']);
 
-export function mountHarm(el, ctx) { return mountHarmView(el, ctx, false); }
-export function mountHarmLive(el, ctx) { return mountHarmView(el, ctx, true); }
-
-function mountHarmView(el, ctx, live) {
+export function mountHarm(el, ctx) {
   const st = { data: null, filters: { komis: new Set(), station: new Set() }, sorts: H.emptySorts(), daysBack: 3, scale: 1 };
-  const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative' } });
+  const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, position: 'relative' } });
   const info = h('span', { class: 'muted' });
 
-  let stop = null;
-  const live_ = { m: null, days: null };
-  let dataOpen = false;
-  const tbl = live ? createTable({ onFilterChange: () => { if (st.data) draw(); } }) : null;
-  const recompute = () => {
-    if (!live_.m) return;
-    if (!live_.days) { info.textContent = 'Pobieranie grafiku…'; }
-    const d = buildHarmData(live_.m.opsByLp, live_.days || {}, live_.m.cfg, H.localNow().getTime());
-    st.data = d;
-    if (dataOpen) tbl.update({ opsByLp: live_.m.opsByLp, rows: d.rows });
-    if (!d.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Baza jest pusta. Użyj „Import z arkusza”.')); info.textContent = 'Operacji: 0'; return; }
-    draw();
-  };
-  // Grafik: po wejściu pokazuje zapamiętany od razu, ale zawsze dopyta arkusz (fresh); potem sprawdza arkusz co 20 s i przelicza, gdy się zmienił.
-  let grJson = '', grTimer = null;
-  const applyGrafik = (g, quiet) => {
-    const j = JSON.stringify(g);
-    if (j === grJson) return false;
-    grJson = j; live_.days = daysByKeyOf(parseGrafik(g)); recompute();
-    if (!quiet) toast('Grafik zaktualizowany');
-    return true;
-  };
-  async function loadGrafik() {
-    try { await apiCached('getGrafNorm', [], (g) => { applyGrafik(g, true); }, { timeoutMs: 180000, maxAge: 0, force: true, callArgs: ['fresh'] }); }
-    catch (e) { toast('Grafik: ' + e.message); }
-    if (grTimer) clearInterval(grTimer);
-    grTimer = setInterval(async () => {
-      if (!el.isConnected) { clearInterval(grTimer); if (stop) stop(); return; }
-      if (document.hidden) return;
-      try { const g = await api('getGrafNorm', ['fresh'], { timeoutMs: 60000 }); applyGrafik(g, false); } catch { /* następna próba za 20 s */ }
-    }, 20000);
-  }
-  async function loadLive(force = false) {
-    clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
-    try {
-      if (stop) stop();
-      loadGrafik();
-      stop = await watchHarm((m) => { live_.m = m; recompute(); },
-        (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
-    } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => loadLive(true) }, 'Ponów'))); }
-  }
-  const modeBtn = live ? h('button', { class: 'btn small primary', title: 'Pokazuje albo ukrywa panel z danymi do edycji obok wykresu', onclick: () => {
-    dataOpen = !dataOpen;
-    modeBtn.textContent = dataOpen ? 'Ukryj dane' : 'Pokaż dane';
-    pane.style.display = dataOpen ? 'flex' : 'none';
-    if (dataOpen && st.data) tbl.update({ opsByLp: live_.m.opsByLp, rows: st.data.rows });
-    if (st.data) draw();
-  } }, 'Pokaż dane') : null;
-  const importSheet = async () => {
-    try {
-      toast('Pobieranie z arkusza…');
-      const d = await api('getHarmData', ['fresh'], { timeoutMs: 180000 });
-      const r = opsFromSheetRows(d.rows);
-      if (!r.operations.length) { toast(r.warnings[0] || 'Brak operacji'); return; }
-      const ok = window.confirm(`Zaimportować ${r.operations.length} operacji z arkusza? Obecne operacje w bazie zostaną ZASTĄPIONE.` + (r.warnings.length ? `\n\nOstrzeżeń: ${r.warnings.length}\n` + r.warnings.slice(0, 5).join('\n') : ''));
-      if (!ok) return;
-      const x = await importOps(r.operations);
-      toast(`Zaimportowano ${x.operations} operacji`);
-    } catch (e) { toast('Błąd importu: ' + (e.code || e.message)); }
-  };
-
   async function load(force = false) {
-    if (live) return loadLive(force);
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie harmonogramu…'));
     try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force, callArgs: force ? ['fresh'] : undefined }); }
     catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
@@ -114,11 +45,9 @@ function mountHarmView(el, ctx, live) {
     const sc = st.scale;
     const HOUR = BASE.hour * sc, ROW = Math.round(BASE.row * sc), FONT = BASE.font * sc, HEAD = Math.round(BASE.head * sc);
     const SW = Math.round(BASE.startW * sc), EW = Math.round(BASE.endW * sc), TW = Math.round(BASE.stationW * sc);
-    const LEFT = dataOpen ? 0 : SW + EW + TW;   // przy otwartym panelu danych Start/Koniec są w tabeli, więc nie powielamy ich na wykresie
+    const LEFT = SW + EW + TW;
     const now = H.localNow();
-    const allowed = dataOpen ? tbl.allowed() : null;
-    const dataF = allowed ? { ...st.data, rows: st.data.rows.filter((r) => allowed.has(r.id)) } : st.data;
-    const chart = H.buildChart(dataF, st.filters, st.sorts, st.daysBack, now);
+    const chart = H.buildChart(st.data, st.filters, st.sorts, st.daysBack, now);
     const holidays = H.holidaySet(st.data.holidays);
     const n = chart.items.length;
     const chartW = Math.ceil((chart.firstDayHours + chart.totalDays * 24) * HOUR);
@@ -183,7 +112,7 @@ function mountHarmView(el, ctx, live) {
 
     const sy = body.scrollTop, sx = body.scrollLeft;
     clear(body);
-    body.append(h('div', { style: { display: 'flex', width: (LEFT + chartW) + 'px', minHeight: '100%' } }, ...(dataOpen ? [chartEl] : [left, chartEl])));
+    body.append(h('div', { style: { display: 'flex', width: (LEFT + chartW) + 'px', minHeight: '100%' } }, left, chartEl));
     body.scrollTop = sy; body.scrollLeft = sx;
     info.textContent = `Operacji: ${n}`;
     daysLabel.textContent = st.daysBack + ' dni';
@@ -201,14 +130,12 @@ function mountHarmView(el, ctx, live) {
   for (const k of ['komis', 'start', 'station']) sortBtns[k] = h('button', { class: 'btn small', onclick: () => { st.sorts = H.cycleSort(st.sorts, k); draw(); } }, k);
   const fK = h('button', { class: 'btn small', onclick: () => openFilter('komis', 'Filtr: komis', st.data.rows.map((r) => r.komis)) }, 'Filtr komis');
   const fS = h('button', { class: 'btn small', onclick: () => openFilter('station', 'Filtr: stanowisko', st.data.rows.map((r) => r.stanowisko)) }, 'Filtr stanowisko');
-  const pane = live ? h('div', { style: { display: 'none', width: '55%', flex: 'none', minWidth: 0, flexDirection: 'column' } }, tbl.el) : null;
-  const split = h('div', { style: { display: 'flex', flex: 1, minHeight: 0, gap: '6px' } }, body, ...(pane ? [pane] : []));
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' },
     h('button', { class: 'btn small', onclick: () => { if (st.daysBack > 0) { st.daysBack--; draw(); } } }, '−'), daysLabel, h('button', { class: 'btn small', onclick: () => { if (st.daysBack < 30) { st.daysBack++; draw(); } } }, '+'), h('span', { class: 'muted' }, 'dni wstecz'),
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     fK, fS, ...Object.values(sortBtns),
     h('button', { class: 'btn small', onclick: () => { st.filters = { komis: new Set(), station: new Set() }; st.sorts = H.emptySorts(); draw(); } }, 'Wyczyść'),
-    h('span', { class: 'grow' }), info, ...(live ? [modeBtn, h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), split);
+    h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
   load();
 }

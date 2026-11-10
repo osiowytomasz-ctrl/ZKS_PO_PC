@@ -74,12 +74,13 @@ function delivery(axisStart, row, end) {
 }
 
 /** Składa dane do wykresu; `now` to Date (czas lokalny przekazany jako UTC). */
-export function buildChart(data, filters, sorts, daysBack, now) {
+export function buildChart(data, filters, sorts, daysBack, now, opts = {}) {
   const axisStart = new Date(Math.floor(ms(now) / HOUR) * HOUR - Math.max(0, daysBack) * 24 * HOUR);
   const parsed = [];
   for (const row of sortRows(filterRows(data.rows || [], filters), sorts)) {
     const s = parseDate(row.start), e = parseDate(row.koniec);
     if (s && e && !(ms(e) < ms(axisStart))) parsed.push({ row, s, e });
+    else if (opts.keepAll) parsed.push({ row, s: null, e: null });   // widok klasyczny: każdy wiersz jest w tabeli, nawet bez paska
   }
   const planSums = new Map();
   for (const { row } of parsed) {
@@ -87,6 +88,7 @@ export function buildChart(data, filters, sorts, daysBack, now) {
     planSums.set(key, (planSums.get(key) || 0) + parseHours(row.godziny));
   }
   const items = parsed.map(({ row, s, e }) => {
+    if (!s) return { row, start: null, end: null, startHours: 0, durationHours: 0, endHours: 0, pct: null, delivery: [], noBar: true };
     const komis = String(row.komis).trim(), station = String(row.stanowisko).trim();
     const plan = planSums.get(komis + '||' + station) || 0;
     let pct = null;
@@ -95,7 +97,8 @@ export function buildChart(data, filters, sorts, daysBack, now) {
     return { row, start: s, end: e, startHours: Math.max(0, hoursBetween(axisStart, cs)), durationHours: Math.max(1, hoursBetween(cs, e)),
       endHours: Math.max(0, hoursBetween(axisStart, e)), pct, delivery: delivery(axisStart, row, e) };
   });
-  const maxEnd = parsed.length ? new Date(Math.max(...parsed.map((p) => ms(p.e)))) : axisStart;
+  const dated = parsed.filter((p) => p.s);
+  const maxEnd = dated.length ? new Date(Math.max(...dated.map((p) => ms(p.e)))) : axisStart;
   const totalDays = Math.max(7, Math.ceil(hoursBetween(axisStart, maxEnd) / 24) + 2);
   const nextDay = new Date(Date.UTC(axisStart.getUTCFullYear(), axisStart.getUTCMonth(), axisStart.getUTCDate() + 1));
   const lpIndex = new Map();
@@ -103,7 +106,7 @@ export function buildChart(data, filters, sorts, daysBack, now) {
   const deps = [];
   items.forEach((it, to) => {
     for (const z of [it.row.z1, it.row.z2, it.row.z3, it.row.z4].map((x) => String(x ?? '').trim()).filter(Boolean)) {
-      if (lpIndex.has(z)) { const from = lpIndex.get(z); deps.push({ from, to, x: items[from].endHours }); }
+      if (lpIndex.has(z)) { const from = lpIndex.get(z); if (!items[from].noBar && !it.noBar) deps.push({ from, to, x: items[from].endHours }); }
     }
   });
   return { axisStart, items, totalDays, firstDayHours: hoursBetween(axisStart, nextDay), deps };
