@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "vendor": "esbuild src/renderer/vendor-src/firebase-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/firebase.js"
   },
   "build": {
     "appId": "pl.zks.po.pc",
@@ -40,7 +41,9 @@
   },
   "devDependencies": {
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.2",
+    "firebase": "^13.2.0"
   },
   "author": "ZKS"
 }

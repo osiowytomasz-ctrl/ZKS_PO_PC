@@ -1,5 +1,6 @@
 import { h, field, api, toast } from '../ui.js';
 import { permissionsSummary } from '../logic/common.js';
+import { firebase } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 
 export async function mountSettings(el, ctx) {
@@ -47,6 +48,24 @@ export async function mountSettings(el, ctx) {
     if (hm.ok) out.push(`Czas czytania arkusza w Harmonogramie: ok. ${fmt(Math.max(0, hm.ms - floor))}.`);
     speed.textContent = out.join('\n');
   };
+  const fbOut = h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } });
+  const fbTest = async () => {
+    await save();
+    fbOut.className = 'muted'; fbOut.textContent = 'Łączenie z Firebase…';
+    try {
+      const t0 = performance.now();
+      const { sdk, db } = await firebase();
+      const t1 = performance.now();
+      const ref = sdk.doc(db, 'test', 'ping');
+      await sdk.setDoc(ref, { at: Date.now() });
+      const t2 = performance.now();
+      const snap = await sdk.getDoc(ref);
+      const t3 = performance.now();
+      fbOut.textContent = `Firebase działa.\nLogowanie: ${fmt(t1 - t0)}\nZapis: ${fmt(t2 - t1)}\nOdczyt: ${fmt(t3 - t2)} (dokument ${snap.exists() ? 'jest' : 'brak'})`;
+    } catch (e) {
+      fbOut.className = 'muted err'; fbOut.textContent = 'Błąd Firebase: ' + (e.code || '') + ' ' + (e.message || e);
+    }
+  };
   el.append(h('div', { class: 'panel', style: { maxWidth: '640px', margin: '20px auto' } },
     h('h2', {}, 'Połączenie z serwerem'),
     h('p', { class: 'muted' }, 'Adres i klucz są te same co w aplikacji na telefonie. Klucz jest przechowywany w pliku szyfrowanym przez system (gdy system to umożliwia) i jest wysyłany wyłącznie w treści żądania do podanego adresu.'),
@@ -56,9 +75,10 @@ export async function mountSettings(el, ctx) {
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn primary', onclick: check }, 'Zapisz i sprawdź połączenie'),
       h('button', { class: 'btn', title: 'Mierzy czas odpowiedzi serwera dla pustego wywołania, Grafiku i Harmonogramu', onclick: speedTest }, 'Test szybkości'),
+      h('button', { class: 'btn', title: 'Sprawdza logowanie i zapis/odczyt w bazie Firebase', onclick: fbTest }, 'Test Firebase'),
       h('button', { class: 'btn', onclick: async () => { await save(); await ctx.loadUser(); ctx.go('home'); } }, 'Zapisz i wróć'),
       h('button', { class: 'btn', title: 'Otwiera stronę z najnowszą wersją aplikacji (plik .exe)', onclick: () => window.zks.openExternal('https://github.com/osiowytomasz-ctrl/ZKS_PO_PC/releases/tag/latest') }, 'Aktualizuj'),
       h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną')),
-    status, speed,
+    status, speed, fbOut,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
 }
