@@ -1,6 +1,7 @@
 import { h, clear, api, apiCached, modal, toast } from '../ui.js';
 import { watchHarm, importOps } from '../harmStore.js';
 import { buildHarmData, parseGrafik, daysByKeyOf } from '../logic/harmModel.js';
+import { createTable } from './harmTable.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
@@ -21,11 +22,14 @@ function mountHarmView(el, ctx, live) {
 
   let stop = null;
   const live_ = { m: null, days: null };
+  let tableMode = false;
+  const tbl = live ? createTable() : null;
   const recompute = () => {
     if (!live_.m) return;
     if (!live_.days) { info.textContent = 'Pobieranie grafiku…'; }
     const d = buildHarmData(live_.m.opsByLp, live_.days || {}, live_.m.cfg, H.localNow().getTime());
     st.data = d;
+    if (tableMode) { tbl.update({ opsByLp: live_.m.opsByLp, result: d.result }); return; }
     if (!d.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Baza jest pusta. Użyj „Import z arkusza”.')); info.textContent = 'Operacji: 0'; return; }
     draw();
   };
@@ -57,6 +61,13 @@ function mountHarmView(el, ctx, live) {
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => loadLive(true) }, 'Ponów'))); }
   }
+  const modeBtn = live ? h('button', { class: 'btn small primary', title: 'Przełącza między wykresem a tabelą danych (edycja)', onclick: () => {
+    tableMode = !tableMode;
+    modeBtn.textContent = tableMode ? 'Pokaż wykres' : 'Edytuj dane (tabela)';
+    clear(body);
+    if (tableMode) { body.style.overflow = 'hidden'; body.style.display = 'flex'; body.append(tbl.el); } else { body.style.overflow = ''; body.style.display = ''; }
+    recompute();
+  } }, 'Edytuj dane (tabela)') : null;
   const importSheet = async () => {
     try {
       toast('Pobieranie z arkusza…');
@@ -100,6 +111,7 @@ function mountHarmView(el, ctx, live) {
   }
 
   function draw() {
+    if (tableMode) return;   // w trybie tabeli przyciski wykresu nie przerysowują widoku
     const sc = st.scale;
     const HOUR = BASE.hour * sc, ROW = Math.round(BASE.row * sc), FONT = BASE.font * sc, HEAD = Math.round(BASE.head * sc);
     const SW = Math.round(BASE.startW * sc), EW = Math.round(BASE.endW * sc), TW = Math.round(BASE.stationW * sc);
@@ -194,6 +206,6 @@ function mountHarmView(el, ctx, live) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     fK, fS, ...Object.values(sortBtns),
     h('button', { class: 'btn small', onclick: () => { st.filters = { komis: new Set(), station: new Set() }; st.sorts = H.emptySorts(); draw(); } }, 'Wyczyść'),
-    h('span', { class: 'grow' }), info, ...(live ? [h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
+    h('span', { class: 'grow' }), info, ...(live ? [modeBtn, h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza')] : []), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
   load();
 }
