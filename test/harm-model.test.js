@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
-import { idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -80,7 +80,7 @@ test('sortowanie i lista wartości kolumn z datami: rok, miesiąc, dzień, godzi
 test('poprzednicy: lista tylko bezpiecznych powiązań (bez cyklu, samej siebie, powtórzeń)', () => {
   // 1 → 2 → 3 (3 zależy od 2, 2 zależy od 1); 4 niezależna
   const ops = { 1: { preds: [] }, 2: { preds: ['1'] }, 3: { preds: ['2'] }, 4: { preds: [] }, 5: { preds: ['4', '1'] } };
-  assert.deepEqual([...dependents(ops, '2')].sort(), ['2', '3']);
+  assert.deepEqual([...blockedPredecessors(ops, '2')].sort(), ['2', '3']);
   assert.deepEqual(predecessorChoices(ops, '2', 0), ['1', '4', '5']);          // nie 2 (ona sama) ani 3 (zależy od 2)
   assert.deepEqual(predecessorChoices(ops, '1', 0), ['4']);                    // 2, 3 i 5 zależą od 1, więc odpada
   assert.match(predError(ops, '1', 0, '3'), /cykl/);
@@ -133,39 +133,47 @@ test('numery: operacja główna = liczba, suboperacja = liczba + litera; kolejno
   assert.match(validateNewOps([{ lp: '71a', komis: 'k' }], {}, pd, pn).errors[0], /wymaga istniejącej operacji głównej/);
 });
 
-test('suboperacje: czas operacji głównej = suma czasów, bez własnych zależności, po kolei, nie są poprzednikami', () => {
+test('suboperacje: czas operacji głównej = suma, po kolei od startu, czekają na swoje poprzedniki, przerwa w operacji głównej', () => {
   const c = {}; for (const st of ['1Si', '2Un']) { c[st] = buildCapacity(Array.from({ length: 40 }, (_, i) => ({ date: Date.UTC(2026, 10, 2) + i * 86400000, hours: 16 }))); }
   const D = (d, h) => Date.UTC(2026, 10, d, h);
   const ops = [
-    { lp: '10', startManual: D(2, 6), station: '1Si' },                                   // bez czasu → suma suboperacji (8 + 4 = 12)
-    { lp: '10a', hours: 8, station: '1Si', preds: ['999'] },                               // własne preds są ignorowane
-    { lp: '10b', hours: 4, station: '2Un' },
-    { lp: '11', preds: ['10b'], hours: 2, station: '1Si' },                                // zależność od suboperacji = od operacji głównej 10
+    { lp: '10', startManual: D(2, 6), station: '1Si' },                                   // bez czasu → trwa do końca ostatniej suboperacji
+    { lp: '10a', hours: 8, station: '1Si' },                                              // 6:00–14:00
+    { lp: '10b', hours: 4, station: '2Un' },                                              // po 10a: 14:00–18:00
+    { lp: '11', preds: ['10b'], hours: 2, station: '1Si' },                               // zależność od suboperacji: start = koniec 10b
     { lp: '12', startManual: D(2, 6), hours: 5, station: '1Si' }, { lp: '12a', hours: 3, station: '1Si' },   // własny czas operacji głównej ma pierwszeństwo
+    { lp: '13', startManual: D(2, 6), hours: 2, station: '1Si' },                          // 6–8
+    { lp: '14', startManual: D(2, 6), station: '1Si' }, { lp: '14a', hours: 3, station: '1Si' }, { lp: '14b', hours: 2, station: '1Si', preds: ['13'] },   // 14a 6–9, 14b czeka na 13 (8) i 14a (9)
+    { lp: '15', startManual: D(2, 6), station: '1Si' }, { lp: '15a', hours: 1, station: '1Si' }, { lp: '15b', hours: 1, station: '1Si', preds: ['16'] },
+    { lp: '16', startManual: D(2, 12), hours: 1, station: '1Si' },                         // 12–13: 15b zaczyna dopiero o 13 → przerwa w 15
   ];
   const r = computeSchedule(ops, c);
-  assert.equal(r.get('10').end, D(2, 18));                                                // 6:00 + 12 h
-  assert.equal(r.get('10a').start, D(2, 6)); assert.equal(r.get('10a').end, D(2, 14));     // pierwsza suboperacja od startu operacji głównej
-  assert.equal(r.get('10b').start, D(2, 14)); assert.equal(r.get('10b').end, D(2, 18));    // kolejna po poprzedniej
+  assert.equal(r.get('10').start, D(2, 6)); assert.equal(r.get('10').end, D(2, 18));       // czas = 8 + 4, koniec = koniec ostatniej suboperacji
+  assert.equal(r.get('10a').end, D(2, 14)); assert.equal(r.get('10b').start, D(2, 14)); assert.equal(r.get('10b').end, D(2, 18));
   assert.equal(r.get('11').start, D(2, 18));
   assert.equal(r.get('12').end, D(2, 11));                                                 // 5 h, nie 3
+  assert.equal(r.get('14b').start, D(2, 9)); assert.equal(r.get('14').end, D(2, 11));
+  assert.equal(r.get('15a').end, D(2, 7)); assert.equal(r.get('15b').start, D(2, 13)); assert.equal(r.get('15').end, D(2, 14));   // przerwa 7–13
 });
 
-test('suboperacje: poprzednik tylko operacja główna, chronologia wierszy i zwijanie', () => {
-  const ops = { 10: { preds: [] }, '10a': { hours: 8, komis: '' }, '10b': { hours: 4 }, 20: { preds: [] } };
-  assert.match(predError(ops, '20', 0, '10a'), /nie może być poprzednikiem.*10/);
-  assert.match(predError(ops, '10a', 0, '20'), /nie ma powiązań/);
-  assert.deepEqual(predecessorChoices(ops, '20', 0), ['10']);
-  const d = buildHarmData({ 10: { komis: 'K1', station: '1Si', startManual: Date.UTC(2026, 10, 2, 6) }, '10a': { hours: 8 }, '10b': { hours: 4, element: 'x' }, 20: { komis: 'K2', station: '2Un' } }, {}, null, Date.UTC(2026, 10, 2));
-  // suboperacje nie są sztywno pod operacją główną: układają się wg stanowiska i startu, jak pozostałe
-  assert.equal(d.rows.length, 4);
-  const r10 = d.rows.find((r) => r.id === '10'), r10a = d.rows.find((r) => r.id === '10a');
-  assert.equal(r10.hoursShown, 'Σ12'); assert.equal(r10.subCount, 2); assert.equal(r10a.sub, true); assert.equal(r10a.komis, 'K1');   // dziedziczy komis i stanowisko
-  assert.equal(r10a.station, '1Si');
-  assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id).sort(), ['10', '20']);                         // zwinięcie chowa wszystkie suboperacje tej operacji
-  assert.equal(arrangeRows(d.rows, new Set()).length, 4);
-  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set()).map((r) => r.id), ['10a']);              // suboperacja widoczna także bez operacji głównej (np. przy filtrze)
-  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set(['10'])), []);
+test('suboperacje: dozwolone powiązania między różnymi operacjami, błąd dla własnej matki i własnych suboperacji', () => {
+  const ops = { 3000: { preds: [] }, '3000a': { hours: 2 }, 3001: { preds: [] }, '3001a': { hours: 1 } };
+  assert.equal(predError(ops, '3000', 0, '3001a'), null);                       // 3000 | 3001a – ok
+  assert.equal(predError(ops, '3000a', 0, '3001'), null);                       // 3000a | 3001 – ok
+  assert.equal(predError(ops, '3000a', 0, '3001a'), null);                      // suboperacja zależna od suboperacji innej operacji
+  assert.match(predError(ops, '3000', 0, '3000a'), /suboperacją tej operacji/);  // 3000 | 3000a – błąd
+  assert.match(predError(ops, '3000a', 0, '3000'), /operacją główną tej suboperacji/);   // 3000a | 3000 – błąd
+  assert.deepEqual(predecessorChoices(ops, '3000', 0), ['3001', '3001a']);
+  assert.deepEqual(predecessorChoices(ops, '3000a', 0), ['3001', '3001a']);
+  // cykl przez operację główną: 3001 zależy od 3000 (czyli od końca 3000a), więc 3000a nie może zależeć od 3001
+  const o2 = { ...ops, 3001: { preds: ['3000'] } };
+  assert.match(predError(o2, '3000a', 0, '3001'), /cykl/); assert.match(predError(o2, '3000a', 0, '3001a'), /cykl/);
+  assert.equal(predError(o2, '3001a', 0, '3000a'), null);
+  assert.match(predError(o2, '3000', 0, '3001a'), /cykl/);                      // 3001a (sub 3001, start = start 3001 po końcu 3000)
+  // silnik zgłasza cykl
+  const cap = { '1Si': buildCapacity(Array.from({ length: 5 }, (_, i) => ({ date: Date.UTC(2026, 10, 2) + i * 86400000, hours: 16 }))) };
+  const res = computeSchedule([{ lp: '3000', startManual: Date.UTC(2026, 10, 2, 6), station: '1Si' }, { lp: '3000a', hours: 2, station: '1Si', preds: ['3001'] }, { lp: '3001', preds: ['3000'], hours: 1, station: '1Si' }], cap);
+  assert.equal(res.get('3000a').state, 'cycle'); assert.equal(res.get('3001').state, 'cycle');
 });
 
 test('suboperacje mieszają się z innymi operacjami według chronologii (stanowisko, start)', () => {

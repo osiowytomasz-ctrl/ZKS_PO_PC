@@ -102,66 +102,65 @@ export function computeEnd(startMs, hours, cap) {
 export function computeSchedule(ops, capacity) {
   const byLp = new Map();
   for (const op of ops) if (!byLp.has(String(op.lp))) byLp.set(String(op.lp), op);
-  const result = new Map();
-  const visiting = new Set();
 
-  // Suboperacje: numer główny + litery (np. 3000a). Należą do operacji głównej (3000), nie szukają zależności, wykonują się po kolei (a, b, …)
-  // od startu operacji głównej, a ich czasy sumują się na operację główną, gdy ta nie ma własnego czasu.
+  // Suboperacje: numer główny + litery (np. 3000a). Wykonują się po kolei (a, b, …) od startu operacji głównej (albo później, jeśli czekają na swoje
+  // poprzedniki), mają własny czas. Operacja główna bez własnego czasu trwa od swojego startu do końca ostatniej suboperacji (czas = suma, możliwe przerwy).
   const isSub = (lp) => { const p = subParent(lp); return p != null && byLp.has(p); };
   const children = new Map();
   for (const op of byLp.values()) if (isSub(op.lp)) { const p = subParent(op.lp); if (!children.has(p)) children.set(p, []); children.get(p).push(op); }
   for (const list of children.values()) list.sort((x, y) => String(x.lp).localeCompare(String(y.lp), 'pl', { numeric: true, sensitivity: 'base' }));
-  const effHours = (op) => {
-    const kids = children.get(String(op.lp));
-    if (kids && !(op.hours > 0)) { const sum = kids.reduce((t, k) => t + (k.hours > 0 ? k.hours : 0), 0); if (sum > 0) return sum; }
-    return op.hours;
-  };
+  const chopped = (op) => children.has(String(op.lp)) && !(op.hours > 0);     // operacja główna złożona z suboperacji (bez własnego czasu)
 
-  function resolve(op) {
-    const key = String(op.lp);
-    if (result.has(key) && byLp.get(key) === op) return result.get(key);
-    if (visiting.has(key)) return { start: null, end: null, state: 'cycle' };
+  // Start (S) i koniec (E) liczone osobno, żeby suboperacje mogły czekać na start operacji głównej, a jej koniec zależał od suboperacji.
+  const sMemo = new Map(), eMemo = new Map(), visiting = new Set();
+  const CYC = { v: null, cyc: true };
+  const memo = (map, key, fn) => {
+    if (map.has(key)) return map.get(key);
+    if (visiting.has(key)) return CYC;
     visiting.add(key);
-    let start = null, state = 'ok';
-    const sub = isSub(key);
-    if (sub) {
-      const parent = byLp.get(subParent(key));
-      const sibs = children.get(parent.lp), idx = sibs.indexOf(op);
-      if (op.startManual != null) start = op.startManual;
-      else if (idx > 0) start = resolve(sibs[idx - 1]).end;
-      else start = resolve(parent).start;
-    } else if (op.startManual != null) {
-      start = op.startManual;
-    } else {
-      const preds = (op.preds || []).map((p) => String(p ?? '').trim()).filter(Boolean).map((p) => (isSub(p) ? subParent(p) : p));   // zależnością jest operacja główna
-      if (preds.length) {
-        const ends = [];
-        let allResolved = true, cyc = false;
-        for (const p of preds) {
-          const po = byLp.get(p);
-          if (!po) { allResolved = false; continue; }
-          const r = resolve(po);
-          if (r.state === 'cycle') cyc = true;
-          if (r.end == null) allResolved = false; else ends.push(r.end);
-        }
-        if (cyc) state = 'cycle';
-        else if (allResolved && ends.length) start = Math.max(...ends);
-      }
-    }
-    let end = null;
-    if (state !== 'cycle') {
-      const hours = sub ? op.hours : effHours(op);
-      const station = sub ? (op.station || byLp.get(subParent(key)).station) : op.station;
-      if (op.endManual != null) end = op.endManual;
-      else if (start != null && hours != null) end = computeEnd(start, hours, capacity && capacity[station]);
-      state = start == null ? 'no-start' : end == null ? 'no-end' : 'ok';
-    }
+    const r = fn();
     visiting.delete(key);
-    const res = { start: state === 'cycle' ? null : start, end: state === 'cycle' ? null : end, state };
-    if (byLp.get(key) === op) result.set(key, res);
-    return res;
+    map.set(key, r);
+    return r;
+  };
+  const S = (op) => memo(sMemo, 's:' + op.lp, () => {
+    if (op.startManual != null) return { v: op.startManual, cyc: false };
+    const ends = []; let all = true, cyc = false;
+    const take = (r) => { if (r.cyc) cyc = true; if (r.v == null) all = false; else ends.push(r.v); };
+    if (isSub(op.lp)) {
+      const parent = byLp.get(subParent(op.lp)), sibs = children.get(parent.lp), idx = sibs.indexOf(op);
+      take(idx > 0 ? E(sibs[idx - 1]) : S(parent));
+    }
+    for (const p of (op.preds || []).map((x) => String(x ?? '').trim()).filter(Boolean)) {
+      const po = byLp.get(p);
+      if (!po) { all = false; continue; }
+      take(E(po));
+    }
+    if (cyc) return CYC;
+    return { v: all && ends.length ? Math.max(...ends) : null, cyc: false };
+  });
+  const E = (op) => memo(eMemo, 'e:' + op.lp, () => {
+    if (op.endManual != null) return { v: op.endManual, cyc: false };
+    const s = S(op);
+    if (s.cyc) return CYC;
+    if (chopped(op)) {
+      let all = true, cyc = false, max = null;
+      for (const k of children.get(String(op.lp))) { const r = E(k); if (r.cyc) cyc = true; if (r.v == null) all = false; else max = max == null ? r.v : Math.max(max, r.v); }
+      if (cyc) return CYC;
+      return { v: all ? max : null, cyc: false };
+    }
+    const sub = isSub(op.lp);
+    const station = sub ? (op.station || byLp.get(subParent(op.lp)).station) : op.station;
+    if (s.v == null || op.hours == null) return { v: null, cyc: false };
+    return { v: computeEnd(s.v, op.hours, capacity && capacity[station]), cyc: false };
+  });
+
+  const result = new Map();
+  for (const op of byLp.values()) {
+    const s = S(op), e = E(op);
+    if (s.cyc || e.cyc) { result.set(String(op.lp), { start: null, end: null, state: 'cycle' }); continue; }
+    result.set(String(op.lp), { start: s.v, end: e.v, state: s.v == null ? 'no-start' : e.v == null ? 'no-end' : 'ok' });
   }
-  for (const op of ops) { const r = resolve(op); if (byLp.get(String(op.lp)) === op) result.set(String(op.lp), r); }
   return result;
 }
 

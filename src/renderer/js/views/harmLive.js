@@ -275,7 +275,6 @@ export function mountHarmLive(el) {
         if (!col.ro) cell.addEventListener('click', (ev) => {
           if (col.key === 'lp' && r.subCount && ev.offsetX < 20 * st.scale) { toggleCollapse(r.id); return; }
           if (col.pred !== undefined) {
-            if (r.sub) { toast('Suboperacja nie ma powiązań: zależności ustawia się w jej operacji głównej'); return; }
             predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp));
             return;
           }
@@ -287,12 +286,24 @@ export function mountHarmLive(el) {
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
       g.leftRows.append(line);
-      if (it.noBar) continue;
-      const left0 = it.startHours * HOUR, w = Math.max(2, it.durationHours * HOUR);
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
-      g.dyn.append(h('div', { title: [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`,
-        style: { position: 'absolute', zIndex: 1, left: left0 + 'px', top: i * ROW + 2 + 'px', width: w + 'px', height: ROW - 4 + 'px', background: bg, border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } },
-        h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - '))));
+      const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
+      const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
+      const hoursAt = (ms) => (ms - chart.axisStart.getTime()) / 3600000;
+      // suboperacja: czarna ramka, w środku tylko 2-pikselowa ramka w kolorze stanowiska (bez wypełnienia); operacja główna: pełny pasek
+      // operacja główna złożona z suboperacji: pasek poszatkowany na odcinki suboperacji, przerwy między nimi to przesunięcia suboperacji
+      const bar = (left, width, withLabel) => {
+        const box = h('div', { title: tip, style: { position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
+        if (r.sub) box.append(h('div', { style: { position: 'absolute', inset: 0, border: '2px solid ' + bg, boxSizing: 'border-box', pointerEvents: 'none' } }));
+        if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
+        g.dyn.append(box);
+      };
+      if (r.segs && r.segs.length) {
+        r.segs.forEach(([s0, e0], k) => { const l = Math.max(0, hoursAt(s0)) * HOUR, w = Math.max(2, (hoursAt(e0) - Math.max(0, hoursAt(s0))) * HOUR); if (hoursAt(e0) > 0) bar(l, w, k === 0); });
+      } else if (!it.noBar) {
+        bar(it.startHours * HOUR, Math.max(2, it.durationHours * HOUR), true);
+      }
+      if (it.noBar) continue;
       for (const sg of it.delivery) g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 1, pointerEvents: 'none', left: sg.left * HOUR + 'px', top: i * ROW + ROW - Math.max(3, ROW * 0.14) + 'px', width: Math.max(2, sg.width * HOUR) + 'px', height: Math.max(3, ROW * 0.14) + 'px', background: sg.kind === 'green' ? '#00b050' : '#f00' } }));
     }
     for (const d of chart.deps) {

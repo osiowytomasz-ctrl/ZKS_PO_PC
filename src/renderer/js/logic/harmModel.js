@@ -160,6 +160,12 @@ export function arrangeRows(rows, collapsed) {
   return rows.filter((r) => !(r.sub && collapsed.has(r.parent)));
 }
 
+/** Odcinki paska operacji głównej złożonej z suboperacji (bez własnego czasu): [[start, koniec], …] w ms; puste, gdy pasek ma być ciągły. */
+function segsOf(o, kidIds, opsByLp, result) {
+  if (!kidIds.length || o.hours > 0) return [];
+  return kidIds.map((k) => result.get(k)).filter((r) => r && r.start != null && r.end != null).map((r) => [r.start, r.end]).sort((a, b) => a[0] - b[0]);
+}
+
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const stations = stationList(cfg);
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
@@ -188,10 +194,10 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
     rows.push({
       id: o.lp, sub: !!par, parent: par, subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
       station: o.station || (po && po.station) || '', client: o.client || (po && po.client) || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
-      lp: isSyntheticId(o.lp) ? '' : o.lp, z1: par ? '' : (o.preds?.[0] || ''), z2: par ? '' : (o.preds?.[1] || ''), z3: par ? '' : (o.preds?.[2] || ''), z4: par ? '' : (o.preds?.[3] || ''),
+      lp: isSyntheticId(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
       komis: o.komis || (po && po.komis) || '', element: o.element || '', stanowisko: o.station || (po && po.station) || '', godziny: hoursShown,
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),
-      zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
+      segs: segsOf(o, myKids, opsByLp, result), zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
   }
   return { rows, holidays: [], rapData: {}, result };
@@ -201,32 +207,53 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
 // Powiązania (poprzednicy) i dodawanie operacji: reguły bezpieczeństwa, żeby nie powstał cykl ani duplikat
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Operacje zależne (bezpośrednio lub pośrednio) od [id], razem z nim samym: nie mogą być jego poprzednikami (powstałby cykl). */
-export function dependents(opsByLp, id) {
-  const children = new Map();
-  for (const [lp, op] of Object.entries(opsByLp)) for (const p of op.preds || []) { if (!children.has(p)) children.set(p, []); children.get(p).push(lp); }
-  const seen = new Set([String(id)]), stack = [String(id)];
-  while (stack.length) for (const c of children.get(stack.pop()) || []) if (!seen.has(c)) { seen.add(c); stack.push(c); }
-  return seen;
+/**
+ * Operacje, których KONIEC zależy (bezpośrednio lub pośrednio) od STARTU operacji [id]. Taka operacja nie może być jej poprzednikiem (powstałby cykl).
+ * Graf zależności (jak w silniku): start suboperacji zależy od startu jej operacji głównej, od końca poprzedniej suboperacji i od końców jej poprzedników;
+ * start operacji głównej od końców poprzedników; koniec operacji głównej złożonej z suboperacji od końców jej suboperacji; koniec zwykły od własnego startu.
+ */
+export function blockedPredecessors(opsByLp, id) {
+  const kids = new Map();
+  for (const lp of Object.keys(opsByLp)) { const p = subParent(lp); if (p && opsByLp[p]) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
+  for (const l of kids.values()) l.sort(lpCompare);
+  const deps = new Map();                         // węzeł → węzły, od których zależy
+  const add = (n, d) => { if (!deps.has(n)) deps.set(n, []); deps.get(n).push(d); };
+  for (const [lp, op] of Object.entries(opsByLp)) {
+    for (const p of op.preds || []) if (opsByLp[p]) add('s:' + lp, 'e:' + p);
+    const par = subParent(lp);
+    if (par && opsByLp[par]) { add('s:' + lp, 's:' + par); const sibs = kids.get(par), i = sibs.indexOf(lp); if (i > 0) add('s:' + lp, 'e:' + sibs[i - 1]); }
+    add('e:' + lp, 's:' + lp);
+    if (kids.has(lp) && !(op.hours > 0)) for (const k of kids.get(lp)) add('e:' + lp, 'e:' + k);
+  }
+  const rev = new Map();
+  for (const [n, ds] of deps) for (const d of ds) { if (!rev.has(d)) rev.set(d, []); rev.get(d).push(n); }
+  const seen = new Set(['s:' + id]), stack = ['s:' + id];
+  while (stack.length) for (const n of rev.get(stack.pop()) || []) if (!seen.has(n)) { seen.add(n); stack.push(n); }
+  return new Set(Object.keys(opsByLp).filter((lp) => seen.has('e:' + lp)));
 }
 
-/** Dlaczego operacja [pred] nie może być poprzednikiem [id] w pozycji [slot] (null = można). */
+/**
+ * Dlaczego operacja [pred] nie może być poprzednikiem [id] w pozycji [slot] (null = można). Operacja główna może zależeć od suboperacji innej
+ * operacji, a suboperacja od innej operacji; nie może zależeć od swojej operacji głównej ani operacja główna od własnych suboperacji (cykl).
+ */
 export function predError(opsByLp, id, slot, pred) {
   const p = String(pred ?? '').trim();
   if (!p) return null;                                                   // puste = brak powiązania
   if (!opsByLp[p]) return `Operacja ${p} nie istnieje`;
-  if (isSubId(id)) return 'Suboperacja nie ma powiązań (należy do swojej operacji głównej)';
-  if (isSubId(p)) return `Suboperacja ${p} nie może być poprzednikiem; wybierz operację główną ${subParent(p)}`;
   if (p === String(id)) return 'Operacja nie może być swoim poprzednikiem';
-  if (dependents(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
+  if (subParent(id) === p) return `Operacja ${p} jest operacją główną tej suboperacji; powiązanie jest zbędne i tworzy cykl`;
+  if (subParent(p) === String(id)) return `Operacja ${p} jest suboperacją tej operacji; powiązanie tworzy cykl`;
+  if (blockedPredecessors(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
   const others = (opsByLp[id]?.preds || []).filter((_, i) => i !== slot);
   if (others.includes(p)) return `Operacja ${p} jest już wpisana jako inny poprzednik`;
   return null;
 }
 
-/** Operacje, które można wybrać jako poprzednika w pozycji [slot]: bez samej siebie, zależnych od niej i już użytych. Posortowane po numerze. */
+/** Operacje, które można wybrać jako poprzednika w pozycji [slot] (też suboperacje innych operacji). Posortowane po numerze. */
 export function predecessorChoices(opsByLp, id, slot) {
-  return Object.keys(opsByLp).filter((lp) => predError(opsByLp, id, slot, lp) === null).sort(lpCompare);
+  const blocked = blockedPredecessors(opsByLp, id);
+  const others = new Set((opsByLp[id]?.preds || []).filter((_, i) => i !== slot));
+  return Object.keys(opsByLp).filter((lp) => lp !== String(id) && !blocked.has(lp) && !others.has(lp) && subParent(id) !== lp && subParent(lp) !== String(id)).sort(lpCompare);
 }
 
 /**
