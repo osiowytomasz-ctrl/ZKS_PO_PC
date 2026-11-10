@@ -67,6 +67,17 @@ export async function saveOps(entries) {
   await b.commit();
 }
 
+/** Zmiana numeru operacji (plan z renamePlan): nowy klucz, usunięcie starego i poprawa poprzedników w operacjach, które się do niego odwołują – jednym zapisem wsadowym. */
+export async function renameOp(plan) {
+  const { sdk, db } = await firebase();
+  const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
+  const b = sdk.writeBatch(db);
+  b.set(ref(plan.newId), { ops: { [plan.newId]: clean(plan.op) } }, { merge: true });
+  b.update(ref(plan.oldId), { [`ops.${plan.oldId}`]: sdk.deleteField() });
+  for (const [lp, preds] of plan.referrers) b.update(ref(lp), { [`ops.${lp}.preds`]: preds });
+  await b.commit();
+}
+
 export async function deleteOp(lp) {
   const { sdk, db } = await firebase();
   await sdk.updateDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { idError, renamePlan, lpCompare, isSyntheticId, predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -9,7 +9,7 @@ import { importOperations, opsFromSheetRows, parseDelimited } from '../src/rende
 const grafApi = (text) => { const rows = parseDelimited(text).filter((r) => r.length > 8); return { stations: rows[0].slice(1, 7), header: rows[0].slice(7), rows: rows.slice(1).map((r) => r.slice(7)).filter((r) => r[0]) }; };
 
 test('chunkId: operacje po 50 numerów, nienumeryczne do cx', () => {
-  assert.equal(chunkId('0'), 'c0000'); assert.equal(chunkId('49'), 'c0000'); assert.equal(chunkId('50'), 'c0001'); assert.equal(chunkId('2000'), 'c0040'); assert.equal(chunkId('A1'), 'cx');
+  assert.equal(chunkId('0'), 'c0000'); assert.equal(chunkId('49'), 'c0000'); assert.equal(chunkId('50'), 'c0001'); assert.equal(chunkId('2000'), 'c0040'); assert.match(chunkId('A1'), /^x\d\d$/);
 });
 
 test('grafik z API → dni; harmonogram liczy koniec z kodów', () => {
@@ -101,8 +101,27 @@ test('nowe operacje: tabela, puste wiersze pomijane, duplikaty numerów zablokow
   assert.deepEqual(ok.errors, []); assert.equal(ok.ops.length, 2); assert.equal(ok.ops[0][1].wysylka, 1);
   assert.match(validateNewOps([{ lp: '1', komis: 'x' }], { 1: {} }, pd, pn).errors[0], /już istnieje/);                 // duplikat z bazą
   assert.match(validateNewOps([{ lp: '5', komis: 'x' }, { lp: '5', komis: 'y' }], {}, pd, pn).errors[0], /powtórzony/); // duplikat w tabeli
-  assert.match(validateNewOps([{ lp: 'a', komis: 'x' }], {}, pd, pn).errors[0], /liczbą/);
+  assert.match(validateNewOps([{ lp: 'a b', komis: 'x' }], {}, pd, pn).errors[0], /litery/);
   assert.match(validateNewOps([{ lp: '5', komis: 'x', hours: 'zz' }], {}, pd, pn).errors[0], /czas/);
   assert.match(validateNewOps([{ lp: '5', komis: 'x', dostawa: 'jutro' }], {}, pd, pn).errors[0], /daty/);
   assert.match(validateNewOps([{ lp: '5' }], {}, pd, pn).errors[0], /przynajmniej jedną/);
+});
+
+test('numery operacji z literami: format, kolejność, dokumenty, zmiana numeru z poprawą powiązań', () => {
+  assert.equal(idError('A12', {}), null); assert.equal(idError('Śl-3', {}), null); assert.equal(idError('12', {}), null);
+  assert.match(idError('', {}), /pusty/); assert.match(idError('a b', {}), /litery, cyfry/); assert.match(idError('a.b', {}), /litery, cyfry/);
+  assert.match(idError('s12', {}), /zarezerwowane/); assert.match(idError('A1', { A1: {} }), /już istnieje/);
+  assert.equal(idError('A1', { A1: {} }, { ignore: 'A1' }), null);
+  assert.deepEqual(['b2', '10', 'a10', '9', 's5', 'a9', 'A1'].sort(lpCompare), ['9', '10', 'A1', 'a9', 'a10', 'b2', 's5']);
+  assert.equal(isSyntheticId('s40'), true); assert.equal(isSyntheticId('S40'), false);
+  assert.match(chunkId('A12'), /^x\d\d$/); assert.equal(chunkId('A12'), chunkId('A12')); assert.equal(chunkId('49'), 'c0000');
+  const ops = { 1: { preds: [], element: 'a' }, 2: { preds: ['1'] }, 3: { preds: ['2', '1'] }, X: { preds: [] } };
+  const plan = renamePlan(ops, '1', 'A-1');
+  assert.equal(plan.newId, 'A-1'); assert.deepEqual(plan.referrers.sort(), [['2', ['A-1']], ['3', ['2', 'A-1']]]);
+  assert.match(renamePlan(ops, '1', '2').error, /już istnieje/); assert.match(renamePlan(ops, '1', 'x y').error, /litery/);
+  assert.equal(renamePlan(ops, '1', '1').same, true); assert.match(renamePlan(ops, '99', 'Q').error, /nie istnieje/);
+  // letters w dodawaniu operacji i w poprzednikach
+  const pd = () => null, pn = (t) => Number(t);
+  assert.equal(validateNewOps([{ lp: 'A7', komis: 'k' }], {}, pd, pn).ops[0][0], 'A7');
+  assert.match(validateNewOps([{ lp: 'a b', komis: 'k' }], {}, pd, pn).errors[0], /litery/);
 });

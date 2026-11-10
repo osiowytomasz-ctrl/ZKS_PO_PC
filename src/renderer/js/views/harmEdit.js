@@ -2,12 +2,12 @@
 // Kolumny liczone przez program (I, M, S) są tylko do odczytu.
 import { h, clear, modal, confirmBox, toast } from '../ui.js';
 import { parseDateTime, parseNumber } from '../logic/harmImport.js';
-import { updateOp, saveOps, deleteOp } from '../harmStore.js';
-import { predError, predecessorChoices, validateNewOps } from '../logic/harmModel.js';
+import { updateOp, saveOps, deleteOp, renameOp } from '../harmStore.js';
+import { predError, predecessorChoices, validateNewOps, renamePlan, isSyntheticId, lpCompare, idError } from '../logic/harmModel.js';
 
 // group: 'z' = zależności (ukrywane razem); calc = liczone przez program; letter = kolumna w pliku
 export const COLS = [
-  { key: 'lp', letter: 'A', title: 'lp.', w: 52, ro: true, isNumberAware: true },
+  { key: 'lp', letter: 'A', title: 'lp.', w: 64, text: true, isNumberAware: true },
   { key: 'z1', letter: 'B', title: 'Z1', w: 48, group: 'z', pred: 0 }, { key: 'z2', letter: 'C', title: 'Z2', w: 48, group: 'z', pred: 1 },
   { key: 'z3', letter: 'D', title: 'Z3', w: 48, group: 'z', pred: 2 }, { key: 'z4', letter: 'E', title: 'Z4', w: 48, group: 'z', pred: 3 },
   { key: 'client', letter: 'F', title: 'Klient', w: 130, text: true },
@@ -24,11 +24,18 @@ export const COLS = [
   { key: 'dostawa', letter: 'X', title: 'Dostawa', w: 116, date: true, isDate: true },
   { key: 'station', letter: 'AB', title: 'Stan.', w: 34, text: true },
 ];
-export const isSynthetic = (id) => /^s\d+$/.test(id);
+export const isSynthetic = isSyntheticId;
 
 /** Zapis jednej komórki (dane twarde). Zwraca true, gdy zapisano albo nic się nie zmieniło. */
 export async function saveCell(opsByLp, id, col, raw) {
   let patch;
+  if (col.key === 'lp') {            // zmiana numeru operacji: przenosi operację pod nowy numer i poprawia powiązania
+    const plan = renamePlan(opsByLp, id, raw.trim());
+    if (plan.error) { toast(plan.error); return false; }
+    if (plan.same) return true;
+    try { await renameOp(plan); toast(`Numer ${plan.oldId} zmieniony na ${plan.newId}` + (plan.referrers.length ? ` (poprawiono powiązania: ${plan.referrers.length})` : '')); return true; }
+    catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); return false; }
+  }
   if (col.pred !== undefined) {
     const err = predError(opsByLp, id, col.pred, raw);
     if (err) { toast(err); return false; }
@@ -103,12 +110,12 @@ const ADD_ROWS = 10;
 
 /** Dodawanie operacji: tabela na dziesięć wierszy (kolumny jak w danych twardych). Puste wiersze są pomijane, numery nie mogą się powtarzać. */
 export function addDialog(opsByLp, stations, onSaved) {
-  let n = 1; for (const k of Object.keys(opsByLp)) if (/^\d+$/.test(k)) n = Math.max(n, Number(k) + 1);
+  let n = 1; for (const k of Object.keys(opsByLp)) if (/^\d+$/.test(k)) n = Math.max(n, Number(k) + 1);   // kolejne wolne numery; można wpisać też numery z literami
   const rows = Array.from({ length: ADD_ROWS }, (_, i) => ({ lp: String(n + i), client: '', komis: '', element: '', station: '', hours: '', wysylka: '', dostawa: '' }));
   const lpInputs = [];
   const markDupes = () => {
     const count = new Map(); for (const r of rows) count.set(r.lp.trim(), (count.get(r.lp.trim()) || 0) + 1);
-    rows.forEach((r, i) => { const bad = opsByLp[r.lp.trim()] || count.get(r.lp.trim()) > 1; lpInputs[i].style.background = bad ? '#ffd6d6' : '#fff'; lpInputs[i].title = bad ? 'Taki numer już istnieje' : ''; });
+    rows.forEach((r, i) => { const e = r.lp.trim() ? idError(r.lp.trim(), opsByLp) : null; const bad = e || count.get(r.lp.trim()) > 1; lpInputs[i].style.background = bad ? '#ffd6d6' : '#fff'; lpInputs[i].title = bad ? (e || 'Numer powtórzony w tabeli') : ''; });
   };
   const head = h('tr', {}, ...ADD_COLS.map((c) => h('th', { style: { padding: '3px 4px', background: '#eee', border: '1px solid #999', fontSize: '12px', textAlign: 'left' } }, c.title)));
   const body = rows.map((r, i) => h('tr', {}, ...ADD_COLS.map((c) => {

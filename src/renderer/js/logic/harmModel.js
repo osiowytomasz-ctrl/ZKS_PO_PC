@@ -8,11 +8,51 @@ import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, comp
 export const HORIZON_DAYS = 417;   // komórka S12 arkusza: operacje startujące dalej niż tyle dni od dziś trafiają za stanowiska
 
 export const CHUNK = 50;
+/** Numer operacji (lp.) może mieć litery, cyfry, „_” i „-” (1–20 znaków). Numery „s<cyfry>” są techniczne (operacje bez numeru w arkuszu). */
+export const ID_PATTERN = /^[\p{L}\p{N}_-]{1,20}$/u;
+export const isSyntheticId = (id) => /^s\d+$/.test(String(id));
+
+/** Porządek numerów: liczby rosnąco, potem numery z literami (naturalnie, bez wielkości liter), na końcu techniczne „s…”. */
+export function lpCompare(a, b) {
+  a = String(a); b = String(b);
+  const rank = (x) => (/^\d+$/.test(x) ? 0 : isSyntheticId(x) ? 2 : 1);
+  const ra = rank(a), rb = rank(b);
+  if (ra !== rb) return ra - rb;
+  if (ra === 0) return Number(a) - Number(b);
+  return a.localeCompare(b, 'pl', { numeric: true, sensitivity: 'base' });
+}
+
+/** Powód, dla którego [id] nie nadaje się na nowy numer operacji (null = można). [existing] to obiekt operacji (klucze = numery). */
+export function idError(id, existing, { ignore } = {}) {
+  const t = String(id ?? '').trim();
+  if (!t) return 'Numer operacji nie może być pusty';
+  if (!ID_PATTERN.test(t)) return 'Numer operacji: litery, cyfry, „_” lub „-” (do 20 znaków, bez spacji i kropek)';
+  if (isSyntheticId(t)) return 'Numery „s” + cyfry są zarezerwowane dla operacji bez numeru';
+  if (t !== ignore && existing[t]) return `Operacja o numerze ${t} już istnieje`;
+  return null;
+}
+
+/** Zmiana numeru: nowy klucz, usunięcie starego i poprawienie poprzedników we wszystkich operacjach, które się do niego odwołują. */
+export function renamePlan(opsByLp, oldId, newId) {
+  const err = idError(newId, opsByLp, { ignore: oldId });
+  if (err) return { error: err };
+  if (!opsByLp[oldId]) return { error: `Operacja ${oldId} nie istnieje` };
+  const neu = String(newId).trim();
+  if (neu === oldId) return { error: null, same: true };
+  const referrers = [];
+  for (const [lp, op] of Object.entries(opsByLp)) if ((op.preds || []).includes(oldId)) referrers.push([lp, op.preds.map((p) => (p === oldId ? neu : p))]);
+  return { error: null, oldId, newId: neu, op: opsByLp[oldId], referrers };
+}
+
+const hashLp = (t) => { let h = 7; for (const ch of t) h = (h * 31 + ch.codePointAt(0)) % 1000003; return h; };
+
+/** Dokument z operacjami: numery po 50 (c0000…), techniczne „s…” osobno, numery z literami rozproszone po 20 dokumentach (x00…x19). */
 export const chunkId = (lp) => {
   const t = String(lp);
   if (/^\d+$/.test(t)) return 'c' + String(Math.floor(Number(t) / CHUNK)).padStart(4, '0');
-  const m = /^s(\d+)$/.exec(t);          // numer techniczny operacji bez numeru w arkuszu: s<wiersz>
-  return m ? 's' + String(Math.floor(Number(m[1]) / CHUNK)).padStart(4, '0') : 'cx';
+  const m = /^s(\d+)$/.exec(t);
+  if (m) return 's' + String(Math.floor(Number(m[1]) / CHUNK)).padStart(4, '0');
+  return 'x' + String(hashLp(t) % 20).padStart(2, '0');
 };
 
 const p2 = (n) => String(n).padStart(2, '0');
@@ -81,7 +121,7 @@ export function statKey(o, r, key) {
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const stations = stationList(cfg);
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
-  const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => Number(a.lp) - Number(b.lp) || String(a.lp).localeCompare(b.lp));
+  const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => lpCompare(a.lp, b.lp));
   const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
   const capacity = capacityFrom(daysByKey, names, new Set(stations.filter((x) => x.sum).map((x) => x.name)));
   const result = computeSchedule(list, capacity);
@@ -96,7 +136,7 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
     const sl = look[o.station] || {};
     rows.push({
       id: o.lp, hours: o.hours == null ? '' : String(o.hours), station: o.station || '', client: o.client || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
-      lp: /^s\d+$/.test(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
+      lp: isSyntheticId(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
       komis: o.komis || '', element: o.element || '', stanowisko: o.station || '', godziny: o.hours == null ? '' : String(o.hours),
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),
       zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
@@ -132,8 +172,7 @@ export function predError(opsByLp, id, slot, pred) {
 
 /** Operacje, które można wybrać jako poprzednika w pozycji [slot]: bez samej siebie, zależnych od niej i już użytych. Posortowane po numerze. */
 export function predecessorChoices(opsByLp, id, slot) {
-  return Object.keys(opsByLp).filter((lp) => predError(opsByLp, id, slot, lp) === null)
-    .sort((a, b) => (Number(a.replace(/^s/, '')) + (a[0] === 's' ? 1e9 : 0)) - (Number(b.replace(/^s/, '')) + (b[0] === 's' ? 1e9 : 0)));
+  return Object.keys(opsByLp).filter((lp) => predError(opsByLp, id, slot, lp) === null).sort(lpCompare);
 }
 
 /**
@@ -148,8 +187,8 @@ export function validateNewOps(rows, existing, parseDate, parseNum) {
     const filled = ['client', 'komis', 'element', 'station', 'hours', 'wysylka', 'dostawa'].some((k) => v(k));
     if (!filled) return;
     const n = i + 1, lp = v('lp');
-    if (!/^\d+$/.test(lp)) { errors.push(`Wiersz ${n}: numer operacji (lp.) musi być liczbą`); return; }
-    if (existing[lp]) { errors.push(`Wiersz ${n}: operacja o numerze ${lp} już istnieje`); return; }
+    const idErr = idError(lp, existing);
+    if (idErr) { errors.push(`Wiersz ${n}: ${idErr}`); return; }
     if (seen.has(lp)) { errors.push(`Wiersz ${n}: numer ${lp} powtórzony w tabeli`); return; }
     seen.add(lp);
     const op = { preds: [], client: v('client'), komis: v('komis'), element: v('element'), station: v('station') };

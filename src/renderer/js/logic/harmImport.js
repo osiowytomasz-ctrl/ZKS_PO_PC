@@ -1,3 +1,5 @@
+import { ID_PATTERN } from './harmModel.js';
+
 // Import danych wejściowych Harmonogramu z pliku wyeksportowanego z Arkuszy Google (TSV albo CSV).
 // Czytane są TYLKO kolumny wpisywane ręcznie; kolumny wyliczane (start i koniec z formuł, końce poprzedników, klucz „Stat.”) są pomijane,
 // bo program liczy je sam (logic/schedule.js).
@@ -73,7 +75,7 @@ export function importOperations(text) {
   const seen = new Map();
   rows.forEach((r, idx) => {
     const lp = String(r[COL.lp] ?? '').trim();
-    if (!/^\d+$/.test(lp)) return;
+    if (!/^\d+$/.test(lp)) return;   // import z pliku: tylko numery liczbowe (wiersze typu „Suma” pomijane)
     const station = String(r[COL.station] ?? '').trim();
     const element = String(r[COL.element] ?? '').trim();
     if (!station && !element) return;
@@ -116,7 +118,7 @@ export function opsFromSheetRows(rows) {
     // Operacje zakończone często nie mają numeru w kolumnie A: dostają numer techniczny „s<wiersz arkusza>”.
     let lp = String(r.lp ?? '').trim();
     if (!lp) { if (r.rowIndex == null) continue; lp = 's' + r.rowIndex; }
-    if (!/^(\d+|s\d+)$/.test(lp)) { warnings.push(`Pominięto wiersz z numerem „${lp}” (oczekiwana liczba).`); continue; }
+    if (!ID_PATTERN.test(lp)) { warnings.push(`Pominięto wiersz z numerem „${lp}” (dozwolone litery, cyfry, „_” i „-”, do 20 znaków).`); continue; }
     if (seen.has(lp)) { warnings.push(`Numer operacji ${lp} powtórzony (liczy się pierwsza).`); continue; }
     seen.add(lp);
     const dt = (key) => { const raw = String(r[key] ?? '').trim(); const v = parseDateTime(raw); if (raw && v == null) warnings.push(`Operacja ${lp}: nie rozpoznano daty „${raw}” (${key}).`); return v; };
