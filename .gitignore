@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.log
+
+# prawdziwe dane produkcyjne (tylko lokalnie i w prywatnym repozytorium ZKS_PO)
+test/fixtures/harm-sample.json
