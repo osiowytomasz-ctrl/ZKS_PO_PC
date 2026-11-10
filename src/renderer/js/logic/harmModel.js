@@ -1,10 +1,9 @@
 // Model danych Harmonogramu w bazie (Firestore) i budowa danych do wykresu.
 //  - harm_ops/{chunk}: { ops: { "<lp>": {preds, client, komis, element, station, hours, startManual, endManual, wysylka, dostawa, status} } }
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
-//  - grafik/{RRRR-MM}: { days: { "RRRR-MM-DD": { "<nagłówek miejsca>": "a8" } } }   (tylko niepuste kody)
+//  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
 //  - config/main: { stations: [{name, bg, color}], holidays: ["RRRR-MM-DD"] }
 import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, DAY_MS } from './schedule.js';
-import { parseDelimited } from './harmImport.js';
 
 export const CHUNK = 50;
 export const chunkId = (lp) => (/^\d+$/.test(String(lp)) ? 'c' + String(Math.floor(Number(lp) / CHUNK)).padStart(4, '0') : 'cx');
@@ -19,31 +18,23 @@ export const DEFAULT_STATIONS = [
   { name: '5Śl', bg: '#ea9999', color: '#000000' }, { name: 'Do', bg: '#d9d2e9', color: '#000000' }, { name: 'Narz', bg: '#d9d9d9', color: '#000000' },
 ];
 
-/** Plik graf_norm (wklejony/eksportowany tekst): A puste, B–G sumy, H data DD-MM-RRRR, od I kody miejsc pracy. */
-export function parseGrafikText(text) {
-  const rows = parseDelimited(text).filter((r) => r.length > 8);
-  if (rows.length < 2) return { stations: [], days: [], warnings: ['Plik jest pusty albo ma za mało kolumn.'] };
-  const head = rows[0].map((c) => String(c ?? '').trim());
-  const stations = head.slice(1, 7).filter(Boolean);
-  const slotCols = head.map((name, i) => ({ name, i })).filter((c) => c.i >= 8 && c.name);
-  const days = [], warnings = [];
-  for (const r of rows.slice(1)) {
-    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(r[7] ?? '').trim());
+/**
+ * Grafik z karty graf_norm (odpowiedź API getGrafNorm): header = nagłówki od kolumny H (pierwszy pusty = data), rows = dni
+ * (pierwsza komórka = data DD-MM-RRRR, dalej kody miejsc pracy). Zwraca dni i nazwy stanowisk.
+ */
+export function parseGrafik(g) {
+  const header = (g && g.header || []).map((c) => String(c ?? '').trim());
+  const days = [];
+  for (const r of (g && g.rows) || []) {
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(r[0] ?? '').trim());
     if (!m) continue;
     const slots = {};
-    for (const c of slotCols) { const v = String(r[c.i] ?? '').trim(); if (v) slots[c.name] = v; }
+    for (let i = 1; i < header.length; i++) { const v = String(r[i] ?? '').trim(); if (v && header[i]) slots[header[i]] = v; }
     days.push({ key: `${m[3]}-${m[2]}-${m[1]}`, slots });
   }
-  if (!days.length) warnings.push('Nie znaleziono dni (oczekiwana data DD-MM-RRRR w kolumnie H).');
-  return { stations, slotHeaders: slotCols.map((c) => c.name), days, warnings };
+  return { stations: ((g && g.stations) || []).map((x) => String(x ?? '').trim()).filter(Boolean), days };
 }
-
-/** Dni → dokumenty miesięczne. */
-export function grafikDocs(days) {
-  const docs = {};
-  for (const d of days) { const id = d.key.slice(0, 7); (docs[id] ||= { days: {} }).days[d.key] = d.slots; }
-  return docs;
-}
+export const daysByKeyOf = (parsed) => Object.fromEntries(parsed.days.map((d) => [d.key, d.slots]));
 
 /** Pojemność każdego stanowiska z kodów miejsc pracy: { stanowisko: buildCapacity(...) }. `daysByKey`: { "RRRR-MM-DD": {nagłówek: kod} }. */
 export function capacityFrom(daysByKey, stationNames) {
@@ -69,7 +60,8 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const stations = (cfg && cfg.stations && cfg.stations.length) ? cfg.stations : DEFAULT_STATIONS;
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
   const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => Number(a.lp) - Number(b.lp) || String(a.lp).localeCompare(b.lp));
-  const capacity = capacityFrom(daysByKey, stations.map((s) => s.name));
+  const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
+  const capacity = capacityFrom(daysByKey, names);
   const result = computeSchedule(list, capacity);
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};

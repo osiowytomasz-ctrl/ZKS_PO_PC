@@ -80,7 +80,11 @@ test('Harmonogram: nowa funkcja zwraca te same dane co stara, z kilkukrotnie mni
   const { env, run } = build();
   const old = measure(env, () => run('getHarmData()'));
   const neu = measure(env, () => run('api_readHarmData_()'));
-  assert.deepEqual(plain(neu.r.rows), plain(old.r.rows));
+  // nowa funkcja ma dodatkowe pola danych ręcznych (client, startManual, endManual); reszta identyczna jak w starej
+  const extra = ['client', 'startManual', 'endManual'];
+  const strip = (rows) => plain(rows).map((r) => { const c = { ...r }; extra.forEach((k) => delete c[k]); return c; });
+  assert.deepEqual(strip(neu.r.rows), strip(old.r.rows));
+  assert.ok(neu.r.rows.every((r) => extra.every((k) => k in r)));
   assert.deepEqual(plain(neu.r.holidays), plain(old.r.holidays));
   assert.deepEqual(plain(neu.r.rapData), plain(old.r.rapData));
   assert.ok(neu.r.rows.length > 30 && Object.keys(neu.r.rapData).length === 2);

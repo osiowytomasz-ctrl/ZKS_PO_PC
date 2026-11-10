@@ -250,6 +250,10 @@ var API_FUNCS = {
     // Token logowania do Firestore (patrz Firebase.gs); claims z uprawnień użytkownika.
     run: function (a, ctx) { return api_firebaseToken_(ctx); }
   },
+  getGrafNorm: {
+    // Pełny grafik (karta graf_norm w pliku Harmonogramu) do liczenia terminów w programie; argument 'fresh' pomija pamięć.
+    run: function (a) { return api_getGrafNorm_(a[0] === 'fresh'); }
+  },
   getHarmData: {
     // Szybka wersja z pamięcią podręczną (api_getHarmData_); argument 'fresh' pomija pamięć.
     run: function (a) { return api_getHarmData_(a[0] === 'fresh'); }
@@ -1145,11 +1149,11 @@ function api_cacheGet_(key) {
 
 function api_getHarmData_(fresh) {
   if (!fresh) {
-    var cached = api_cacheGet_('harm:v1');
+    var cached = api_cacheGet_('harm:v2');
     if (cached) return cached;
   }
   var data = api_readHarmData_();
-  api_cachePut_('harm:v1', data, API_HARM_TTL);
+  api_cachePut_('harm:v2', data, API_HARM_TTL);
   return data;
 }
 
@@ -1178,7 +1182,7 @@ function api_readHarmData_() {
     var row = {
       rowIndex: startRow + i,
       lp: r[0], z1: r[1], z2: r[2], z3: r[3], z4: r[4],
-      komis: r[6], element: r[7], start: r[8], godziny: r[10], koniec: r[12],
+      client: r[5], komis: r[6], element: r[7], start: r[8], startManual: r[9], godziny: r[10], endManual: r[11], koniec: r[12],
       wysylka: r[17], dostawa: r[23],
       stanowisko: r[27], stanowiskoBg: bgs[i][0], stanowiskoColor: fonts[i][0],
       zak: String(r[19] || '').trim().toLowerCase()
@@ -1207,6 +1211,32 @@ function api_readHarmData_() {
     }
   }
   return { rows: rows, holidays: holidays, rapData: rapData };
+}
+
+// ---- Pełny grafik do liczenia w programie: karta graf_norm pliku Harmonogramu ----
+// Zwraca { header: [...], rows: [[...]] }: kolumny od H (data DD-MM-RRRR) w prawo; wiersz 1 = nagłówki miejsc pracy (np. 1Si1), potem dzień po dniu.
+function api_getGrafNorm_(fresh) {
+  if (!fresh) {
+    var cached = api_cacheGet_('grafnorm:v1');
+    if (cached) return cached;
+  }
+  var ss = SpreadsheetApp.openById(HARM_SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('graf_norm');
+  if (!sheet) throw new Error('Nie znaleziono karty: graf_norm');
+  var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  var out = { header: [], rows: [], stations: [] };
+  if (lastRow < 2 || lastCol < 8) return out;
+  out.stations = sheet.getRange(1, 2, 1, 6).getDisplayValues()[0];   // B1:G1 = nazwy stanowisk
+  var block = sheet.getRange(1, 8, lastRow, lastCol - 7).getDisplayValues();
+  out.header = block[0];
+  for (var i = 1; i < block.length; i++) {
+    var r = block[i];
+    if (!String(r[0]).trim()) continue;
+    while (r.length && !String(r[r.length - 1]).trim()) r.pop();   // obcięcie pustych kolumn z prawej
+    out.rows.push(r);
+  }
+  api_cachePut_('grafnorm:v1', out, API_HARM_TTL);
+  return out;
 }
 
 // ---- Grafik: odczyt z pamięcią podręczną (45 s), unieważnianą zapisem z aplikacji ----
