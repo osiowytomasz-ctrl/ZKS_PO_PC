@@ -57,6 +57,16 @@ export async function saveOp(lp, op) {
   await sdk.setDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { ops: { [lp]: clean(op) } }, { merge: true });
 }
 
+/** Wiele nowych operacji naraz (jeden zapis wsadowy; operacje z jednego dokumentu scalane). */
+export async function saveOps(entries) {
+  const { sdk, db } = await firebase();
+  const chunks = new Map();
+  for (const [lp, op] of entries) { const id = chunkId(lp); if (!chunks.has(id)) chunks.set(id, {}); chunks.get(id)[lp] = clean(op); }
+  const b = sdk.writeBatch(db);
+  for (const [id, ops] of chunks) b.set(sdk.doc(db, 'harm_ops', id), { ops }, { merge: true });
+  await b.commit();
+}
+
 export async function deleteOp(lp) {
   const { sdk, db } = await firebase();
   await sdk.updateDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() });

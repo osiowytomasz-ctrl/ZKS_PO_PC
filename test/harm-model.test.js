@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -74,4 +74,35 @@ test('sortowanie i lista wartości kolumn z datami: rok, miesiąc, dzień, godzi
   assert.deepEqual(sortRows(rows, cols, [{ key: 'd', ascending: true }], get).map((r) => r.d), ['30.10.2026 06', '08.11.2026 06', '08.11.2026 14', '02.01.2027 00', '15.04.2027 00', '29.06.2027 00', '']);
   assert.deepEqual(sortRows(rows, cols, [{ key: 'd', ascending: false }], get).map((r) => r.d).slice(0, 2), ['29.06.2027 00', '15.04.2027 00']);
   assert.equal(filterOptions(rows, cols, {}, get, cols[0]).map((o) => o.value)[0], '30.10.2026 06');
+});
+
+test('poprzednicy: lista tylko bezpiecznych powiązań (bez cyklu, samej siebie, powtórzeń)', () => {
+  // 1 → 2 → 3 (3 zależy od 2, 2 zależy od 1); 4 niezależna
+  const ops = { 1: { preds: [] }, 2: { preds: ['1'] }, 3: { preds: ['2'] }, 4: { preds: [] }, 5: { preds: ['4', '1'] } };
+  assert.deepEqual([...dependents(ops, '2')].sort(), ['2', '3']);
+  assert.deepEqual(predecessorChoices(ops, '2', 0), ['1', '4', '5']);          // nie 2 (ona sama) ani 3 (zależy od 2)
+  assert.deepEqual(predecessorChoices(ops, '1', 0), ['4']);                    // 2, 3 i 5 zależą od 1, więc odpada
+  assert.match(predError(ops, '1', 0, '3'), /cykl/);
+  assert.match(predError(ops, '5', 0, '1'), /już wpisana/);                      // 1 jest w pozycji 2 → nie można w pozycji 1
+  assert.equal(predError(ops, '5', 1, '1'), null);                              // ta sama pozycja: podmiana na siebie jest dozwolona
+  assert.match(predError(ops, '1', 0, '1'), /swoim poprzednikiem/);
+  assert.match(predError(ops, '1', 0, '99'), /nie istnieje/);
+  assert.equal(predError(ops, '1', 0, ''), null);
+});
+
+test('nowe operacje: tabela, puste wiersze pomijane, duplikaty numerów zablokowane', () => {
+  const pd = (t) => (t === '14.11.2026 14:00' ? 1 : null), pn = (t) => (/^\d+$/.test(t) ? Number(t) : null);
+  const rows = [
+    { lp: '10', komis: 'K1', element: 'A', station: '1Si', hours: '8', wysylka: '14.11.2026 14:00' },
+    { lp: '11' },                                                  // pusty → pominięty
+    { lp: '12', komis: 'K2', hours: '5' },
+  ];
+  const ok = validateNewOps(rows, { 1: {} }, pd, pn);
+  assert.deepEqual(ok.errors, []); assert.equal(ok.ops.length, 2); assert.equal(ok.ops[0][1].wysylka, 1);
+  assert.match(validateNewOps([{ lp: '1', komis: 'x' }], { 1: {} }, pd, pn).errors[0], /już istnieje/);                 // duplikat z bazą
+  assert.match(validateNewOps([{ lp: '5', komis: 'x' }, { lp: '5', komis: 'y' }], {}, pd, pn).errors[0], /powtórzony/); // duplikat w tabeli
+  assert.match(validateNewOps([{ lp: 'a', komis: 'x' }], {}, pd, pn).errors[0], /liczbą/);
+  assert.match(validateNewOps([{ lp: '5', komis: 'x', hours: 'zz' }], {}, pd, pn).errors[0], /czas/);
+  assert.match(validateNewOps([{ lp: '5', komis: 'x', dostawa: 'jutro' }], {}, pd, pn).errors[0], /daty/);
+  assert.match(validateNewOps([{ lp: '5' }], {}, pd, pn).errors[0], /przynajmniej jedną/);
 });

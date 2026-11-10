@@ -104,3 +104,59 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   }
   return { rows, holidays: [], rapData: {}, result };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Powiązania (poprzednicy) i dodawanie operacji: reguły bezpieczeństwa, żeby nie powstał cykl ani duplikat
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Operacje zależne (bezpośrednio lub pośrednio) od [id], razem z nim samym: nie mogą być jego poprzednikami (powstałby cykl). */
+export function dependents(opsByLp, id) {
+  const children = new Map();
+  for (const [lp, op] of Object.entries(opsByLp)) for (const p of op.preds || []) { if (!children.has(p)) children.set(p, []); children.get(p).push(lp); }
+  const seen = new Set([String(id)]), stack = [String(id)];
+  while (stack.length) for (const c of children.get(stack.pop()) || []) if (!seen.has(c)) { seen.add(c); stack.push(c); }
+  return seen;
+}
+
+/** Dlaczego operacja [pred] nie może być poprzednikiem [id] w pozycji [slot] (null = można). */
+export function predError(opsByLp, id, slot, pred) {
+  const p = String(pred ?? '').trim();
+  if (!p) return null;                                                   // puste = brak powiązania
+  if (!opsByLp[p]) return `Operacja ${p} nie istnieje`;
+  if (p === String(id)) return 'Operacja nie może być swoim poprzednikiem';
+  if (dependents(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
+  const others = (opsByLp[id]?.preds || []).filter((_, i) => i !== slot);
+  if (others.includes(p)) return `Operacja ${p} jest już wpisana jako inny poprzednik`;
+  return null;
+}
+
+/** Operacje, które można wybrać jako poprzednika w pozycji [slot]: bez samej siebie, zależnych od niej i już użytych. Posortowane po numerze. */
+export function predecessorChoices(opsByLp, id, slot) {
+  return Object.keys(opsByLp).filter((lp) => predError(opsByLp, id, slot, lp) === null)
+    .sort((a, b) => (Number(a.replace(/^s/, '')) + (a[0] === 's' ? 1e9 : 0)) - (Number(b.replace(/^s/, '')) + (b[0] === 's' ? 1e9 : 0)));
+}
+
+/**
+ * Walidacja wielu nowych operacji naraz (tabela do wpisywania). [rows]: [{lp, client, komis, element, station, hours, wysylka, dostawa}] jako teksty.
+ * Puste wiersze (bez komisu, opisu, stanowiska, klienta, czasu i dat) są pomijane. Zwraca {ops: [[lp, op]], errors: [teksty]}.
+ * Numery nie mogą się powtarzać ani z bazą, ani między wierszami tabeli.
+ */
+export function validateNewOps(rows, existing, parseDate, parseNum) {
+  const ops = [], errors = [], seen = new Set();
+  rows.forEach((r, i) => {
+    const v = (k) => String(r[k] ?? '').trim();
+    const filled = ['client', 'komis', 'element', 'station', 'hours', 'wysylka', 'dostawa'].some((k) => v(k));
+    if (!filled) return;
+    const n = i + 1, lp = v('lp');
+    if (!/^\d+$/.test(lp)) { errors.push(`Wiersz ${n}: numer operacji (lp.) musi być liczbą`); return; }
+    if (existing[lp]) { errors.push(`Wiersz ${n}: operacja o numerze ${lp} już istnieje`); return; }
+    if (seen.has(lp)) { errors.push(`Wiersz ${n}: numer ${lp} powtórzony w tabeli`); return; }
+    seen.add(lp);
+    const op = { preds: [], client: v('client'), komis: v('komis'), element: v('element'), station: v('station') };
+    if (v('hours')) { const h = parseNum(v('hours')); if (h == null || h < 0) { errors.push(`Wiersz ${n}: czas to liczba godzin`); return; } op.hours = h; }
+    for (const k of ['wysylka', 'dostawa']) if (v(k)) { const d = parseDate(v(k)); if (d == null) { errors.push(`Wiersz ${n}: nie rozpoznano daty „${v(k)}” (${k === 'wysylka' ? 'zakończenie' : 'dostawa'})`); return; } op[k] = d; }
+    ops.push([lp, op]);
+  });
+  if (!ops.length && !errors.length) errors.push('Wpisz przynajmniej jedną operację');
+  return { ops, errors };
+}

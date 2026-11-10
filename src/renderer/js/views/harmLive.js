@@ -6,7 +6,7 @@ import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings } from '../harmStore.js';
-import { COLS, saveCell, removeOp, addDialog } from './harmEdit.js';
+import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
@@ -263,7 +263,9 @@ export function mountHarmLive(el) {
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
             background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
-        if (!col.ro) cell.addEventListener('click', () => startEdit(cell, r.id, col, col.date ? fmtDt(st.m.opsByLp[r.id] && st.m.opsByLp[r.id][col.key]) : text));
+        if (!col.ro) cell.addEventListener('click', () => (col.pred !== undefined
+          ? predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp))
+          : startEdit(cell, r.id, col, col.date ? fmtDt(st.m.opsByLp[r.id] && st.m.opsByLp[r.id][col.key]) : text)));
         line.append(cell);
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
@@ -317,7 +319,7 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp) }, 'Dodaj operację'),
+    h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,
     h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza'),
