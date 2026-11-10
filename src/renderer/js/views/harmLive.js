@@ -105,6 +105,21 @@ export function mountHarmLive(el) {
 
   const komisColor = (komis) => { const k = String(komis ?? '').trim(); const f = k && st.m && st.m.cfg && (st.m.cfg.komisColors || []).find((x) => x.komis === k); return f || null; };
 
+  // Szczegóły operacji (po kliknięciu paska albo wiersza wykresu)
+  function detail(r) {
+    const subs = st.data ? st.data.rows.filter((x) => x.parent === r.id) : [];
+    const line = (k, v) => (String(v ?? '').trim() ? h('div', { class: 'row', style: { margin: '2px 0' } }, h('b', { style: { width: '150px' } }, k), h('span', {}, v)) : null);
+    const body = [
+      line('Komis', r.komis), line('Klient', r.client), line('Element', r.element), line('Stanowisko', r.stanowisko),
+      line('Start', r.start), line('Koniec', r.koniec), line('Godziny', r.hoursShown || r.godziny), line('Dostawa', r.dostawa), line('Zakończenie / wysyłka', r.wysylka),
+      line('Start ręczny', r.startManual), line('Koniec ręczny', r.endManual), line('Status', r.status),
+      line('Lp / poprzedzające', [r.lp, r.z1, r.z2, r.z3, r.z4].filter(Boolean).join(' / ')),
+      r.sub ? line('Operacja główna', r.parent) : null,
+      subs.length ? h('div', { style: { marginTop: '6px' } }, h('b', {}, `Suboperacje (${subs.length}):`), ...subs.map((x) => h('div', { style: { margin: '2px 0 2px 12px' } }, `${x.lp}  ·  ${x.start || '—'} → ${x.koniec || '—'}  ·  ${x.hours ? x.hours + ' h' : ''}${x.element ? '  ·  ' + x.element : ''}`))) : null,
+    ].filter(Boolean);
+    const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
+  }
+
   const saveCollapsed = () => lsSet(LS.collapsed, [...st.collapsed]);
   const toggleCollapse = (id) => { if (st.collapsed.has(id)) st.collapsed.delete(id); else st.collapsed.add(id); saveCollapsed(); draw(); };
   const setAllCollapsed = (on) => {
@@ -286,6 +301,7 @@ export function mountHarmLive(el) {
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
       g.leftRows.append(line);
+      g.dyn.append(h('div', { onclick: () => detail(r), style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer' } }));   // klik w wiersz wykresu
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
       const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
@@ -293,7 +309,7 @@ export function mountHarmLive(el) {
       // suboperacja: czarna ramka, w środku tylko 2-pikselowa ramka w kolorze stanowiska (bez wypełnienia); operacja główna: pełny pasek
       // operacja główna złożona z suboperacji: pasek poszatkowany na odcinki suboperacji, przerwy między nimi to przesunięcia suboperacji
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, style: { position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
+        const box = h('div', { title: tip, onclick: () => detail(r), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
         if (r.sub) box.append(h('div', { style: { position: 'absolute', inset: 0, border: '2px solid ' + bg, boxSizing: 'border-box', pointerEvents: 'none' } }));
         if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
         g.dyn.append(box);
@@ -303,7 +319,7 @@ export function mountHarmLive(el) {
         const lefts = r.segs.map(([s0]) => Math.max(0, hoursAt(s0)) * HOUR), rights = r.segs.map(([, e0]) => Math.max(0, hoursAt(e0)) * HOUR);
         const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
         if (Math.max(...rights) > 0) {
-          const box = h('div', { title: tip, style: { position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+          const box = h('div', { title: tip, onclick: () => detail(r), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
           r.segs.forEach((_, k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: bg, pointerEvents: 'none' } })); });
           if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
           g.dyn.append(box);
