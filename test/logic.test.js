@@ -346,3 +346,32 @@ test('Workflow: format daty RRRR.MM.DD', () => {
   assert.equal(W.fmtDate('brak'), 'brak');
   assert.equal(formatDate('2026.11.08'), '08.11.2026');                // inne moduły czytają też ten zapis
 });
+
+test('Workflow: filtry i sortowanie jak w Zakupach', () => {
+  const mk = (row, o) => { const rec = { ...W.toRecord(['', '', '', o.D || '', o.E || '', o.F || '', o.G || '', ''], {}), row }; if (o.A) rec.A = 'x'; return { rec, eff: W.effective(rec, null) }; };
+  const items = [
+    mk(2, { D: '2021-01-01', E: '604-01', F: 'Korekta  programu', G: 'Jan' }),
+    mk(3, { D: '2026-11-08 18:12', E: '604-01', F: 'zakup śrub', G: 'Ola' }),
+    mk(4, { D: '', E: '', F: 'audit', G: 'Jan' }),
+    mk(5, { D: '2026-11-02 09:00', E: '606-02', F: 'Urlop', G: 'Ola', A: true }),
+  ];
+  assert.equal(W.columnTitle('B'), 'Start (w trakcie)');
+  assert.equal(W.columnTitle('G'), 'Zlecający');
+  assert.equal(W.filterValue(items[0].eff, 'D'), '2021.01.01');
+  assert.equal(W.filterValue(items[0].eff, 'F'), 'Korekta programu');            // spacje scalone
+  // filtry kolumn się sumują
+  const f1 = { G: new Set(['Jan']) };
+  assert.deepEqual(W.visible(items, f1).map((x) => x.rec.row), [2, 4]);
+  const f2 = { ...f1, E: new Set(['604-01']) };
+  assert.deepEqual(W.visible(items, f2).map((x) => x.rec.row), [2]);
+  // liczniki w oknie kolumny liczone przy filtrach INNYCH kolumn; puste na końcu
+  const opts = W.options(items, { G: new Set(['Jan']) }, 'E');
+  assert.deepEqual(opts.map((o) => [o.value, o.count]), [['604-01', 1], ['606-02', 0], ['', 1]]);
+  // sortowanie wielopoziomowe: data malejąco (puste na końcu), data jest chronologiczna
+  const sorted = W.sortItems(items, [{ key: 'D', ascending: false }]).map((x) => x.rec.row);
+  assert.deepEqual(sorted, [3, 5, 2, 4]);
+  const by2 = W.sortItems(items, [{ key: 'G', ascending: true }, { key: 'D', ascending: true }]).map((x) => x.rec.row);
+  assert.deepEqual(by2, [2, 4, 5, 3]);
+  // status A jest widoczny w filtrze kolumny A po wartości „x”
+  assert.deepEqual(W.options(items, {}, 'A').map((o) => [o.value, o.count]), [['x', 1], ['', 3]]);
+});

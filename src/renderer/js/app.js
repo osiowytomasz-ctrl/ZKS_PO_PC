@@ -25,9 +25,10 @@ export const MODULES = [
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
   { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
   { id: 'help', title: 'Help', mount: mountHelp },
-  { id: 'symulator', title: 'Symulator', web: 'symulator.html' },
-  { id: 'symulatornum', title: 'SymulatorNUM', web: 'symulator-num.html' },
-  { id: 'pomiary', title: 'Pomiary', web: 'karta-pomiaru.html', gas: true },
+  { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },
+  { id: 'symulatornum', title: 'SymulatorNUM', inHelp: true, web: 'symulator-num.html' },
+  { id: 'pomiary', title: 'Pomiary', inHelp: true, web: 'karta-pomiaru.html', gas: true },
+  // Symulator, SymulatorNUM i Pomiary mają przyciski na ekranie Help (inHelp), nie na ekranie głównym.
   // Przyciski ekranu Narzędziownia (nie ma ich na ekranie głównym).
   { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', inToolRoom: true, mount: mountBuilder },
   { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
@@ -59,10 +60,12 @@ const root = document.getElementById('app');
 let cleanup = null;
 let current = 'home';
 
-/** Moduły z Narzędziowni wracają do Narzędziowni, reszta do ekranu głównego. */
+/** Moduły z Narzędziowni wracają do Narzędziowni, moduły z Helpu do Helpu, reszta do ekranu głównego. */
 function backTarget(id) {
   const mod = MODULES.find((m) => m.id === id);
-  return mod && mod.inToolRoom ? 'narzedziownia' : 'home';
+  if (mod && mod.inToolRoom) return 'narzedziownia';
+  if (mod && mod.inHelp) return 'help';
+  return 'home';
 }
 
 function topbar(title, showBack) {

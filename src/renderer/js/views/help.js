@@ -1,7 +1,9 @@
 import { h, clear, field } from '../ui.js';
 import * as K from '../logic/help.js';
+import { MODULES } from '../app.js';
 
-export function mountHelp(el) {
+/** Help: u góry przyciski Symulator, SymulatorNUM i Pomiary (inHelp), pod nimi kalkulatory. */
+export function mountHelp(el, ctx) {
   const inp = (ph, value = '') => h('input', { type: 'text', placeholder: ph, value, spellcheck: 'false' });
   const out = () => h('div', { style: { whiteSpace: 'pre-wrap', margin: '6px 0', fontFamily: 'monospace' } });
   const show = (box, text, err) => { box.textContent = text; box.style.color = err ? '#b00020' : '#1b5e20'; };
@@ -51,6 +53,9 @@ export function mountHelp(el) {
   const linCard = card('F° na Fmm', h('div', { class: 'row' }, field('F° [°/min]', fa), field('Ø [mm]', fd)),
     h('button', { class: 'btn primary', onclick: () => { const r = K.linearFeed(fa.value, fd.value); show(o4, r.text, r.isError); } }, 'Oblicz Fmm'), o4);
 
-  el.append(h('div', { style: { maxWidth: '760px', margin: '0 auto' } },
+  const modules = h('div', { class: 'grid-modules', style: { maxWidth: '760px' } },
+    ...MODULES.filter((m) => m.inHelp).map((m) => h('button', { class: 'mod ' + (m.style || ''), disabled: !!m.disabled, onclick: () => ctx.go(m.id) }, m.title)));
+
+  el.append(h('div', { style: { maxWidth: '760px', margin: '0 auto' } }, modules,
     h('p', { class: 'muted' }, 'Pola przyjmują wyrażenia jak w arkuszu, np. pi*100, 360/8, sqrt(2).'), feedCard, chordCard, coordCard, linCard));
 }

@@ -112,6 +112,54 @@ var API_FUNCS = {
     run: function () { return getHomeMissingPartsFromNdCacheV2(); }
   },
 
+  // --- Mistrz PO (Code_MistrzPO.js): dostęp dla każdego z kluczem, uprawnienia szczegółowe z zakładki Setup arkusza Mistrz_po ---
+  mp_getPermissions: {
+    run: function (a, ctx) { return mp_getPermissions_(ctx); }
+  },
+  mp_saveDetail: {
+    write: true,
+    run: function (a, ctx) { return mp_saveDetail_(a[0], ctx); }
+  },
+  mp_saveOperation: {
+    write: true,
+    run: function (a, ctx) { return mp_saveOperation_(a[0], ctx); }
+  },
+  mp_pendingOperations: {
+    run: function (a) { return mp_pendingOperations_(a[0]); }
+  },
+  mp_displayOperations: {
+    run: function (a) { return mp_displayOperations_(a[0], a[1]); }
+  },
+  mp_findOperations: {
+    run: function (a) { return mp_findOperations_(a[0], a[1], a[2]); }
+  },
+  mp_changeOperationStatus: {
+    write: true,
+    run: function (a, ctx) { return mp_changeOperationStatus_(a[0], ctx); }
+  },
+  mp_deleteOperation: {
+    write: true,
+    run: function (a, ctx) { return mp_deleteOperation_(a[0], ctx); }
+  },
+  mp_saveDocument: {
+    write: true,
+    run: function (a, ctx) { return mp_saveDocument_(a[0], ctx); }
+  },
+  mp_listDocuments: {
+    run: function (a, ctx) { return mp_listDocuments_(a[0], ctx); }
+  },
+  mp_deleteDocument: {
+    write: true,
+    run: function (a, ctx) { return mp_deleteDocument_(a[0], ctx); }
+  },
+  mp_listDetails: {
+    run: function (a, ctx) { return mp_listDetails_(ctx); }
+  },
+  mp_addDetail: {
+    write: true,
+    run: function (a, ctx) { return mp_addDetail_(a[0], ctx); }
+  },
+
   // --- Skaner ---
   getProductCodes: {
     run: function () { return getProductCodes(); }

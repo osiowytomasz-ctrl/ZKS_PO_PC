@@ -22,11 +22,11 @@ Klucz jest zapisywany szyfrowany przez system (`safeStorage`), jeśli system to 
 |---|---|
 | Ekran główny (braki części, filtry) | gotowy |
 | Ustawienia i sprawdzenie połączenia | gotowy |
-| Skaner (skaner USB jako klawiatura, kamera tam, gdzie jest `BarcodeDetector`) | gotowy |
+| Skaner (pobranie części oraz rejestry detali, operacji i dokumentacji rozpoznawane po znaku rozdzielającym; skaner USB, kamera tam, gdzie jest `BarcodeDetector`) | gotowy |
 | Grafik (filtry, sortowanie, edycja, zakres dat, zoom Ctrl+kółko) | gotowy |
 | Zakupy (zamówione = bez PZ, zakupione = z PZ, archiwum; czerwone pozycje do korekty; tabela dodawania 10 wierszy; realizacja z kopią pozostałej ilości) | gotowy |
-| Pomiary (karta pomiaru, HTML z Androida) | gotowy |
-| Symulator, SymulatorNUM (wersje HTML; wymagają internetu dla bibliotek) | gotowy |
+| Pomiary (karta pomiaru, HTML z Androida) | gotowy (przycisk na ekranie Help) |
+| Symulator, SymulatorNUM (wersje HTML; wymagają internetu dla bibliotek) | gotowy (przyciski na ekranie Help) |
 | Narzędziownia (ekran z ToolBuilder, Assem.Tool, ToolTrack; Zniszczone i Pomiarówka w budowie) | gotowy |
 | ToolTrack (filtry kaskadowe, skaner USB, zapis lokalizacji) | gotowy |
 | Harmonogram (wykres Gantta, filtry, sortowanie, dostawy, zależności) | gotowy |
@@ -64,3 +64,7 @@ wyników formatowania warunkowego. Edycja: kliknięcie w A/B/C ustawia status (`
 (pogrubienie, kursywa, podkreślenie, przekreślenie, kolor), data (D) i zlecający (G) uzupełniają się automatycznie tylko gdy są puste.
 Edycja jest w samej tabeli jak w arkuszu: strzałki, Tab, Home/End poruszają po komórkach, Enter lub F2 (albo pisanie) zaczyna edycję tekstu z paskiem formatowania nad tabelą, Enter zatwierdza, Alt+Enter dodaje linię, Esc anuluje, Spacja lub x ustawia status.
 Backend: `backend/Workflow.gs` (instrukcja w `docs/WORKFLOW_API.md`).
+
+Zsynchronizowano z gałęzią Androida do commita `45deb72` (10.11.2026): Skaner z rejestrami (backend `mp_*` w `backend/Api.gs`, `backend/Code_MistrzPO.gs`),
+logo i ikona, przyciski Symulator/SymulatorNUM/Pomiary w Help. Workflow ma filtry i sortowanie jak w Zakupach (kliknięcie nagłówka kolumny);
+bez sortowania najnowsze zadania są na górze. Backend trzeba wkleić do Apps Script i wdrożyć Nową wersję (`WKLEJ_DO_APPSCRIPT.md` w repozytorium `ZKS_PO`).

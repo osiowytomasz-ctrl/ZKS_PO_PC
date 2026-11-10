@@ -1,4 +1,5 @@
 import { parseDate } from './common.js';
+import { visibleRows, filterOptions, sortRows } from './tableFilter.js';
 // Workflow (karta Z): kategoria zadania z formuły w kolumnie H oraz kolorowanie wg formatowania warunkowego arkusza.
 // Wszystko liczone lokalnie z surowych wartości, bo Apps Script nie zwraca wyników formatowania warunkowego.
 
@@ -186,3 +187,27 @@ export function fmtDate(raw) {
   const date = `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())}`;
   return /\d{1,2}:\d{2}/.test(text) ? `${date} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` : date;
 }
+
+// ---- filtry i sortowanie jak w Zakupach (dla każdej kolumny zbiór dozwolonych wartości, poziomy sortowania się sumują) ----
+export const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
+const COL_DEFS = COLS.map((key) => ({ key }));
+
+/** Tytuł okna filtra kolumny (A–C mają podobne nazwy, więc dopisujemy status). */
+export function columnTitle(col) {
+  return { A: 'Koniec (zakończone)', B: 'Start (w trakcie)', C: 'Start (wstrzymane)' }[col] || HEADERS[col];
+}
+
+/** Wartość komórki w filtrach: taka, jaka jest pokazywana (data jako RRRR.MM.DD, tekst w jednej linii), bez skrajnych spacji. */
+export function filterValue(eff, col) {
+  if (col === 'D') return fmtDate(eff[col]).trim();
+  if (col === 'E' || col === 'F') return String(eff[col] ?? '').replace(/\s+/g, ' ').trim();
+  return String(eff[col] ?? '').trim();
+}
+const getter = (item, column) => filterValue(item.eff, column.key);
+
+/** items = [{rec, eff}] (po zmianach). Wiersze spełniające filtry wszystkich kolumn naraz; `except` pomija filtr jednej kolumny. */
+export const visible = (items, filters, except = null) => visibleRows(items, COL_DEFS, filters, getter, except);
+/** Wartości do okna filtra kolumny z licznikami przy filtrach INNYCH kolumn (0 = obecnie ukryta); puste na końcu. */
+export const options = (items, filters, col) => filterOptions(items, COL_DEFS, filters, getter, COL_DEFS.find((c) => c.key === col));
+/** Sortowanie wielopoziomowe, puste zawsze na końcu; data `RRRR.MM.DD GG:MM` sortuje się chronologicznie. */
+export const sortItems = (items, sorts) => sortRows(items, COL_DEFS, sorts, getter);

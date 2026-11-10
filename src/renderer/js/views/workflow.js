@@ -1,6 +1,6 @@
-import { h, clear, api, apiCached, toast, modal, field, confirmBox, alertBox } from '../ui.js';
+import { h, clear, api, apiCached, toast, modal, field, confirmBox, alertBox, columnFilterDialog } from '../ui.js';
 import * as W from '../logic/workflow.js';
-import { parseSheetColor } from '../logic/common.js';
+import { parseSheetColor, updateSorts, sortLabels } from '../logic/common.js';
 
 const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
 
@@ -66,14 +66,14 @@ const PALETTE = ['#cc0000', '#e69138', '#38761d', '#1155cc', '#674ea7', '#666666
 
 /** Zakładka Workflow na ekranie głównym: karta Z, kolorowanie liczone lokalnie, edycja w tabeli (jak w arkuszu). */
 export function createWorkflow() {
-  const st = { headers: [], records: [], changes: new Map(), fresh: false, hideDone: false, newestFirst: true, search: '', saving: false, sel: null, editing: null, order: [] };
+  const st = { headers: [], records: [], changes: new Map(), fresh: false, filters: {}, sorts: [], saving: false, sel: null, editing: null, order: [] };
   const cells = new Map();      // `${wiersz}:${kolumna}` → <td>
   const recByRow = new Map();
   const info = h('span', { class: 'muted' });
   const body = h('div', { class: 'table-wrap', tabindex: '0', style: { maxHeight: 'calc(100vh - 400px)', minHeight: '200px', outline: 'none' } });
   const saveBtn = h('button', { class: 'btn primary', disabled: true, onclick: save }, 'Zapisz zmiany');
   const discardBtn = h('button', { class: 'btn', disabled: true, onclick: async () => { if (await confirmBox('Odrzucić zmiany?', `Niezapisane zmiany: ${st.changes.size}.`, 'Odrzuć')) { st.changes = new Map(); draw(); } } }, 'Odrzuć');
-  const search = h('input', { type: 'search', placeholder: 'Szukaj…', style: { padding: '4px 8px', width: '160px' }, oninput: () => { st.search = search.value.trim().toLowerCase(); draw(); } });
+  const clearBtn = h('button', { class: 'btn', title: 'Wyczyść wszystkie filtry i sortowanie', onclick: () => { st.filters = {}; st.sorts = []; draw(); } }, 'Wyczyść filtry i sortowanie');
   const canEdit = () => st.fresh && !st.saving;
   const key = (row, col) => `${row}:${col}`;
 
@@ -107,10 +107,10 @@ export function createWorkflow() {
 
   function draw() {
     const sy = body.scrollTop, sx = body.scrollLeft;
-    let recs = st.records.map((rec) => ({ rec, eff: W.effective(rec, st.changes.get(rec.row)) }));
-    if (st.hideDone) recs = recs.filter((x) => W.statusOf(x.eff) !== 'A');
-    if (st.search) recs = recs.filter((x) => [x.eff.E, x.eff.F, x.eff.G, x.eff.D].join(' ').toLowerCase().includes(st.search));
-    if (st.newestFirst) recs = recs.slice().reverse();
+    const eff = st.records.map((rec) => ({ rec, eff: W.effective(rec, st.changes.get(rec.row)) }));
+    let recs = W.visible(eff, st.filters);
+    // Bez wybranego sortowania najnowsze zadania są na górze; wybrane sortowanie działa na kolejności z arkusza.
+    recs = st.sorts.length ? W.sortItems(recs, st.sorts) : recs.slice().reverse();
     st.order = recs.map((x) => x.rec.row);
     cells.clear(); recByRow.clear();
     const tbody = h('tbody', {});
@@ -124,7 +124,7 @@ export function createWorkflow() {
         const isText = W.TEXT_COLS.includes(col);
         const dirty = changed && ((isStatus && changed.status !== undefined) || (isText && changed.cells && changed.cells[col]));
         const style = { verticalAlign: 'top', textAlign: isStatus || col === 'D' || col === 'H' ? 'center' : 'left', whiteSpace: isText ? 'pre-wrap' : 'nowrap', cursor: isText ? 'cell' : 'default' };
-        if (col === 'F') { style.minWidth = '320px'; style.maxWidth = '560px'; } else if (col === 'E') { style.maxWidth = '160px'; }
+        if (col === 'F') { style.minWidth = '320px'; style.maxWidth = '560px'; } else if (col === 'E') { style.minWidth = '100px'; style.maxWidth = '180px'; } else if (col === 'D') { style.minWidth = '125px'; }
         if (isStatus) { style.width = '26px'; style.minWidth = '26px'; style.padding = '3px 2px'; }
         if (s) { style.background = s.background; if (s.color) style.color = s.color; if (s.bold) style.fontWeight = 700; if (s.italic) style.fontStyle = 'italic'; }
         if (dirty) { style.outline = '2px solid #e65100'; style.outlineOffset = '-2px'; }
@@ -138,16 +138,34 @@ export function createWorkflow() {
       tbody.append(tr);
     }
     clear(body);
-    body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...W.COLS.map((c) => (W.STATUS_COLS.includes(c)
-      ? h('th', { title: W.STATUS_LABELS[c], style: { width: '26px', minWidth: '26px', padding: '4px 2px', fontSize: '11px', verticalAlign: 'bottom' } }, h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block', whiteSpace: 'nowrap' } }, HEADERS[c]))
-      : h('th', {}, HEADERS[c]))))), tbody));
+    const labels = sortLabels(st.sorts);
+    const th = (c) => {
+      const isStatus = W.STATUS_COLS.includes(c);
+      const filtered = !!st.filters[c];
+      const badge = labels[c] ? h('span', { class: 'badge', style: isStatus ? { position: 'absolute', bottom: '1px', left: '50%', transform: 'translateX(-50%)' } : { position: 'absolute', right: '2px', top: '50%', transform: 'translateY(-50%)' } }, labels[c]) : null;
+      return h('th', { class: 'click' + (filtered ? ' filtered' : ''), title: W.columnTitle(c) + ' (kliknij: filtr i sortowanie)', onclick: () => openFilter(c, eff),
+        style: isStatus ? { width: '26px', minWidth: '26px', padding: '4px 2px 14px', fontSize: '11px', verticalAlign: 'bottom', position: 'sticky', top: 0 } : { position: 'sticky', top: 0, paddingRight: badge ? '26px' : '' } },
+        isStatus ? h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block', whiteSpace: 'nowrap' } }, HEADERS[c]) : HEADERS[c],
+        filtered && !isStatus ? ' ▼' : null, badge);
+    };
+    body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...W.COLS.map(th))), tbody));
     body.scrollTop = sy; body.scrollLeft = sx;
     const bad = W.mismatches(st.records).length;
-    info.textContent = `Wierszy: ${recs.length}${recs.length !== st.records.length ? ' z ' + st.records.length : ''}` + (st.fresh ? '' : '  ·  dane z pamięci, odświeżanie… (edycja po odświeżeniu)') + (bad ? `  ·  niezgodne z kolumną H w arkuszu: ${bad}` : '');
+    info.textContent = [st.fresh ? '' : 'dane z pamięci, odświeżanie… (edycja po odświeżeniu)', bad ? `niezgodne z kolumną H w arkuszu: ${bad}` : ''].filter(Boolean).join('  ·  ');
+    clearBtn.disabled = !Object.keys(st.filters).length && !st.sorts.length;
     saveBtn.disabled = !canEdit() || !st.changes.size;
     discardBtn.disabled = !st.changes.size;
     saveBtn.textContent = st.changes.size ? `Zapisz zmiany (${st.changes.size})` : 'Zapisz zmiany';
     paintSel(false);
+  }
+
+  function openFilter(col, items) {
+    if (st.editing) commitEdit(0, 0);
+    const cur = st.sorts.find((x) => x.key === col);
+    columnFilterDialog({
+      title: W.columnTitle(col), options: W.options(items, st.filters, col), activeFilter: st.filters[col], activeSort: cur ? cur.ascending : null,
+      onApply: (filter, sort) => { if (filter) st.filters[col] = filter; else delete st.filters[col]; st.sorts = updateSorts(st.sorts, col, sort); draw(); },
+    });
   }
 
   // ---- zaznaczenie i ruch strzałkami ----
@@ -317,11 +335,9 @@ export function createWorkflow() {
     }
   }
 
-  const check = (label, k) => h('label', { class: 'row muted', style: { gap: '4px' } }, h('input', { type: 'checkbox', checked: st[k], onchange: (ev) => { st[k] = ev.target.checked; draw(); } }), label);
   const node = h('div', { class: 'panel', style: { maxWidth: '1400px', margin: '0 auto' } },
-    h('div', { class: 'row', style: { marginBottom: '4px' } }, h('h2', { style: { margin: 0 } }, 'Workflow'),
-      h('button', { class: 'btn primary', onclick: newTask }, '+ Nowe zadanie'), saveBtn, discardBtn, search,
-      check('Ukryj zakończone', 'hideDone'), check('Najnowsze na górze', 'newestFirst'),
+    h('div', { class: 'row', style: { marginBottom: '4px' } },
+      h('button', { class: 'btn primary', onclick: newTask }, '+ Nowe zadanie'), saveBtn, discardBtn, clearBtn,
       h('span', { class: 'grow' }), info,
       h('button', { class: 'btn', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); load(); } }, 'Odśwież')), bar, body);
   return { node, refresh: load };

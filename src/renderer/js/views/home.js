@@ -10,7 +10,9 @@ export function mountHome(el, ctx) {
   const grid = h('div', { class: 'grid-modules' });
   const draw = () => {
     clear(grid);
-    for (const m of MODULES.filter((x) => !x.inToolRoom)) {
+    // Logo w prawym górnym rogu na wysokość czterech wierszy; przyciski układają się obok, w dwóch kolumnach.
+    grid.append(h('img', { class: 'logo', src: 'img/logo.png', alt: 'Logo ZKS' }));
+    for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp)) {
       const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
       grid.append(h('button', { class: 'mod ' + (m.style || ''), disabled: !!denied, onclick: () => ctx.go(m.id) }, m.title));
     }

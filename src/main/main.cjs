@@ -48,6 +48,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#808080',
     title: 'ZKS PO',
+    icon: path.join(__dirname, '..', 'renderer', 'img', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

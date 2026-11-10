@@ -23,16 +23,19 @@
       "target": [
         "portable",
         "zip"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "portable": {
       "artifactName": "ZKS-PO-portable.${ext}"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.png"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "build/icon.png"
     }
   },
   "devDependencies": {
