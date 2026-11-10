@@ -4,3 +4,4 @@ dist/
 
 # prawdziwe dane produkcyjne (tylko lokalnie i w prywatnym repozytorium ZKS_PO)
 test/fixtures/harm-sample.json
+test/fixtures/harm-export.txt
