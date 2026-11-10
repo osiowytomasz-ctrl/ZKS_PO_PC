@@ -216,12 +216,18 @@ export function blockedPredecessors(opsByLp, id) {
   const kids = new Map();
   for (const lp of Object.keys(opsByLp)) { const p = subParent(lp); if (p && opsByLp[p]) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
   for (const l of kids.values()) l.sort(lpCompare);
+  const own = (o) => o.startManual != null || (o.preds || []).length > 0;
   const deps = new Map();                         // węzeł → węzły, od których zależy
   const add = (n, d) => { if (!deps.has(n)) deps.set(n, []); deps.get(n).push(d); };
   for (const [lp, op] of Object.entries(opsByLp)) {
     for (const p of op.preds || []) if (opsByLp[p]) add('s:' + lp, 'e:' + p);
     const par = subParent(lp);
-    if (par && opsByLp[par]) { add('s:' + lp, 's:' + par); const sibs = kids.get(par), i = sibs.indexOf(lp); if (i > 0) add('s:' + lp, 'e:' + sibs[i - 1]); }
+    if (par && opsByLp[par]) {
+      const sibs = kids.get(par), i = sibs.indexOf(lp);
+      if (i > 0) add('s:' + lp, 'e:' + sibs[i - 1]);
+      else if (own(opsByLp[par])) add('s:' + lp, 's:' + par);             // pierwsza suboperacja startuje z operacją główną, o ile ta ma własny start
+    }
+    if (kids.has(lp) && !own(op)) add('s:' + lp, 's:' + kids.get(lp)[0]);   // operacja główna bez własnego startu dziedziczy start po pierwszej suboperacji
     add('e:' + lp, 's:' + lp);
     if (kids.has(lp) && !(op.hours > 0)) for (const k of kids.get(lp)) add('e:' + lp, 'e:' + k);
   }

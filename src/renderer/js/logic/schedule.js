@@ -109,6 +109,8 @@ export function computeSchedule(ops, capacity) {
   const children = new Map();
   for (const op of byLp.values()) if (isSub(op.lp)) { const p = subParent(op.lp); if (!children.has(p)) children.set(p, []); children.get(p).push(op); }
   for (const list of children.values()) list.sort((x, y) => String(x.lp).localeCompare(String(y.lp), 'pl', { numeric: true, sensitivity: 'base' }));
+  // własne źródło startu: ręczny start albo poprzednicy; operacja główna bez niego dziedziczy start po PIERWSZEJ suboperacji (jej zależności)
+  const ownStart = (op) => op.startManual != null || (op.preds || []).some((x) => String(x ?? '').trim());
   const chopped = (op) => children.has(String(op.lp)) && !(op.hours > 0);     // operacja główna złożona z suboperacji (bez własnego czasu)
 
   // Start (S) i koniec (E) liczone osobno, żeby suboperacje mogły czekać na start operacji głównej, a jej koniec zależał od suboperacji.
@@ -129,7 +131,10 @@ export function computeSchedule(ops, capacity) {
     const take = (r) => { if (r.cyc) cyc = true; if (r.v == null) all = false; else ends.push(r.v); };
     if (isSub(op.lp)) {
       const parent = byLp.get(subParent(op.lp)), sibs = children.get(parent.lp), idx = sibs.indexOf(op);
-      take(idx > 0 ? E(sibs[idx - 1]) : S(parent));
+      if (idx > 0) take(E(sibs[idx - 1]));
+      else if (ownStart(parent)) take(S(parent));        // pierwsza suboperacja startuje z operacją główną, o ile ta ma własny start; inaczej to ona dziedziczy po pierwszej
+    } else if (!ownStart(op) && children.has(String(op.lp))) {
+      return S(children.get(String(op.lp))[0]);          // operacja główna bez zależności dziedziczy start po pierwszej suboperacji
     }
     for (const p of (op.preds || []).map((x) => String(x ?? '').trim()).filter(Boolean)) {
       const po = byLp.get(p);

@@ -188,3 +188,25 @@ test('suboperacje mieszają się z innymi operacjami według chronologii (stanow
   assert.deepEqual(d.rows.map((r) => r.id), ['10', '10a', '20', '10b']);
   assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id), ['10', '20']);
 });
+
+test('operacja główna bez zależności dziedziczy start po pierwszej suboperacji (tylko po pierwszej)', () => {
+  const D = (d, h) => Date.UTC(2026, 10, d, h);
+  const cap = { '1Si': buildCapacity(Array.from({ length: 10 }, (_, i) => ({ date: Date.UTC(2026, 10, 2) + i * 86400000, hours: 16 }))) };
+  const ops = [
+    { lp: '5', startManual: D(3, 6), hours: 4, station: '1Si' },                                       // 6–10 (3.11)
+    { lp: '10', station: '1Si' },                                                                      // bez zależności i bez startu
+    { lp: '10a', hours: 2, station: '1Si', preds: ['5'] },                                             // pierwsza suboperacja zależy od 5 → operacja 10 dziedziczy
+    { lp: '10b', hours: 2, station: '1Si', preds: ['6'] }, { lp: '6', startManual: D(4, 6), hours: 4, station: '1Si' },   // zależność drugiej suboperacji NIE jest dziedziczona
+    { lp: '20', station: '1Si' }, { lp: '20a', hours: 1, station: '1Si' },                              // pierwsza bez zależności → brak startu
+    { lp: '30', startManual: D(8, 6), station: '1Si' }, { lp: '30a', hours: 1, station: '1Si', preds: ['5'] },   // własny start ma pierwszeństwo
+  ];
+  const r = computeSchedule(ops, cap);
+  assert.equal(r.get('10a').start, D(3, 10)); assert.equal(r.get('10').start, D(3, 10));            // start 10 = start 10a (koniec 5)
+  assert.equal(r.get('10b').start, D(4, 10));                                                          // czeka na 6 (koniec 4.11 10:00)
+  assert.equal(r.get('10').end, D(4, 12));
+  assert.equal(r.get('20').state, 'no-start');
+  assert.equal(r.get('30').start, D(8, 6)); assert.equal(r.get('30a').start, D(8, 6));                 // 30a: max(start 30, koniec 5)
+  // wykrywanie cyklu uwzględnia dziedziczenie: operacja 10 zależy teraz od końca 5, więc 5 nie może zależeć od 10
+  const m = { 5: { preds: [] }, 10: { preds: [] }, '10a': { preds: ['5'], hours: 2 } };
+  assert.match(predError(m, '5', 0, '10'), /cykl/);
+});
