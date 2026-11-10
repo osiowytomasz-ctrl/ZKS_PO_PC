@@ -154,18 +154,10 @@ export function statKey(o, r, key) {
  * Z operacji (mapa lp → operacja), dni grafiku i konfiguracji robi dane dla widoku Harmonogramu (ten sam kształt co z arkusza).
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
  */
-/** Wiersze po filtrach i sortowaniu ułożone hierarchicznie: operacja główna, a pod nią jej suboperacje (pomijane, gdy operacja jest zwinięta). */
+/** Wiersze po filtrach i sortowaniu: suboperacje układają się chronologicznie razem z pozostałymi; znikają tylko wtedy, gdy ich operacja główna jest zwinięta. */
 export function arrangeRows(rows, collapsed) {
-  const kids = new Map();
-  for (const r of rows) if (r.sub) { if (!kids.has(r.parent)) kids.set(r.parent, []); kids.get(r.parent).push(r); }
-  for (const list of kids.values()) list.sort((a, b) => lpCompare(a.id, b.id));
-  const out = [];
-  for (const r of rows) {
-    if (r.sub) continue;
-    out.push(r);
-    if (!collapsed || !collapsed.has(r.id)) out.push(...(kids.get(r.id) || []));
-  }
-  return out;
+  if (!collapsed || !collapsed.size) return rows;
+  return rows.filter((r) => !(r.sub && collapsed.has(r.parent)));
 }
 
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
@@ -182,12 +174,10 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};
     const zak = String(o.status || '').trim().toLowerCase() === 'zak.' ? 'zak.' : String(o.status || '');
-    return { o, r, zak, key: sortKey({ station: o.station, element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };
+    const po = parentOf(o.lp) ? opsByLp[parentOf(o.lp)] : null;
+    return { o, r, zak, key: sortKey({ station: o.station || (po && po.station) || '', element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };   // suboperacja sortuje się po stanowisku (własnym albo operacji głównej) i starcie, jak każda inna
   });
-  const byLp = new Map(keyed.map((k) => [k.o.lp, k]));
-  const tops = keyed.filter((k) => !parentOf(k.o.lp)).sort((a, b) => compareKeys(a.key, b.key));
-  const ordered = [];
-  for (const t of tops) { ordered.push(t); for (const c of kids.get(t.o.lp) || []) ordered.push(byLp.get(c)); }
+  const ordered = keyed.slice().sort((a, b) => compareKeys(a.key, b.key));
   const rows = [];
   for (const { o, r, zak, key } of ordered) {
     const par = parentOf(o.lp), po = par ? opsByLp[par] : null;

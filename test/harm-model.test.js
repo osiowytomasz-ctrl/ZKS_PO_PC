@@ -151,19 +151,32 @@ test('suboperacje: czas operacji głównej = suma czasów, bez własnych zależn
   assert.equal(r.get('12').end, D(2, 11));                                                 // 5 h, nie 3
 });
 
-test('suboperacje: poprzednik tylko operacja główna, hierarchia wierszy i zwijanie', () => {
+test('suboperacje: poprzednik tylko operacja główna, chronologia wierszy i zwijanie', () => {
   const ops = { 10: { preds: [] }, '10a': { hours: 8, komis: '' }, '10b': { hours: 4 }, 20: { preds: [] } };
   assert.match(predError(ops, '20', 0, '10a'), /nie może być poprzednikiem.*10/);
   assert.match(predError(ops, '10a', 0, '20'), /nie ma powiązań/);
   assert.deepEqual(predecessorChoices(ops, '20', 0), ['10']);
   const d = buildHarmData({ 10: { komis: 'K1', station: '1Si', startManual: Date.UTC(2026, 10, 2, 6) }, '10a': { hours: 8 }, '10b': { hours: 4, element: 'x' }, 20: { komis: 'K2', station: '2Un' } }, {}, null, Date.UTC(2026, 10, 2));
-  const ids = d.rows.map((r) => r.id);
-  assert.ok(ids.indexOf('10a') === ids.indexOf('10') + 1 && ids.indexOf('10b') === ids.indexOf('10') + 2);   // pod operacją główną
+  // suboperacje nie są sztywno pod operacją główną: układają się wg stanowiska i startu, jak pozostałe
+  assert.equal(d.rows.length, 4);
   const r10 = d.rows.find((r) => r.id === '10'), r10a = d.rows.find((r) => r.id === '10a');
   assert.equal(r10.hoursShown, 'Σ12'); assert.equal(r10.subCount, 2); assert.equal(r10a.sub, true); assert.equal(r10a.komis, 'K1');   // dziedziczy komis i stanowisko
   assert.equal(r10a.station, '1Si');
-  assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id).filter((x) => x.startsWith('10')), ['10']);     // zwinięta
+  assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id).sort(), ['10', '20']);                         // zwinięcie chowa wszystkie suboperacje tej operacji
   assert.equal(arrangeRows(d.rows, new Set()).length, 4);
-  // filtr, który zostawia tylko suboperację (bez operacji głównej), ukrywa ją
-  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set()), []);
+  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set()).map((r) => r.id), ['10a']);              // suboperacja widoczna także bez operacji głównej (np. przy filtrze)
+  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set(['10'])), []);
+});
+
+test('suboperacje mieszają się z innymi operacjami według chronologii (stanowisko, start)', () => {
+  const t0 = Date.UTC(2026, 10, 2, 6);
+  const ops = {
+    10: { station: '1Si', startManual: t0, hours: 2 },                            // 6:00–8:00
+    '10a': { hours: 5 }, '10b': { hours: 5 },                                      // dziedziczą 1Si; a: 6–11, b: 11–16
+    20: { station: '1Si', startManual: t0 + 3 * 3600000, hours: 1 },               // 9:00 – wypada między 10a i 10b
+  };
+  const cap = {}; const days = {}; for (let i = 0; i < 5; i++) { const k = `2026-11-${String(2 + i).padStart(2, '0')}`; days[k] = { '1Si1': 'a8', '1Si2': 'b8' }; }
+  const d = buildHarmData(ops, days, null, t0);
+  assert.deepEqual(d.rows.map((r) => r.id), ['10', '10a', '20', '10b']);
+  assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id), ['10', '20']);
 });
