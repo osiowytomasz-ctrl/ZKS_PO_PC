@@ -33,7 +33,7 @@ export async function mountSettings(el, ctx) {
     await save();
     speed.className = 'muted'; speed.textContent = 'Mierzenie… (kilka sekund)';
     const [s, e] = defaultRange();
-    const tests = [['Puste wywołanie (api_whoami), 1', 'api_whoami', []], ['Puste wywołanie (api_whoami), 2', 'api_whoami', []], ['Grafik (getGrData)', 'getGrData', [s, e]], ['Harmonogram (getHarmData)', 'getHarmData', []]];
+    const tests = [['Puste wywołanie (api_whoami), 1', 'api_whoami', []], ['Puste wywołanie (api_whoami), 2', 'api_whoami', []], ['Grafik (getGrData)', 'getGrData', [s, e, 'fresh']], ['Harmonogram (getHarmData)', 'getHarmData', ['fresh']]];
     const out = []; const res = {};
     for (const [label, fn, args] of tests) {
       const r = await timed(fn, args); res[label] = r;

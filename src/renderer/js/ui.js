@@ -40,9 +40,12 @@ export async function api(fn, args = [], opts = {}) {
 const inflight = new Map();
 /** To samo wywołanie (funkcja + argumenty) w toku jest wspólne: wejście w moduł w trakcie pobierania w tle nie zaczyna drugiego zapytania. */
 function apiShared(fn, args, opts) {
-  const k = fn + '|' + JSON.stringify(args || []);
+  const { callArgs, ...apiOpts } = opts;
+  const sent = callArgs || args || [];
+  const k = fn + '|' + JSON.stringify(sent);
   if (inflight.has(k)) return inflight.get(k);
-  const p = api(fn, args || [], { ...opts, cache: true }).finally(() => inflight.delete(k));
+  // Wynik zapisuje się w pamięci pod kluczem `args` (zwykłe wywołanie), nawet gdy serwerowi wysyłamy `callArgs` (np. z dopiskiem 'fresh').
+  const p = api(fn, sent, { ...apiOpts, cache: true, cacheArgs: args || [] }).finally(() => inflight.delete(k));
   inflight.set(k, p);
   return p;
 }
@@ -52,10 +55,11 @@ function apiShared(fn, args, opts) {
  * wywoływane jest od razu, a potem `onData(świeże, {cached:false})`, gdy dojdą z serwera. Zwraca obietnicę rozwiązywaną przy
  * pierwszych danych (z pamięci albo z serwera). Błąd serwera przy istniejących danych z pamięci to tylko komunikat (chyba że `silent`).
  * Opcje: `maxAge` (ms): dane z pamięci nie starsze niż tyle traktujemy jako świeże i nie pytamy serwera;
- * `force`: pomija pamięć i pyta serwer; `silent`: bez komunikatu o błędzie (odświeżanie w tle).
+ * `force`: pomija pamięć i pyta serwer; `silent`: bez komunikatu o błędzie (odświeżanie w tle);
+ * `callArgs`: argumenty wysyłane do serwera zamiast `args` (np. z dopiskiem 'fresh', który pomija pamięć podręczną w skrypcie).
  */
 export async function apiCached(fn, args, onData, opts = {}) {
-  const { maxAge = 0, silent = false, force = false, ...apiOpts } = opts;
+  const { maxAge = 0, silent = false, force = false, callArgs, ...apiOpts } = opts;
   const cached = force ? null : await window.zks.cacheGet(fn, args || []);
   let resolveFirst, rejectFirst, settled = false;
   const first = new Promise((res, rej) => { resolveFirst = res; rejectFirst = rej; });
@@ -65,7 +69,7 @@ export async function apiCached(fn, args, onData, opts = {}) {
     onData(cached.data, { cached: true, age });
     settled = true; resolveFirst(cached.data);
   }
-  apiShared(fn, args, apiOpts).then((data) => {
+  apiShared(fn, args, { ...apiOpts, callArgs }).then((data) => {
     onData(data, { cached: false, age: 0 });
     if (!settled) { settled = true; resolveFirst(data); }
   }).catch((e) => {

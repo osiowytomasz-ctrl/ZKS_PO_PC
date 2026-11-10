@@ -15,7 +15,7 @@ export function mountHarm(el, ctx) {
 
   async function load(force = false) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie harmonogramu…'));
-    try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force }); }
+    try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force, callArgs: force ? ['fresh'] : undefined }); }
     catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
   }
 

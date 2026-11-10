@@ -172,14 +172,9 @@ var API_FUNCS = {
   // --- Grafik ---
   getGrData: {
     perm: ['grafik', 'read'],
-    run: function (a, ctx) {
-      var result = getGrData(a[0], a[1]);
-      // Prawo edycji wynika z uprawnień w zakładce Uzytkownicy, a nie z listy w kodzie.
-      result.canEdit = ctx.permissions.grafik === 'write';
-      delete result.allowedEditors;
-      delete result.debug;
-      return result;
-    }
+    // Szybka wersja z pamięcią podręczną (api_getGrData_); trzeci argument 'fresh' pomija pamięć. Prawo edycji wynika
+    // z uprawnień w zakładce Uzytkownicy, a nie z listy w kodzie.
+    run: function (a, ctx) { return api_getGrData_(a[0], a[1], ctx, a[2] === 'fresh'); }
   },
   saveGrData: {
     perm: ['grafik', 'write'],
@@ -252,7 +247,8 @@ var API_FUNCS = {
 
   // --- Harmonogram ---
   getHarmData: {
-    run: function () { return getHarmData(); }
+    // Szybka wersja z pamięcią podręczną (api_getHarmData_); argument 'fresh' pomija pamięć.
+    run: function (a) { return api_getHarmData_(a[0] === 'fresh'); }
   },
 
   // --- Zakupy ---
@@ -913,6 +909,7 @@ function api_saveGrData_(changes, startDate, endDate) {
   });
 
   SpreadsheetApp.flush();
+  api_grBump_();   // następny odczyt Grafiku nie bierze danych z pamięci podręcznej
   return { status: 'success', message: 'Grafik zapisany.' };
 }
 
@@ -1090,6 +1087,187 @@ function api_getPlanGrid(ctx) {
     // Prawo edycji z uprawnień w zakładce Uzytkownicy (kolumna Plan), a nie z listy w kodzie.
     canEdit: !!(ctx && ctx.permissions && ctx.permissions.plan === 'write'),
     userColor: PLAN_USER_FONT_COLORS[email] || '#000000'
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Szybkość: pamięć podręczna odpowiedzi i mniej odczytów arkusza (Grafik, Harmonogram)
+// Wersje webowe (getGrData, getHarmData w Code_GR.js i Code_Harm.js) zostają bez zmian; API używa poniższych.
+// ---------------------------------------------------------------------------
+
+var API_CACHE_CHUNK = 90000;   // limit CacheService to 100 KB na wartość
+var API_GR_TTL = 45;           // sekundy: zmiany ręcznie w arkuszu widać w aplikacji po tym czasie; zapis z aplikacji unieważnia od razu
+var API_HARM_TTL = 90;         // sekundy; plik Harmonogramu jest osobny, więc nie ma jak go unieważnić z edycji
+
+/** Zapis obiektu w pamięci podręcznej skryptu: JSON → gzip → base64, w kawałkach po 90 KB. Błąd (np. za duży) oznacza brak pamięci, nie błąd odczytu. */
+function api_cachePut_(key, obj, seconds) {
+  try {
+    var json = JSON.stringify(obj);
+    var b64 = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(json, 'application/octet-stream', 'data')).getBytes());
+    var parts = Math.max(1, Math.ceil(b64.length / API_CACHE_CHUNK));
+    var map = {};
+    for (var i = 0; i < parts; i++) map[key + ':' + i] = b64.substr(i * API_CACHE_CHUNK, API_CACHE_CHUNK);
+    map[key] = String(parts);
+    CacheService.getScriptCache().putAll(map, seconds);
+  } catch (e) {
+    // bez pamięci podręcznej działamy dalej
+  }
+}
+
+/** Obiekt z pamięci podręcznej albo null (brak, wygasł, uszkodzony). */
+function api_cacheGet_(key) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var parts = Number(cache.get(key));
+    if (!parts) return null;
+    var keys = [];
+    for (var i = 0; i < parts; i++) keys.push(key + ':' + i);
+    var got = cache.getAll(keys);
+    var b64 = '';
+    for (var j = 0; j < keys.length; j++) {
+      if (got[keys[j]] == null) return null;
+      b64 += got[keys[j]];
+    }
+    var bytes = Utilities.base64Decode(b64);
+    var json = Utilities.ungzip(Utilities.newBlob(bytes, 'application/x-gzip', 'data.gz')).getDataAsString();
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---- Harmonogram: jeden odczyt bloku A14:AB zamiast ok. 20 osobnych odczytów, bez logów ----
+
+function api_getHarmData_(fresh) {
+  if (!fresh) {
+    var cached = api_cacheGet_('harm:v1');
+    if (cached) return cached;
+  }
+  var data = api_readHarmData_();
+  api_cachePut_('harm:v1', data, API_HARM_TTL);
+  return data;
+}
+
+function api_readHarmData_() {
+  var ss = SpreadsheetApp.openById(HARM_SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(HARM_SHEET_NAME);
+  if (!sheet) throw new Error('Nie znaleziono karty: ' + HARM_SHEET_NAME);
+
+  var startRow = 14;
+  var lastRow = sheet.getLastRow();
+  var holidaySheet = ss.getSheetByName('setup');
+  var holidays = holidaySheet ? holidaySheet.getRange('A2:A30').getDisplayValues().map(function (r) { return r[0]; }).filter(String) : [];
+  if (lastRow < startRow) return { rows: [], holidays: holidays, rapData: {} };
+
+  var rowCount = lastRow - startRow + 1;
+  // Kolumny: A=0 lp, B..E=1..4 Z1..Z4, G=6 komis, H=7 element, I=8 start, K=10 godziny, M=12 koniec,
+  // R=17 wysyłka, T=19 zak, X=23 dostawa, AB=27 stanowisko (tło i kolor czcionki osobno).
+  var block = sheet.getRange(startRow, 1, rowCount, 28).getDisplayValues();
+  var stationRange = sheet.getRange(startRow, 28, rowCount, 1);
+  var bgs = stationRange.getBackgrounds();
+  var fonts = stationRange.getFontColors();
+
+  var rows = [];
+  for (var i = 0; i < rowCount; i++) {
+    var r = block[i];
+    var row = {
+      rowIndex: startRow + i,
+      lp: r[0], z1: r[1], z2: r[2], z3: r[3], z4: r[4],
+      komis: r[6], element: r[7], start: r[8], godziny: r[10], koniec: r[12],
+      wysylka: r[17], dostawa: r[23],
+      stanowisko: r[27], stanowiskoBg: bgs[i][0], stanowiskoColor: fonts[i][0],
+      zak: String(r[19] || '').trim().toLowerCase()
+    };
+    if (row.komis || row.element || row.start || row.koniec || row.stanowisko) rows.push(row);
+  }
+
+  // Realizacja z Rap_m_h: jeden odczyt całego arkusza; stanowiska w wierszu 2 (od kolumny B), dane od wiersza 4.
+  var rapData = {};
+  var rapSheet = ss.getSheetByName('Rap_m_h');
+  if (rapSheet) {
+    var all = rapSheet.getDataRange().getDisplayValues();
+    if (all.length >= 4) {
+      var stations = (all[1] || []).slice(1);
+      for (var k = 3; k < all.length; k++) {
+        var komis = String(all[k][0] || '').trim();
+        if (!komis) continue;
+        rapData[komis] = rapData[komis] || {};
+        for (var s = 0; s < stations.length; s++) {
+          var st = String(stations[s] || '').trim();
+          if (!st) continue;
+          var val = parseFloat(String(all[k][s + 1] || '').replace(',', '.'));
+          if (!isNaN(val) && val > 0) rapData[komis][st] = (rapData[komis][st] || 0) + val;
+        }
+      }
+    }
+  }
+  return { rows: rows, holidays: holidays, rapData: rapData };
+}
+
+// ---- Grafik: odczyt z pamięcią podręczną (45 s), unieważnianą zapisem z aplikacji ----
+
+function api_grVersion_() { return CacheService.getScriptCache().get('gr_ver') || '0'; }
+function api_grBump_() { CacheService.getScriptCache().put('gr_ver', String(new Date().getTime()), 21600); }
+
+function api_getGrData_(startDate, endDate, ctx, fresh) {
+  var key = 'gr:' + api_grVersion_() + ':' + (startDate || '') + '|' + (endDate || '');
+  var data = fresh ? null : api_cacheGet_(key);
+  if (!data) {
+    data = api_readGrData_(startDate, endDate);
+    api_cachePut_(key, data, API_GR_TTL);
+  }
+  // Prawo edycji z uprawnień w zakładce Uzytkownicy; nie jest częścią pamięci podręcznej (zależy od użytkownika).
+  return {
+    rows: data.rows,
+    extraValues: data.extraValues,
+    extraBackgrounds: data.extraBackgrounds,
+    extraFontColors: data.extraFontColors,
+    canEdit: !!(ctx && ctx.permissions && ctx.permissions.grafik === 'write')
+  };
+}
+
+function api_readGrData_(startDate, endDate) {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('G');
+  if (!sheet) throw new Error('Arkusz G nie istnieje!');
+
+  var addr = sheet.getRange('A3:B3').getDisplayValues()[0];   // jeden odczyt zamiast dwóch
+  var leftAddress = String(addr[0]).trim();
+  var extraAddress = String(addr[1]).trim();
+
+  if (startDate && endDate) {
+    var headers = sheet.getRange(4, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+    var startNumber = api_dateToNumber_(startDate);
+    var endNumber = api_dateToNumber_(endDate);
+    var startCol = null, endCol = null;
+    headers.forEach(function (header, index) {
+      var n = api_dateToNumber_(header);
+      if (!n) return;
+      if (startCol === null && n >= startNumber) startCol = index + 1;
+      if (n <= endNumber) endCol = index + 1;
+    });
+    if (!startCol || !endCol || endCol < startCol) throw new Error('Nie znaleziono zakresu dat w wierszu 4 arkusza G.');
+    var b3 = sheet.getRange(extraAddress);
+    extraAddress = sheet.getRange(b3.getRow(), startCol, b3.getNumRows(), endCol - startCol + 1).getA1Notation();
+  }
+
+  var left = sheet.getRange(leftAddress);
+  var extra = sheet.getRange(extraAddress);
+  var values = left.getDisplayValues();
+  var backgrounds = left.getBackgrounds();
+  var fontColors = left.getFontColors();
+  var rows = values.map(function (row, index) {
+    return {
+      rowIndex: index, name: row[0], value: row[1],
+      nameBg: backgrounds[index][0], valueBg: backgrounds[index][1],
+      nameColor: fontColors[index][0], valueColor: fontColors[index][1]
+    };
+  });
+  return {
+    rows: rows,
+    extraValues: extra.getDisplayValues(),
+    extraBackgrounds: extra.getBackgrounds(),
+    extraFontColors: extra.getFontColors()
   };
 }
 

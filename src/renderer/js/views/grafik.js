@@ -32,10 +32,10 @@ export function mountGrafik(el, ctx) {
     const show = (range) => (data, meta) => { st.data = data; st.loaded = range; st.fresh = !meta.cached; if (st.fresh) st.changes = new Map(); draw(); };
     try {
       try {
-        await apiCached('getGrData', [s, e], show({ start: s, end: e }), { maxAge: GR_MAX_AGE, force });
+        await apiCached('getGrData', [s, e], show({ start: s, end: e }), { maxAge: GR_MAX_AGE, force, callArgs: force ? [s, e, 'fresh'] : undefined });
       } catch (err) {
         // Gdy arkusz nie ma dat z zakresu, pokazujemy cały grafik (jak w aplikacji na Androida).
-        if (/zakres/i.test(err.message)) { startIn.value = ''; endIn.value = ''; await apiCached('getGrData', ['', ''], show({ start: '', end: '' }), { maxAge: GR_MAX_AGE, force }); }
+        if (/zakres/i.test(err.message)) { startIn.value = ''; endIn.value = ''; await apiCached('getGrData', ['', ''], show({ start: '', end: '' }), { maxAge: GR_MAX_AGE, force, callArgs: force ? ['', '', 'fresh'] : undefined }); }
         else throw err;
       }
     } catch (err) {

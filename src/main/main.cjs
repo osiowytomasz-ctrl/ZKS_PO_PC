@@ -90,7 +90,7 @@ app.whenReady().then(() => {
     return callApi(store.load(), fn, list, { fetch: (u, o) => net.fetch(u, o), timeoutMs }).then((r) => {
       if (r.ok && opts && opts.cache) {
         try {
-          const f = cacheFile(fn, list);
+          const f = cacheFile(fn, (opts && Array.isArray(opts.cacheArgs)) ? opts.cacheArgs : list);
           fs.mkdirSync(path.dirname(f), { recursive: true });
           fs.writeFileSync(f, JSON.stringify({ t: Date.now(), data: r.data }), { mode: 0o600 });
         } catch (e) { /* brak miejsca lub uprawnień: działamy bez pamięci podręcznej */ }
