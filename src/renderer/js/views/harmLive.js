@@ -3,15 +3,16 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 
-const BASE = { hour: 0.75, row: 26, font: 12, head: 84 };
+const BASE = { hour: 0.75, row: 26, font: 12 };
+const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode' };
+const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout' };
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
@@ -20,11 +21,14 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], daysBack: 3, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    rows: [], chart: null, geom: null,
+    rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
-  const val = (row, col) => String(row[col.key] ?? '');
+  const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
+  const val = (row, col) => (col.isDate ? noMin(row[col.key]) : String(row[col.key] ?? ''));
+  let measureCtx = null;
+  const textW = (text, font, bold) => { try { measureCtx = measureCtx || document.createElement('canvas').getContext('2d'); measureCtx.font = `${bold ? 'bold ' : ''}${font}px ${getComputedStyle(document.body).fontFamily}`; return measureCtx.measureText(text).width; } catch { return text.length * font * 0.6; } };
   const shownCols = () => COLS.filter((c) => !(st.compact && st.hideSet.has(c.key)));
 
   // ---------- dane: baza + grafik z arkusza ----------
@@ -121,7 +125,7 @@ export function mountHarmLive(el) {
     };
     render();
     // kolory komisów: wiersz = komis + kolor tła + kolor tekstu
-    const kRows = ((st.m && st.m.cfg && st.m.cfg.komisColors) || []).map((x) => ({ komis: x.komis, bg: x.bg || '#ffe599', color: x.color || '#000000' }));
+    const kRows = ((st.m && st.m.cfg && st.m.cfg.komisColors) || []).map((x) => ({ komis: x.komis, bg: x.bg || '#ffe599', color: x.color || '#000000', bold: !!x.bold, italic: !!x.italic, underline: !!x.underline }));
     const kBox = h('div', {});
     const kRender = () => {
       clear(kBox);
@@ -129,8 +133,11 @@ export function mountHarmLive(el) {
       for (const r of kRows) {
         const bgI = h('input', { type: 'color', value: parseSheetColor(r.bg, '#ffe599'), oninput: () => { r.bg = bgI.value; sample.style.background = r.bg; } });
         const fgI = h('input', { type: 'color', value: parseSheetColor(r.color, '#000000'), oninput: () => { r.color = fgI.value; sample.style.color = r.color; } });
-        const sample = h('span', { style: { display: 'inline-block', minWidth: '84px', textAlign: 'center', padding: '2px 6px', background: r.bg, color: r.color } }, r.komis);
-        kBox.append(h('div', { class: 'row', style: { margin: '4px 0', alignItems: 'center' } }, sample, h('span', { class: 'muted' }, 'tło'), bgI, h('span', { class: 'muted' }, 'tekst'), fgI,
+        const styleOf = () => ({ fontWeight: r.bold ? 700 : 400, fontStyle: r.italic ? 'italic' : 'normal', textDecoration: r.underline ? 'underline' : 'none' });
+        const sample = h('span', { style: { display: 'inline-block', minWidth: '84px', textAlign: 'center', padding: '2px 6px', background: r.bg, color: r.color, ...styleOf() } }, r.komis);
+        const flag = (key, label, title) => h('label', { class: 'muted', title }, h('input', { type: 'checkbox', checked: r[key], onchange: (e) => { r[key] = e.target.checked; Object.assign(sample.style, styleOf()); } }), ' ' + label);
+        kBox.append(h('div', { class: 'row', style: { margin: '4px 0', alignItems: 'center', flexWrap: 'wrap' } }, sample, h('span', { class: 'muted' }, 'tło'), bgI, h('span', { class: 'muted' }, 'tekst'), fgI,
+          flag('bold', 'B', 'Pogrubienie'), flag('italic', 'I', 'Kursywa'), flag('underline', 'U', 'Podkreślenie'),
           h('button', { class: 'btn small', onclick: () => { kRows.splice(kRows.indexOf(r), 1); kRender(); } }, 'Usuń')));
       }
     };
@@ -141,8 +148,11 @@ export function mountHarmLive(el) {
       const k = komisI.value.trim();
       if (!k) { toast('Wpisz komis'); return; }
       if (kRows.some((r) => r.komis === k)) { toast('Ten komis ma już kolor'); return; }
-      kRows.push({ komis: k, bg: '#ffe599', color: '#000000' }); komisI.value = ''; kRender();
+      kRows.push({ komis: k, bg: '#ffe599', color: '#000000', bold: false, italic: false, underline: false }); komisI.value = ''; kRender();
     } }, 'Dodaj komis');
+    // wygląd tabeli (zapamiętywany na tym komputerze)
+    const num = (value, min, max) => h('input', { type: 'number', value: String(value), min: String(min), max: String(max), style: { width: '80px', padding: '4px' } });
+    const rowHI = num(st.layout.rowH, 16, 80), dateWI = num(st.layout.dateW, 60, 220);
     const nameI = h('input', { type: 'text', placeholder: 'Nazwa nowego stanowiska, np. 4Fr', style: { padding: '4px', width: '220px' }, spellcheck: 'false' });
     const addBtn = h('button', { class: 'btn small', onclick: () => {
       const name = nameI.value.trim();
@@ -153,10 +163,17 @@ export function mountHarmLive(el) {
     const save = async () => {
       // zapisujemy tylko zmiany: stanowiska dodane i te, których kolory różnią się od domyślnych
       const list = rows.filter((r) => { const d = DEFAULT_STATIONS.find((x) => x.name === r.name); return !d || d.bg !== r.bg || d.color !== r.color || r.sum; });
-      try { await saveSettings(list, kRows); m.close(); toast('Zapisano ustawienia'); } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
+      try {
+        const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+        st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
+        await saveSettings(list, kRows); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
+      } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
     const m = modal('Ustawienia harmonogramu', h('div', {},
-      h('h3', { style: { margin: '4px 0' } }, 'Stanowiska'),
+      h('h3', { style: { margin: '4px 0' } }, 'Wygląd tabeli'),
+      h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
+      h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
       h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
       box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli.'),
@@ -166,9 +183,10 @@ export function mountHarmLive(el) {
 
   // ---------- rysowanie ----------
   function draw() {
-    const sc = st.scale, HOUR = BASE.hour * sc, ROW = Math.round(BASE.row * sc), FONT = BASE.font * sc, HEAD = Math.round(BASE.head * sc);
+    const sc = st.scale, HOUR = BASE.hour * sc, ROW = Math.round(st.layout.rowH * sc), FONT = BASE.font * sc;
+    const HEAD = Math.ceil(textW('00.00.0000', FONT, false)) + 14;   // wysokość nagłówka = długość daty w pionie
     const cols = shownCols();
-    const colW = (c) => Math.round(c.w * sc);
+    const colW = (c) => Math.round((c.isDate ? st.layout.dateW : c.w) * sc);
     const LEFT = cols.reduce((a, c) => a + colW(c), 0) + Math.round(34 * sc);
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
@@ -237,20 +255,19 @@ export function mountHarmLive(el) {
       const it = chart.items[i], r = it.row;
       const done = String(r.status).trim().toLowerCase() === 'zak.';
       const kc = komisColor(r.komis);
-      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', borderBottom: '1px solid #ddd', boxSizing: 'border-box' } });
+      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: kc && kc.bold ? 700 : 400, fontStyle: kc && kc.italic ? 'italic' : 'normal', textDecoration: kc && kc.underline ? 'underline' : 'none', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
       for (const col of cols) {
         const text = val(r, col);
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
         const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : '',
-          style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #e0e0e0',
+          style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
             background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
-        if (!col.ro) cell.addEventListener('click', () => startEdit(cell, r.id, col, text));
+        if (!col.ro) cell.addEventListener('click', () => startEdit(cell, r.id, col, col.date ? fmtDt(st.m.opsByLp[r.id] && st.m.opsByLp[r.id][col.key]) : text));
         line.append(cell);
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
       g.leftRows.append(line);
-      g.dyn.append(h('div', { style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', borderBottom: '1px solid #e8e8e8', boxSizing: 'border-box', pointerEvents: 'none' } }));
       if (it.noBar) continue;
       const left0 = it.startHours * HOUR, w = Math.max(2, it.durationHours * HOUR);
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
 // tekst graf_norm (arkusz) → kształt odpowiedzi API getGrafNorm: kolumny od H w prawo
@@ -64,4 +65,13 @@ test('klucz „Stat.” (kolumna S): zakończone, stanowisko + numer startu, 0ZZ
   assert.equal(mk({ station: '2Un', element: 'x', startManual: Date.UTC(2029, 0, 1) }), '0ZZ');           // poza horyzontem 417 dni
   assert.equal(mk({ station: '2Un', element: '' }), '0ZZZ');                                              // brak startu i opisu
   assert.equal(mk({ station: '', element: 'x', startManual: day }), '0ZZ');
+});
+
+test('sortowanie i lista wartości kolumn z datami: rok, miesiąc, dzień, godzina (także zapis „dd.mm.rrrr hh”)', () => {
+  const cols = [{ key: 'd', isDate: true }];
+  const rows = ['15.04.2027 00', '30.10.2026 06', '29.06.2027 00', '', '08.11.2026 14', '08.11.2026 06', '02.01.2027 00'].map((d) => ({ d }));
+  const get = (r, c) => r[c.key];
+  assert.deepEqual(sortRows(rows, cols, [{ key: 'd', ascending: true }], get).map((r) => r.d), ['30.10.2026 06', '08.11.2026 06', '08.11.2026 14', '02.01.2027 00', '15.04.2027 00', '29.06.2027 00', '']);
+  assert.deepEqual(sortRows(rows, cols, [{ key: 'd', ascending: false }], get).map((r) => r.d).slice(0, 2), ['29.06.2027 00', '15.04.2027 00']);
+  assert.equal(filterOptions(rows, cols, {}, get, cols[0]).map((o) => o.value)[0], '30.10.2026 06');
 });

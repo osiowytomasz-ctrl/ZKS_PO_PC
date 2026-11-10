@@ -75,6 +75,6 @@ export async function saveSettings(stations, komisColors) {
   const { sdk, db } = await firebase();
   await sdk.setDoc(sdk.doc(db, 'config', 'main'), {
     stations: stations.map(({ name, bg, color, sum }) => (sum ? { name, bg, color, sum: true } : { name, bg, color })),
-    komisColors: komisColors.map(({ komis, bg, color }) => ({ komis, bg, color })),
+    komisColors: komisColors.map(({ komis, bg, color, bold, italic, underline }) => ({ komis, bg, color, ...(bold ? { bold: true } : {}), ...(italic ? { italic: true } : {}), ...(underline ? { underline: true } : {}) })),
   }, { merge: true });
 }
