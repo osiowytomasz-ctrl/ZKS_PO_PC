@@ -246,6 +246,10 @@ var API_FUNCS = {
   },
 
   // --- Harmonogram ---
+  firebaseToken: {
+    // Token logowania do Firestore (patrz Firebase.gs); claims z uprawnień użytkownika.
+    run: function (a, ctx) { return api_firebaseToken_(ctx); }
+  },
   getHarmData: {
     // Szybka wersja z pamięcią podręczną (api_getHarmData_); argument 'fresh' pomija pamięć.
     run: function (a) { return api_getHarmData_(a[0] === 'fresh'); }
