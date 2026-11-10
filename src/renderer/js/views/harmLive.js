@@ -299,7 +299,15 @@ export function mountHarmLive(el) {
         g.dyn.append(box);
       };
       if (r.segs && r.segs.length) {
-        r.segs.forEach(([s0, e0], k) => { const l = Math.max(0, hoursAt(s0)) * HOUR, w = Math.max(2, (hoursAt(e0) - Math.max(0, hoursAt(s0))) * HOUR); if (hoursAt(e0) > 0) bar(l, w, k === 0); });
+        // jedna czarna ramka od początku pierwszej do końca ostatniej suboperacji; w środku kolor stanowiska tylko w miejscach suboperacji, przerwy puste
+        const lefts = r.segs.map(([s0]) => Math.max(0, hoursAt(s0)) * HOUR), rights = r.segs.map(([, e0]) => Math.max(0, hoursAt(e0)) * HOUR);
+        const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
+        if (Math.max(...rights) > 0) {
+          const box = h('div', { title: tip, style: { position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+          r.segs.forEach((_, k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: bg, pointerEvents: 'none' } })); });
+          if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
+          g.dyn.append(box);
+        }
       } else if (!it.noBar) {
         bar(it.startHours * HOUR, Math.max(2, it.durationHours * HOUR), true);
       }
