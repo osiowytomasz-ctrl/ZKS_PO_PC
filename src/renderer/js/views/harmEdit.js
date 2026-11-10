@@ -2,12 +2,12 @@
 // Kolumny liczone przez program (I, M, S) są tylko do odczytu.
 import { h, clear, modal, confirmBox, toast } from '../ui.js';
 import { parseDateTime, parseNumber } from '../logic/harmImport.js';
-import { updateOp, saveOps, deleteOp, renameOp } from '../harmStore.js';
-import { predError, predecessorChoices, validateNewOps, renamePlan, isSyntheticId, lpCompare, idError } from '../logic/harmModel.js';
+import { updateOp, saveOps, deleteOps, renameOp } from '../harmStore.js';
+import { predError, predecessorChoices, validateNewOps, renamePlan, isSyntheticId, lpCompare, idError, subOps } from '../logic/harmModel.js';
 
 // group: 'z' = zależności (ukrywane razem); calc = liczone przez program; letter = kolumna w pliku
 export const COLS = [
-  { key: 'lp', letter: 'A', title: 'lp.', w: 64, text: true, isNumberAware: true },
+  { key: 'lp', letter: 'A', title: 'lp.', w: 76, text: true, isNumberAware: true },
   { key: 'z1', letter: 'B', title: 'Z1', w: 48, group: 'z', pred: 0 }, { key: 'z2', letter: 'C', title: 'Z2', w: 48, group: 'z', pred: 1 },
   { key: 'z3', letter: 'D', title: 'Z3', w: 48, group: 'z', pred: 2 }, { key: 'z4', letter: 'E', title: 'Z4', w: 48, group: 'z', pred: 3 },
   { key: 'client', letter: 'F', title: 'Klient', w: 130, text: true },
@@ -33,7 +33,7 @@ export async function saveCell(opsByLp, id, col, raw) {
     const plan = renamePlan(opsByLp, id, raw.trim());
     if (plan.error) { toast(plan.error); return false; }
     if (plan.same) return true;
-    try { await renameOp(plan); toast(`Numer ${plan.oldId} zmieniony na ${plan.newId}` + (plan.referrers.length ? ` (poprawiono powiązania: ${plan.referrers.length})` : '')); return true; }
+    try { await renameOp(plan); toast(`Numer ${plan.oldId} zmieniony na ${plan.newId}` + (plan.moves.length > 1 ? ` (razem z suboperacjami: ${plan.moves.length - 1})` : '') + (plan.referrers.length ? ` (poprawiono powiązania: ${plan.referrers.length})` : '')); return true; }
     catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); return false; }
   }
   if (col.pred !== undefined) {
@@ -55,8 +55,10 @@ export async function saveCell(opsByLp, id, col, raw) {
 
 export async function removeOp(opsByLp, id) {
   const op = opsByLp[id] || {};
-  if (!(await confirmBox('Usuń operację', `Usunąć operację ${isSynthetic(id) ? '' : id + ' '}„${op.element || op.komis || ''}”?`, 'Usuń'))) return;
-  try { await deleteOp(id); } catch (e) { toast('Nie usunięto: ' + (e.code || e.message)); }
+  const subs = subOps(opsByLp, id);
+  const extra = subs.length ? `\n\nRazem z nią zostanie usunięte suboperacji: ${subs.length} (${subs.join(', ')}).` : '';
+  if (!(await confirmBox('Usuń operację', `Usunąć operację ${isSynthetic(id) ? '' : id + ' '}„${op.element || op.komis || ''}”?${extra}`, 'Usuń'))) return;
+  try { await deleteOps([id, ...subs]); } catch (e) { toast('Nie usunięto: ' + (e.code || e.message)); }
 }
 
 /** Okno wyboru poprzednika: lista tylko tych operacji, które nie spowodują cyklu ani duplikatu; można wpisać numer, komis albo opis. */
@@ -126,7 +128,7 @@ export function addDialog(opsByLp, stations, onSaved) {
   })));
   const errBox = h('div', { class: 'err', style: { whiteSpace: 'pre-wrap', marginTop: '6px', fontSize: '12px' } });
   const m = modal('Nowe operacje', h('div', {},
-    h('p', { class: 'muted' }, `Wpisz do ${ADD_ROWS} operacji. Puste wiersze są pomijane. Poprzedników, start i koniec ręczny ustawisz potem w tabeli. Daty np. 14.11.2026 14:00.`),
+    h('p', { class: 'muted' }, `Wpisz do ${ADD_ROWS} operacji. Puste wiersze są pomijane. Numer: liczba (operacja główna) albo liczba + litera (suboperacja, np. 3000a, wymaga istniejącej operacji głównej). Poprzedników, start i koniec ręczny ustawisz potem w tabeli. Daty np. 14.11.2026 14:00.`),
     h('div', { style: { overflow: 'auto', maxHeight: '60vh' } }, h('table', { style: { borderCollapse: 'collapse' } }, h('thead', {}, head), h('tbody', {}, ...body))),
     errBox,
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {

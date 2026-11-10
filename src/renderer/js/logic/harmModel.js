@@ -3,53 +3,89 @@
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
 //  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
 //  - config/main: { stations: [{name, bg, color}] } – tylko zmiany użytkownika (kolory stanowisk i dodane stanowiska); domyślne są w kodzie.
-import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, DAY_MS } from './schedule.js';
+import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, subParent, DAY_MS } from './schedule.js';
 
 export const HORIZON_DAYS = 417;   // komórka S12 arkusza: operacje startujące dalej niż tyle dni od dziś trafiają za stanowiska
 
 export const CHUNK = 50;
-/** Numer operacji (lp.) może mieć litery, cyfry, „_” i „-” (1–20 znaków). Numery „s<cyfry>” są techniczne (operacje bez numeru w arkuszu). */
-export const ID_PATTERN = /^[\p{L}\p{N}_-]{1,20}$/u;
+/**
+ * Numer operacji: liczba = operacja główna (np. 3000); liczba + litery = suboperacja tej operacji (np. 3000a, 3000b).
+ * Numery „s<cyfry>” są techniczne (operacje bez numeru w arkuszu) i nie można ich wpisać ręcznie.
+ */
+export const ID_PATTERN = /^\d{1,15}\p{L}{0,3}$/u;
 export const isSyntheticId = (id) => /^s\d+$/.test(String(id));
+export { subParent };
+/** Czy numer ma postać suboperacji (liczba + litery), niezależnie od tego, czy operacja główna istnieje. */
+export const isSubId = (id) => subParent(id) != null;
 
-/** Porządek numerów: liczby rosnąco, potem numery z literami (naturalnie, bez wielkości liter), na końcu techniczne „s…”. */
+/** Porządek numerów: liczba rosnąco, przy tej samej liczbie najpierw operacja główna, potem suboperacje (a, b, …); techniczne „s…” na końcu. */
 export function lpCompare(a, b) {
   a = String(a); b = String(b);
-  const rank = (x) => (/^\d+$/.test(x) ? 0 : isSyntheticId(x) ? 2 : 1);
-  const ra = rank(a), rb = rank(b);
-  if (ra !== rb) return ra - rb;
-  if (ra === 0) return Number(a) - Number(b);
+  const parse = (x) => { const m = /^(\d+)(\p{L}*)$/u.exec(x); return m ? { n: BigInt(m[1]), suf: m[2] } : null; };
+  const pa = parse(a), pb = parse(b);
+  if (pa && pb) return pa.n === pb.n ? pa.suf.localeCompare(pb.suf, 'pl', { numeric: true, sensitivity: 'base' }) : (pa.n < pb.n ? -1 : 1);
+  if (pa) return -1;
+  if (pb) return 1;
   return a.localeCompare(b, 'pl', { numeric: true, sensitivity: 'base' });
 }
 
-/** Powód, dla którego [id] nie nadaje się na nowy numer operacji (null = można). [existing] to obiekt operacji (klucze = numery). */
-export function idError(id, existing, { ignore } = {}) {
+/**
+ * Powód, dla którego [id] nie nadaje się na nowy numer operacji (null = można). [existing] to obiekt operacji (klucze = numery),
+ * [pending] – numery operacji głównych dodawanych jednocześnie (np. w tej samej tabeli). Suboperacja wymaga istniejącej operacji głównej.
+ */
+export function idError(id, existing, { ignore, pending } = {}) {
   const t = String(id ?? '').trim();
   if (!t) return 'Numer operacji nie może być pusty';
-  if (!ID_PATTERN.test(t)) return 'Numer operacji: litery, cyfry, „_” lub „-” (do 20 znaków, bez spacji i kropek)';
   if (isSyntheticId(t)) return 'Numery „s” + cyfry są zarezerwowane dla operacji bez numeru';
+  if (!ID_PATTERN.test(t)) return 'Numer operacji: liczba (operacja główna, np. 3000) albo liczba + litera (suboperacja, np. 3000a)';
   if (t !== ignore && existing[t]) return `Operacja o numerze ${t} już istnieje`;
+  const parent = subParent(t);
+  if (parent && !(existing[parent] && parent !== ignore) && !(pending && pending.has(parent))) return `Suboperacja ${t} wymaga istniejącej operacji głównej ${parent}`;
   return null;
 }
 
-/** Zmiana numeru: nowy klucz, usunięcie starego i poprawienie poprzedników we wszystkich operacjach, które się do niego odwołują. */
+/** Suboperacje operacji głównej [id] (numery), w kolejności a, b, … */
+export function subOps(opsByLp, id) {
+  return Object.keys(opsByLp).filter((lp) => subParent(lp) === String(id)).sort(lpCompare);
+}
+
+/**
+ * Zmiana numeru: nowy klucz, usunięcie starego i poprawienie poprzedników we wszystkich operacjach, które się do niego odwołują.
+ * Zmiana numeru operacji głównej przenosi razem z nią jej suboperacje (3000a → 3001a). Wynik: {moves: [{oldId, newId, op}], referrers: [[lp, preds]]}.
+ */
 export function renamePlan(opsByLp, oldId, newId) {
-  const err = idError(newId, opsByLp, { ignore: oldId });
-  if (err) return { error: err };
+  const neu = String(newId ?? '').trim();
   if (!opsByLp[oldId]) return { error: `Operacja ${oldId} nie istnieje` };
-  const neu = String(newId).trim();
+  const err = idError(neu, opsByLp, { ignore: oldId });
+  if (err) return { error: err };
   if (neu === oldId) return { error: null, same: true };
+  const idMap = new Map([[oldId, neu]]);
+  const wasMain = /^\d+$/.test(oldId);
+  if (wasMain) {
+    if (!/^\d+$/.test(neu)) return { error: 'Operacja główna musi mieć numer liczbowy (litery dodaje się tylko do suboperacji)' };
+    for (const sub of subOps(opsByLp, oldId)) {
+      const target = neu + sub.slice(oldId.length);
+      if (opsByLp[target]) return { error: `Nie można przenieść suboperacji ${sub}: numer ${target} już istnieje` };
+      idMap.set(sub, target);
+    }
+  } else if (subParent(oldId) && !subParent(neu) && /^\d+$/.test(neu) === false) {
+    return { error: 'Nieprawidłowy numer' };
+  }
+  const fix = (preds) => (preds || []).map((p) => idMap.get(p) ?? p);
+  const moves = [...idMap].map(([from, to]) => ({ oldId: from, newId: to, op: { ...opsByLp[from], preds: fix(opsByLp[from].preds) } }));
   const referrers = [];
-  for (const [lp, op] of Object.entries(opsByLp)) if ((op.preds || []).includes(oldId)) referrers.push([lp, op.preds.map((p) => (p === oldId ? neu : p))]);
-  return { error: null, oldId, newId: neu, op: opsByLp[oldId], referrers };
+  for (const [lp, op] of Object.entries(opsByLp)) if (!idMap.has(lp) && (op.preds || []).some((p) => idMap.has(p))) referrers.push([lp, fix(op.preds)]);
+  return { error: null, oldId, newId: neu, op: moves[0].op, moves, referrers };
 }
 
 const hashLp = (t) => { let h = 7; for (const ch of t) h = (h * 31 + ch.codePointAt(0)) % 1000003; return h; };
 
-/** Dokument z operacjami: numery po 50 (c0000…), techniczne „s…” osobno, numery z literami rozproszone po 20 dokumentach (x00…x19). */
+/** Dokument z operacjami: numery po 50 (c0000…), suboperacje razem z operacją główną, techniczne „s…” osobno, pozostałe rozproszone po x00…x19. */
 export const chunkId = (lp) => {
   const t = String(lp);
   if (/^\d+$/.test(t)) return 'c' + String(Math.floor(Number(t) / CHUNK)).padStart(4, '0');
+  const sp = subParent(t);
+  if (sp) return 'c' + String(Math.floor(Number(sp) / CHUNK)).padStart(4, '0');
   const m = /^s(\d+)$/.exec(t);
   if (m) return 's' + String(Math.floor(Number(m[1]) / CHUNK)).padStart(4, '0');
   return 'x' + String(hashLp(t) % 20).padStart(2, '0');
@@ -118,6 +154,20 @@ export function statKey(o, r, key) {
  * Z operacji (mapa lp → operacja), dni grafiku i konfiguracji robi dane dla widoku Harmonogramu (ten sam kształt co z arkusza).
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
  */
+/** Wiersze po filtrach i sortowaniu ułożone hierarchicznie: operacja główna, a pod nią jej suboperacje (pomijane, gdy operacja jest zwinięta). */
+export function arrangeRows(rows, collapsed) {
+  const kids = new Map();
+  for (const r of rows) if (r.sub) { if (!kids.has(r.parent)) kids.set(r.parent, []); kids.get(r.parent).push(r); }
+  for (const list of kids.values()) list.sort((a, b) => lpCompare(a.id, b.id));
+  const out = [];
+  for (const r of rows) {
+    if (r.sub) continue;
+    out.push(r);
+    if (!collapsed || !collapsed.has(r.id)) out.push(...(kids.get(r.id) || []));
+  }
+  return out;
+}
+
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const stations = stationList(cfg);
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
@@ -125,19 +175,31 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
   const capacity = capacityFrom(daysByKey, names, new Set(stations.filter((x) => x.sum).map((x) => x.name)));
   const result = computeSchedule(list, capacity);
+  const parentOf = (lp) => { const p = subParent(lp); return p && opsByLp[p] ? p : null; };
+  const kids = new Map();
+  for (const lp of Object.keys(opsByLp)) { const p = parentOf(lp); if (p) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
+  for (const l of kids.values()) l.sort(lpCompare);
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};
     const zak = String(o.status || '').trim().toLowerCase() === 'zak.' ? 'zak.' : String(o.status || '');
     return { o, r, zak, key: sortKey({ station: o.station, element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };
   });
-  keyed.sort((a, b) => compareKeys(a.key, b.key));
+  const byLp = new Map(keyed.map((k) => [k.o.lp, k]));
+  const tops = keyed.filter((k) => !parentOf(k.o.lp)).sort((a, b) => compareKeys(a.key, b.key));
+  const ordered = [];
+  for (const t of tops) { ordered.push(t); for (const c of kids.get(t.o.lp) || []) ordered.push(byLp.get(c)); }
   const rows = [];
-  for (const { o, r, zak, key } of keyed) {
-    const sl = look[o.station] || {};
+  for (const { o, r, zak, key } of ordered) {
+    const par = parentOf(o.lp), po = par ? opsByLp[par] : null;
+    const sl = look[o.station || (po && po.station)] || {};
+    const myKids = kids.get(o.lp) || [];
+    const sum = myKids.reduce((t, c) => t + (opsByLp[c].hours > 0 ? opsByLp[c].hours : 0), 0);
+    const hoursShown = o.hours > 0 ? String(o.hours) : (myKids.length && sum > 0 ? `Σ${sum}` : (o.hours == null ? '' : String(o.hours)));
     rows.push({
-      id: o.lp, hours: o.hours == null ? '' : String(o.hours), station: o.station || '', client: o.client || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
-      lp: isSyntheticId(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
-      komis: o.komis || '', element: o.element || '', stanowisko: o.station || '', godziny: o.hours == null ? '' : String(o.hours),
+      id: o.lp, sub: !!par, parent: par, subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
+      station: o.station || (po && po.station) || '', client: o.client || (po && po.client) || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
+      lp: isSyntheticId(o.lp) ? '' : o.lp, z1: par ? '' : (o.preds?.[0] || ''), z2: par ? '' : (o.preds?.[1] || ''), z3: par ? '' : (o.preds?.[2] || ''), z4: par ? '' : (o.preds?.[3] || ''),
+      komis: o.komis || (po && po.komis) || '', element: o.element || '', stanowisko: o.station || (po && po.station) || '', godziny: hoursShown,
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),
       zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
@@ -163,6 +225,8 @@ export function predError(opsByLp, id, slot, pred) {
   const p = String(pred ?? '').trim();
   if (!p) return null;                                                   // puste = brak powiązania
   if (!opsByLp[p]) return `Operacja ${p} nie istnieje`;
+  if (isSubId(id)) return 'Suboperacja nie ma powiązań (należy do swojej operacji głównej)';
+  if (isSubId(p)) return `Suboperacja ${p} nie może być poprzednikiem; wybierz operację główną ${subParent(p)}`;
   if (p === String(id)) return 'Operacja nie może być swoim poprzednikiem';
   if (dependents(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
   const others = (opsByLp[id]?.preds || []).filter((_, i) => i !== slot);
@@ -182,12 +246,13 @@ export function predecessorChoices(opsByLp, id, slot) {
  */
 export function validateNewOps(rows, existing, parseDate, parseNum) {
   const ops = [], errors = [], seen = new Set();
+  const pending = new Set(rows.map((r) => String(r.lp ?? '').trim()).filter((x) => /^\d+$/.test(x)));
   rows.forEach((r, i) => {
     const v = (k) => String(r[k] ?? '').trim();
     const filled = ['client', 'komis', 'element', 'station', 'hours', 'wysylka', 'dostawa'].some((k) => v(k));
     if (!filled) return;
     const n = i + 1, lp = v('lp');
-    const idErr = idError(lp, existing);
+    const idErr = idError(lp, existing, { pending });
     if (idErr) { errors.push(`Wiersz ${n}: ${idErr}`); return; }
     if (seen.has(lp)) { errors.push(`Wiersz ${n}: numer ${lp} powtórzony w tabeli`); return; }
     seen.add(lp);

@@ -3,7 +3,7 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
@@ -12,7 +12,7 @@ import { parseSheetColor } from '../logic/common.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout' };
+const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', collapsed: 'zks.harm.collapsed' };
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
@@ -21,12 +21,12 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], daysBack: 3, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(lsGet(LS.collapsed, [])), rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
   const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
-  const val = (row, col) => (col.isDate ? noMin(row[col.key]) : String(row[col.key] ?? ''));
+  const val = (row, col) => (col.isDate ? noMin(row[col.key]) : col.key === 'hours' ? String(row.hoursShown ?? '') : String(row[col.key] ?? ''));
   let measureCtx = null;
   const textW = (text, font, bold) => { try { measureCtx = measureCtx || document.createElement('canvas').getContext('2d'); measureCtx.font = `${bold ? 'bold ' : ''}${font}px ${getComputedStyle(document.body).fontFamily}`; return measureCtx.measureText(text).width; } catch { return text.length * font * 0.6; } };
   const shownCols = () => COLS.filter((c) => !(st.compact && st.hideSet.has(c.key)));
@@ -104,6 +104,13 @@ export function mountHarmLive(el) {
   }
 
   const komisColor = (komis) => { const k = String(komis ?? '').trim(); const f = k && st.m && st.m.cfg && (st.m.cfg.komisColors || []).find((x) => x.komis === k); return f || null; };
+
+  const saveCollapsed = () => lsSet(LS.collapsed, [...st.collapsed]);
+  const toggleCollapse = (id) => { if (st.collapsed.has(id)) st.collapsed.delete(id); else st.collapsed.add(id); saveCollapsed(); draw(); };
+  const setAllCollapsed = (on) => {
+    st.collapsed = new Set(on ? (st.data ? st.data.rows.filter((r) => r.subCount > 0).map((r) => r.id) : []) : []);
+    saveCollapsed(); if (st.data) draw();
+  };
 
   // ---------- ustawienia harmonogramu (kolory stanowisk, nowe stanowiska, kolory komisów) ----------
   function stationsDialog() {
@@ -191,11 +198,11 @@ export function mountHarmLive(el) {
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
-    const rows = sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val);
+    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed);   // suboperacje pod operacją główną; zwinięte pomijane
     const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), st.daysBack, now, { keepAll: true });
     const n = chart.items.length, chartW = Math.ceil((chart.firstDayHours + chart.totalDays * 24) * HOUR);
     st.rows = rows; st.chart = chart; st.geom = { HOUR, ROW, FONT, HEAD, cols, colW, LEFT, chartW, now };
-    info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '');
+    info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
     scaleLabel.textContent = Math.round(sc * 100) + '%'; daysLabel.textContent = st.daysBack + ' dni';
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
@@ -255,17 +262,27 @@ export function mountHarmLive(el) {
       const it = chart.items[i], r = it.row;
       const done = String(r.status).trim().toLowerCase() === 'zak.';
       const kc = komisColor(r.komis);
-      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: kc && kc.bold ? 700 : 400, fontStyle: kc && kc.italic ? 'italic' : 'normal', textDecoration: kc && kc.underline ? 'underline' : 'none', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
+      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: kc && kc.bold ? 700 : 400, fontStyle: (kc && kc.italic) || (r.sub && !kc) ? 'italic' : 'normal', textDecoration: kc && kc.underline ? 'underline' : 'none', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
       for (const col of cols) {
-        const text = val(r, col);
+        let text = val(r, col);
+        if (col.key === 'lp') text = (r.sub ? '    ↳ ' : r.subCount ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') : '    ') + text;
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
         const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
             background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
-        if (!col.ro) cell.addEventListener('click', () => (col.pred !== undefined
-          ? predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp))
-          : startEdit(cell, r.id, col, col.date ? fmtDt(st.m.opsByLp[r.id] && st.m.opsByLp[r.id][col.key]) : text)));
+        if (col.key === 'lp' && r.subCount) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje; resztę komórki, aby zmienić numer';
+        if (!col.ro) cell.addEventListener('click', (ev) => {
+          if (col.key === 'lp' && r.subCount && ev.offsetX < 20 * st.scale) { toggleCollapse(r.id); return; }
+          if (col.pred !== undefined) {
+            if (r.sub) { toast('Suboperacja nie ma powiązań: zależności ustawia się w jej operacji głównej'); return; }
+            predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp));
+            return;
+          }
+          const op = st.m.opsByLp[r.id] || {};
+          const initial = col.key === 'lp' ? r.lp : col.date ? fmtDt(op[col.key]) : col.key === 'hours' ? (op.hours == null ? '' : String(op.hours)) : text;
+          startEdit(cell, r.id, col, initial);
+        });
         line.append(cell);
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
@@ -319,6 +336,8 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
+    h('button', { class: 'btn small', title: 'Chowa suboperacje (np. 3000a, 3000b) pod operacjami głównymi', onclick: () => setAllCollapsed(true) }, 'Zwiń suboperacje'),
+    h('button', { class: 'btn small', onclick: () => setAllCollapsed(false) }, 'Rozwiń suboperacje'),
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,

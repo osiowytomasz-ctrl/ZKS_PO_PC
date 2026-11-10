@@ -1,4 +1,4 @@
-import { ID_PATTERN } from './harmModel.js';
+import { ID_PATTERN, isSyntheticId } from './harmModel.js';
 
 // Import danych wejściowych Harmonogramu z pliku wyeksportowanego z Arkuszy Google (TSV albo CSV).
 // Czytane są TYLKO kolumny wpisywane ręcznie; kolumny wyliczane (start i koniec z formuł, końce poprzedników, klucz „Stat.”) są pomijane,
@@ -118,7 +118,7 @@ export function opsFromSheetRows(rows) {
     // Operacje zakończone często nie mają numeru w kolumnie A: dostają numer techniczny „s<wiersz arkusza>”.
     let lp = String(r.lp ?? '').trim();
     if (!lp) { if (r.rowIndex == null) continue; lp = 's' + r.rowIndex; }
-    if (!ID_PATTERN.test(lp)) { warnings.push(`Pominięto wiersz z numerem „${lp}” (dozwolone litery, cyfry, „_” i „-”, do 20 znaków).`); continue; }
+    if (!ID_PATTERN.test(lp) && !isSyntheticId(lp)) { warnings.push(`Pominięto wiersz z numerem „${lp}” (dozwolona liczba albo liczba + litera, np. 3000 lub 3000a).`); continue; }
     if (seen.has(lp)) { warnings.push(`Numer operacji ${lp} powtórzony (liczy się pierwsza).`); continue; }
     seen.add(lp);
     const dt = (key) => { const raw = String(r[key] ?? '').trim(); const v = parseDateTime(raw); if (raw && v == null) warnings.push(`Operacja ${lp}: nie rozpoznano daty „${raw}” (${key}).`); return v; };

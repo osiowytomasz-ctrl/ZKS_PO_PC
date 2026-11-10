@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { idError, renamePlan, lpCompare, isSyntheticId, predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
+import { idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, predError, predecessorChoices, validateNewOps, dependents, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -101,27 +102,68 @@ test('nowe operacje: tabela, puste wiersze pomijane, duplikaty numerów zablokow
   assert.deepEqual(ok.errors, []); assert.equal(ok.ops.length, 2); assert.equal(ok.ops[0][1].wysylka, 1);
   assert.match(validateNewOps([{ lp: '1', komis: 'x' }], { 1: {} }, pd, pn).errors[0], /już istnieje/);                 // duplikat z bazą
   assert.match(validateNewOps([{ lp: '5', komis: 'x' }, { lp: '5', komis: 'y' }], {}, pd, pn).errors[0], /powtórzony/); // duplikat w tabeli
-  assert.match(validateNewOps([{ lp: 'a b', komis: 'x' }], {}, pd, pn).errors[0], /litery/);
+  assert.match(validateNewOps([{ lp: 'a b', komis: 'x' }], {}, pd, pn).errors[0], /liczba/);
   assert.match(validateNewOps([{ lp: '5', komis: 'x', hours: 'zz' }], {}, pd, pn).errors[0], /czas/);
   assert.match(validateNewOps([{ lp: '5', komis: 'x', dostawa: 'jutro' }], {}, pd, pn).errors[0], /daty/);
   assert.match(validateNewOps([{ lp: '5' }], {}, pd, pn).errors[0], /przynajmniej jedną/);
 });
 
-test('numery operacji z literami: format, kolejność, dokumenty, zmiana numeru z poprawą powiązań', () => {
-  assert.equal(idError('A12', {}), null); assert.equal(idError('Śl-3', {}), null); assert.equal(idError('12', {}), null);
-  assert.match(idError('', {}), /pusty/); assert.match(idError('a b', {}), /litery, cyfry/); assert.match(idError('a.b', {}), /litery, cyfry/);
-  assert.match(idError('s12', {}), /zarezerwowane/); assert.match(idError('A1', { A1: {} }), /już istnieje/);
-  assert.equal(idError('A1', { A1: {} }, { ignore: 'A1' }), null);
-  assert.deepEqual(['b2', '10', 'a10', '9', 's5', 'a9', 'A1'].sort(lpCompare), ['9', '10', 'A1', 'a9', 'a10', 'b2', 's5']);
-  assert.equal(isSyntheticId('s40'), true); assert.equal(isSyntheticId('S40'), false);
-  assert.match(chunkId('A12'), /^x\d\d$/); assert.equal(chunkId('A12'), chunkId('A12')); assert.equal(chunkId('49'), 'c0000');
-  const ops = { 1: { preds: [], element: 'a' }, 2: { preds: ['1'] }, 3: { preds: ['2', '1'] }, X: { preds: [] } };
-  const plan = renamePlan(ops, '1', 'A-1');
-  assert.equal(plan.newId, 'A-1'); assert.deepEqual(plan.referrers.sort(), [['2', ['A-1']], ['3', ['2', 'A-1']]]);
-  assert.match(renamePlan(ops, '1', '2').error, /już istnieje/); assert.match(renamePlan(ops, '1', 'x y').error, /litery/);
-  assert.equal(renamePlan(ops, '1', '1').same, true); assert.match(renamePlan(ops, '99', 'Q').error, /nie istnieje/);
-  // letters w dodawaniu operacji i w poprzednikach
+test('numery: operacja główna = liczba, suboperacja = liczba + litera; kolejność, dokumenty, zmiana numeru', () => {
+  const ops = { 3000: { preds: [] }, '3000a': {}, '3000b': {}, 3001: { preds: ['3000'] } };
+  assert.equal(idError('3002', ops), null); assert.equal(idError('3000c', ops), null); assert.equal(idError('3000ab', ops), null);
+  assert.match(idError('', ops), /pusty/); assert.match(idError('A12', ops), /liczba/); assert.match(idError('3000 a', ops), /liczba/); assert.match(idError('30.5', ops), /liczba/);
+  assert.match(idError('s12', ops), /zarezerwowane/); assert.match(idError('3000a', ops), /już istnieje/);
+  assert.match(idError('4000a', ops), /wymaga istniejącej operacji głównej 4000/);
+  assert.equal(idError('4000a', ops, { pending: new Set(['4000']) }), null);
+  assert.equal(idError('3000a', ops, { ignore: '3000a' }), null);
+  assert.deepEqual(['3001', '3000b', '9', '3000', 's5', '3000a', '10'].sort(lpCompare), ['9', '10', '3000', '3000a', '3000b', '3001', 's5']);
+  assert.equal(isSyntheticId('s40'), true); assert.equal(isSubId('3000a'), true); assert.equal(isSubId('3000'), false);
+  assert.equal(chunkId('3000a'), chunkId('3000')); assert.equal(chunkId('49'), 'c0000'); assert.match(chunkId('A12'), /^x\d\d$/);
+  // zmiana numeru operacji głównej przenosi suboperacje i poprawia powiązania
+  const plan = renamePlan(ops, '3000', '3005');
+  assert.deepEqual(plan.moves.map((m) => [m.oldId, m.newId]).sort(), [['3000', '3005'], ['3000a', '3005a'], ['3000b', '3005b']]);
+  assert.deepEqual(plan.referrers, [['3001', ['3005']]]);
+  assert.match(renamePlan(ops, '3000', '3001').error, /już istnieje/); assert.match(renamePlan(ops, '3000', '3000a').error, /już istnieje|główna/);
+  assert.match(renamePlan(ops, '3000', '5000a').error, /główna musi mieć numer liczbowy|wymaga/);
+  assert.equal(renamePlan(ops, '3000', '3000').same, true); assert.match(renamePlan(ops, '99', '100').error, /nie istnieje/);
+  const rp = renamePlan(ops, '3000a', '3000c'); assert.equal(rp.moves.length, 1); assert.equal(rp.newId, '3000c');
+  // dodawanie: suboperacja razem z operacją główną w jednej tabeli, bez operacji głównej – błąd
   const pd = () => null, pn = (t) => Number(t);
-  assert.equal(validateNewOps([{ lp: 'A7', komis: 'k' }], {}, pd, pn).ops[0][0], 'A7');
-  assert.match(validateNewOps([{ lp: 'a b', komis: 'k' }], {}, pd, pn).errors[0], /litery/);
+  assert.equal(validateNewOps([{ lp: '70a', komis: 'k' }, { lp: '70', komis: 'k' }], {}, pd, pn).errors.length, 0);
+  assert.match(validateNewOps([{ lp: '71a', komis: 'k' }], {}, pd, pn).errors[0], /wymaga istniejącej operacji głównej/);
+});
+
+test('suboperacje: czas operacji głównej = suma czasów, bez własnych zależności, po kolei, nie są poprzednikami', () => {
+  const c = {}; for (const st of ['1Si', '2Un']) { c[st] = buildCapacity(Array.from({ length: 40 }, (_, i) => ({ date: Date.UTC(2026, 10, 2) + i * 86400000, hours: 16 }))); }
+  const D = (d, h) => Date.UTC(2026, 10, d, h);
+  const ops = [
+    { lp: '10', startManual: D(2, 6), station: '1Si' },                                   // bez czasu → suma suboperacji (8 + 4 = 12)
+    { lp: '10a', hours: 8, station: '1Si', preds: ['999'] },                               // własne preds są ignorowane
+    { lp: '10b', hours: 4, station: '2Un' },
+    { lp: '11', preds: ['10b'], hours: 2, station: '1Si' },                                // zależność od suboperacji = od operacji głównej 10
+    { lp: '12', startManual: D(2, 6), hours: 5, station: '1Si' }, { lp: '12a', hours: 3, station: '1Si' },   // własny czas operacji głównej ma pierwszeństwo
+  ];
+  const r = computeSchedule(ops, c);
+  assert.equal(r.get('10').end, D(2, 18));                                                // 6:00 + 12 h
+  assert.equal(r.get('10a').start, D(2, 6)); assert.equal(r.get('10a').end, D(2, 14));     // pierwsza suboperacja od startu operacji głównej
+  assert.equal(r.get('10b').start, D(2, 14)); assert.equal(r.get('10b').end, D(2, 18));    // kolejna po poprzedniej
+  assert.equal(r.get('11').start, D(2, 18));
+  assert.equal(r.get('12').end, D(2, 11));                                                 // 5 h, nie 3
+});
+
+test('suboperacje: poprzednik tylko operacja główna, hierarchia wierszy i zwijanie', () => {
+  const ops = { 10: { preds: [] }, '10a': { hours: 8, komis: '' }, '10b': { hours: 4 }, 20: { preds: [] } };
+  assert.match(predError(ops, '20', 0, '10a'), /nie może być poprzednikiem.*10/);
+  assert.match(predError(ops, '10a', 0, '20'), /nie ma powiązań/);
+  assert.deepEqual(predecessorChoices(ops, '20', 0), ['10']);
+  const d = buildHarmData({ 10: { komis: 'K1', station: '1Si', startManual: Date.UTC(2026, 10, 2, 6) }, '10a': { hours: 8 }, '10b': { hours: 4, element: 'x' }, 20: { komis: 'K2', station: '2Un' } }, {}, null, Date.UTC(2026, 10, 2));
+  const ids = d.rows.map((r) => r.id);
+  assert.ok(ids.indexOf('10a') === ids.indexOf('10') + 1 && ids.indexOf('10b') === ids.indexOf('10') + 2);   // pod operacją główną
+  const r10 = d.rows.find((r) => r.id === '10'), r10a = d.rows.find((r) => r.id === '10a');
+  assert.equal(r10.hoursShown, 'Σ12'); assert.equal(r10.subCount, 2); assert.equal(r10a.sub, true); assert.equal(r10a.komis, 'K1');   // dziedziczy komis i stanowisko
+  assert.equal(r10a.station, '1Si');
+  assert.deepEqual(arrangeRows(d.rows, new Set(['10'])).map((r) => r.id).filter((x) => x.startsWith('10')), ['10']);     // zwinięta
+  assert.equal(arrangeRows(d.rows, new Set()).length, 4);
+  // filtr, który zostawia tylko suboperację (bez operacji głównej), ukrywa ją
+  assert.deepEqual(arrangeRows(d.rows.filter((r) => r.id === '10a'), new Set()), []);
 });

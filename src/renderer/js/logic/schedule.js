@@ -105,16 +105,35 @@ export function computeSchedule(ops, capacity) {
   const result = new Map();
   const visiting = new Set();
 
+  // Suboperacje: numer główny + litery (np. 3000a). Należą do operacji głównej (3000), nie szukają zależności, wykonują się po kolei (a, b, …)
+  // od startu operacji głównej, a ich czasy sumują się na operację główną, gdy ta nie ma własnego czasu.
+  const isSub = (lp) => { const p = subParent(lp); return p != null && byLp.has(p); };
+  const children = new Map();
+  for (const op of byLp.values()) if (isSub(op.lp)) { const p = subParent(op.lp); if (!children.has(p)) children.set(p, []); children.get(p).push(op); }
+  for (const list of children.values()) list.sort((x, y) => String(x.lp).localeCompare(String(y.lp), 'pl', { numeric: true, sensitivity: 'base' }));
+  const effHours = (op) => {
+    const kids = children.get(String(op.lp));
+    if (kids && !(op.hours > 0)) { const sum = kids.reduce((t, k) => t + (k.hours > 0 ? k.hours : 0), 0); if (sum > 0) return sum; }
+    return op.hours;
+  };
+
   function resolve(op) {
     const key = String(op.lp);
     if (result.has(key) && byLp.get(key) === op) return result.get(key);
     if (visiting.has(key)) return { start: null, end: null, state: 'cycle' };
     visiting.add(key);
     let start = null, state = 'ok';
-    if (op.startManual != null) {
+    const sub = isSub(key);
+    if (sub) {
+      const parent = byLp.get(subParent(key));
+      const sibs = children.get(parent.lp), idx = sibs.indexOf(op);
+      if (op.startManual != null) start = op.startManual;
+      else if (idx > 0) start = resolve(sibs[idx - 1]).end;
+      else start = resolve(parent).start;
+    } else if (op.startManual != null) {
       start = op.startManual;
     } else {
-      const preds = (op.preds || []).map((p) => String(p ?? '').trim()).filter(Boolean);
+      const preds = (op.preds || []).map((p) => String(p ?? '').trim()).filter(Boolean).map((p) => (isSub(p) ? subParent(p) : p));   // zależnością jest operacja główna
       if (preds.length) {
         const ends = [];
         let allResolved = true, cyc = false;
@@ -131,8 +150,10 @@ export function computeSchedule(ops, capacity) {
     }
     let end = null;
     if (state !== 'cycle') {
+      const hours = sub ? op.hours : effHours(op);
+      const station = sub ? (op.station || byLp.get(subParent(key)).station) : op.station;
       if (op.endManual != null) end = op.endManual;
-      else if (start != null && op.hours != null) end = computeEnd(start, op.hours, capacity && capacity[op.station]);
+      else if (start != null && hours != null) end = computeEnd(start, hours, capacity && capacity[station]);
       state = start == null ? 'no-start' : end == null ? 'no-end' : 'ok';
     }
     visiting.delete(key);
@@ -142,6 +163,12 @@ export function computeSchedule(ops, capacity) {
   }
   for (const op of ops) { const r = resolve(op); if (byLp.get(String(op.lp)) === op) result.set(String(op.lp), r); }
   return result;
+}
+
+/** Numer operacji głównej dla suboperacji („3000a” → „3000”); null, gdy to nie jest numer suboperacji. */
+export function subParent(lp) {
+  const m = /^(\d+)\p{L}+$/u.exec(String(lp));
+  return m ? m[1] : null;
 }
 
 // ---------------------------------------------------------------------------

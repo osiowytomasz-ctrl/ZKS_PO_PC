@@ -67,14 +67,24 @@ export async function saveOps(entries) {
   await b.commit();
 }
 
-/** Zmiana numeru operacji (plan z renamePlan): nowy klucz, usunięcie starego i poprawa poprzedników w operacjach, które się do niego odwołują – jednym zapisem wsadowym. */
+/** Zmiana numeru operacji (plan z renamePlan): nowe klucze, usunięcie starych (także suboperacji) i poprawa poprzedników – jednym zapisem wsadowym. */
 export async function renameOp(plan) {
   const { sdk, db } = await firebase();
   const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
   const b = sdk.writeBatch(db);
-  b.set(ref(plan.newId), { ops: { [plan.newId]: clean(plan.op) } }, { merge: true });
-  b.update(ref(plan.oldId), { [`ops.${plan.oldId}`]: sdk.deleteField() });
+  for (const m of plan.moves) {
+    b.set(ref(m.newId), { ops: { [m.newId]: clean(m.op) } }, { merge: true });
+    b.update(ref(m.oldId), { [`ops.${m.oldId}`]: sdk.deleteField() });
+  }
   for (const [lp, preds] of plan.referrers) b.update(ref(lp), { [`ops.${lp}.preds`]: preds });
+  await b.commit();
+}
+
+/** Usunięcie kilku operacji naraz (np. operacji głównej razem z suboperacjami). */
+export async function deleteOps(lps) {
+  const { sdk, db } = await firebase();
+  const b = sdk.writeBatch(db);
+  for (const lp of lps) b.update(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() });
   await b.commit();
 }
 
