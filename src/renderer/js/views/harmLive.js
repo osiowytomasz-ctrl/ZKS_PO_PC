@@ -184,7 +184,7 @@ export function mountHarmLive(el) {
   // ---------- rysowanie ----------
   function draw() {
     const sc = st.scale, HOUR = BASE.hour * sc, ROW = Math.round(st.layout.rowH * sc), FONT = BASE.font * sc;
-    const HEAD = Math.ceil(textW('00.00.0000', FONT, false)) + 14;   // wysokość nagłówka = długość daty w pionie
+    const HEAD = Math.ceil(Math.max(textW('00.00.0000', FONT, false), ...COLS.filter((c) => c.vertical).map((c) => textW(c.title, FONT, true)))) + 14;   // wysokość nagłówka = najdłuższy opis w pionie (data albo tytuł kolumny)
     const cols = shownCols();
     const colW = (c) => Math.round((c.isDate ? st.layout.dateW : c.w) * sc);
     const LEFT = cols.reduce((a, c) => a + colW(c), 0) + Math.round(34 * sc);
@@ -208,7 +208,7 @@ export function mountHarmLive(el) {
       leftHead.append(h('div', { title: `Kolumna ${c.letter}${c.ro ? ' (liczona przez program)' : ''}. Kliknij: filtr i sortowanie`, onclick: () => openFilter(c),
         style: { width: colW(c) + 'px', flex: 'none', boxSizing: 'border-box', borderRight: '1px solid #999', padding: '3px', fontSize: FONT + 'px', fontWeight: 700, cursor: 'pointer', userSelect: 'none', overflow: 'hidden', display: 'flex', alignItems: 'flex-end',
           background: filtered ? '#cfe3ff' : hideable ? '#ff0000' : '#e4e4e4', color: hideable && !filtered ? '#fff' : '#000' } },
-        h('span', { style: { lineHeight: '1.15', wordBreak: 'break-word' } }, c.title + (filtered ? ' ▼' : '') + (sortLabel(c.key) ? ' ' + sortLabel(c.key) : ''))));
+        h('span', { style: c.vertical ? { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', lineHeight: '1.15', margin: '0 auto' } : { lineHeight: '1.15', wordBreak: 'break-word', whiteSpace: c.w <= 40 ? 'nowrap' : 'normal' } }, c.title + (filtered ? ' ▼' : '') + (sortLabel(c.key) ? ' ' + sortLabel(c.key) : ''))));
     }
     leftHead.append(h('div', { style: { flex: 1 } }));
     left.append(leftHead);
@@ -259,7 +259,7 @@ export function mountHarmLive(el) {
       for (const col of cols) {
         const text = val(r, col);
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
-        const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : '',
+        const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
             background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);

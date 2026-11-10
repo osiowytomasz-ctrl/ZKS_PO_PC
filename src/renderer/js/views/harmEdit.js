@@ -10,18 +10,18 @@ export const COLS = [
   { key: 'z1', letter: 'B', title: 'Z1', w: 48, group: 'z', pred: 0 }, { key: 'z2', letter: 'C', title: 'Z2', w: 48, group: 'z', pred: 1 },
   { key: 'z3', letter: 'D', title: 'Z3', w: 48, group: 'z', pred: 2 }, { key: 'z4', letter: 'E', title: 'Z4', w: 48, group: 'z', pred: 3 },
   { key: 'client', letter: 'F', title: 'Klient', w: 130, text: true },
-  { key: 'komis', letter: 'G', title: 'Komis', w: 78, text: true },
+  { key: 'komis', letter: 'G', title: 'Komis', w: 56, text: true },
   { key: 'element', letter: 'H', title: 'Opis operacji nazwa/element', w: 300, text: true },
   { key: 'start', letter: 'I', title: 'Start zlec.', w: 116, ro: true, isDate: true },
   { key: 'startManual', letter: 'J', title: 'Start ręcznie', w: 116, date: true, isDate: true },
-  { key: 'hours', letter: 'K', title: 'Czas [h]', w: 62, num: true },
+  { key: 'hours', letter: 'K', title: 'Czas [h]', w: 34, num: true, vertical: true },
   { key: 'endManual', letter: 'L', title: 'Koniec ręcznie', w: 116, date: true, isDate: true },
   { key: 'koniec', letter: 'M', title: 'Koniec zlec.', w: 116, ro: true, isDate: true },
   { key: 'wysylka', letter: 'R', title: 'Zakończenie', w: 116, date: true, isDate: true },
-  { key: 'key', letter: 'S', title: 'Stat. (klucz)', w: 150, ro: true },
-  { key: 'status', letter: 'T', title: 'Status', w: 64, text: true },
+  { key: 'key', letter: 'S', title: 'Stat. (klucz)', w: 48, ro: true, vertical: true },
+  { key: 'status', letter: 'T', title: 'Status', w: 30, text: true, vertical: true },
   { key: 'dostawa', letter: 'X', title: 'Dostawa', w: 116, date: true, isDate: true },
-  { key: 'station', letter: 'AB', title: 'Stan.', w: 62, text: true },
+  { key: 'station', letter: 'AB', title: 'Stan.', w: 34, text: true },
 ];
 export const isSynthetic = (id) => /^s\d+$/.test(id);
 
