@@ -2,7 +2,7 @@
 //  - harm_ops/{chunk}: { ops: { "<lp>": {preds, client, komis, element, station, hours, startManual, endManual, wysylka, dostawa, status} } }
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
 //  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
-//  - W bazie są wyłącznie suche dane tekstowe/liczbowe (bez kolorów i czcionek).
+//  - config/main: { stations: [{name, bg, color}] } – tylko zmiany użytkownika (kolory stanowisk i dodane stanowiska); domyślne są w kodzie.
 import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, DAY_MS } from './schedule.js';
 
 export const HORIZON_DAYS = 417;   // komórka S12 arkusza: operacje startujące dalej niż tyle dni od dziś trafiają za stanowiska
@@ -21,9 +21,17 @@ export const fmtDt = (ms) => { if (ms == null) return ''; const d = new Date(ms)
 
 // Kolory stanowisk (domyślne; można je zmienić w config/main).
 export const DEFAULT_STATIONS = [
-  { name: '1Si', bg: '#9fc5e8', color: '#000000' }, { name: '2Un', bg: '#b6d7a8', color: '#000000' }, { name: '3Co', bg: '#ffe599', color: '#000000' },
-  { name: '5Śl', bg: '#ea9999', color: '#000000' }, { name: 'Do', bg: '#d9d2e9', color: '#000000' }, { name: 'Narz', bg: '#d9d9d9', color: '#000000' },
+  { name: '1Si', bg: '#0070c0', color: '#ffffff' }, { name: '2Un', bg: '#00b0f0', color: '#000000' }, { name: '3Co', bg: '#ffc000', color: '#000000' },
+  { name: '5Śl', bg: '#92d050', color: '#000000' }, { name: 'Do', bg: '#d9d2e9', color: '#000000' }, { name: 'Narz', bg: '#bfbfbf', color: '#000000' },
 ];
+export const FALLBACK_STATION = { bg: '#cccccc', color: '#000000' };
+/** Stanowiska: domyślne (kolory ze zrzutu arkusza) nadpisane ustawieniami z bazy (cfg.stations) + stanowiska dodane przez użytkownika. */
+export function stationList(cfg) {
+  const over = new Map(((cfg && cfg.stations) || []).filter((x) => x && x.name).map((x) => [x.name, x]));
+  const list = DEFAULT_STATIONS.map((d) => ({ ...d, ...(over.get(d.name) || {}), builtin: true, custom: over.has(d.name) }));
+  for (const [name, x] of over) if (!DEFAULT_STATIONS.some((d) => d.name === name)) list.push({ name, bg: x.bg || FALLBACK_STATION.bg, color: x.color || FALLBACK_STATION.color, sum: !!x.sum, builtin: false, custom: true });
+  return list;
+}
 
 /**
  * Grafik z karty graf_norm (odpowiedź API getGrafNorm): header = nagłówki od kolumny H (pierwszy pusty = data), rows = dni
@@ -44,7 +52,7 @@ export function parseGrafik(g) {
 export const daysByKeyOf = (parsed) => Object.fromEntries(parsed.days.map((d) => [d.key, d.slots]));
 
 /** Pojemność każdego stanowiska z kodów miejsc pracy: { stanowisko: buildCapacity(...) }. `daysByKey`: { "RRRR-MM-DD": {nagłówek: kod} }. */
-export function capacityFrom(daysByKey, stationNames) {
+export function capacityFrom(daysByKey, stationNames, sumStations) {
   const keys = Object.keys(daysByKey).sort();
   const out = {};
   for (const st of stationNames) {
@@ -52,7 +60,7 @@ export function capacityFrom(daysByKey, stationNames) {
       const slots = daysByKey[k], codes = Array(9).fill('');
       for (const [header, code] of Object.entries(slots)) { const n = slotNumber(header, st); if (n) codes[n - 1] = code; }
       const [y, mo, d] = k.split('-').map(Number);
-      return { date: Date.UTC(y, mo - 1, d), hours: stationHours(st, codes) };
+      return { date: Date.UTC(y, mo - 1, d), hours: stationHours(st, codes, sumStations && sumStations.has(st) ? true : undefined) };
     });
     out[st] = buildCapacity(list);
   }
@@ -71,11 +79,11 @@ export function statKey(o, r, key) {
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
  */
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
-  const stations = DEFAULT_STATIONS;   // kolory i czcionki nie są w bazie (ustalimy później); tu tylko domyślne wyświetlanie
+  const stations = stationList(cfg);
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
   const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => Number(a.lp) - Number(b.lp) || String(a.lp).localeCompare(b.lp));
   const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
-  const capacity = capacityFrom(daysByKey, names);
+  const capacity = capacityFrom(daysByKey, names, new Set(stations.filter((x) => x.sum).map((x) => x.name)));
   const result = computeSchedule(list, capacity);
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};

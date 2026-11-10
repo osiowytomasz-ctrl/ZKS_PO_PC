@@ -3,9 +3,9 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
-import { watchHarm, importOps } from '../harmStore.js';
+import { watchHarm, importOps, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 
@@ -99,6 +99,71 @@ export function mountHarmLive(el) {
         h('button', { class: 'btn primary', onclick: apply }, 'OK'))));
   }
 
+  const komisColor = (komis) => { const k = String(komis ?? '').trim(); const f = k && st.m && st.m.cfg && (st.m.cfg.komisColors || []).find((x) => x.komis === k); return f || null; };
+
+  // ---------- ustawienia harmonogramu (kolory stanowisk, nowe stanowiska, kolory komisów) ----------
+  function stationsDialog() {
+    const cur = stationList(st.m && st.m.cfg);
+    const rows = cur.map((x) => ({ name: x.name, bg: x.bg, color: x.color, sum: !!x.sum, builtin: x.builtin }));
+    const box = h('div', {});
+    const render = () => {
+      clear(box);
+      for (const r of rows) {
+        const def = DEFAULT_STATIONS.find((d) => d.name === r.name);
+        const bgI = h('input', { type: 'color', value: parseSheetColor(r.bg, '#cccccc'), oninput: () => { r.bg = bgI.value; sample.style.background = r.bg; } });
+        const fgI = h('input', { type: 'color', value: parseSheetColor(r.color, '#000000'), oninput: () => { r.color = fgI.value; sample.style.color = r.color; } });
+        const sample = h('span', { style: { display: 'inline-block', width: '64px', textAlign: 'center', fontStyle: 'italic', fontWeight: 700, padding: '2px 6px', background: r.bg, color: r.color } }, r.name);
+        box.append(h('div', { class: 'row', style: { margin: '4px 0', alignItems: 'center' } }, sample, h('span', { class: 'muted' }, 'tło'), bgI, h('span', { class: 'muted' }, 'tekst'), fgI,
+          def ? h('button', { class: 'btn small', title: 'Przywraca kolory ze zrzutu arkusza', onclick: () => { r.bg = def.bg; r.color = def.color; render(); } }, 'Domyślne')
+              : h('label', { class: 'muted', title: 'Zaznacz, gdy godziny wszystkich miejsc pracy mają się sumować (jak Śl, Do, Narz). Bez zaznaczenia stanowisko liczy się jak maszyna: jeden operator, do 8 h na zmianę' }, h('input', { type: 'checkbox', checked: r.sum, onchange: (e) => { r.sum = e.target.checked; } }), ' sumuj godziny'),
+          def ? null : h('button', { class: 'btn small', title: 'Usuwa dodane stanowisko z listy (operacje zostają)', onclick: () => { rows.splice(rows.indexOf(r), 1); render(); } }, 'Usuń')));
+      }
+    };
+    render();
+    // kolory komisów: wiersz = komis + kolor tła + kolor tekstu
+    const kRows = ((st.m && st.m.cfg && st.m.cfg.komisColors) || []).map((x) => ({ komis: x.komis, bg: x.bg || '#ffe599', color: x.color || '#000000' }));
+    const kBox = h('div', {});
+    const kRender = () => {
+      clear(kBox);
+      if (!kRows.length) kBox.append(h('div', { class: 'muted' }, 'Brak pozycji. Wpisz komis (np. 25/803) i wybierz kolor.'));
+      for (const r of kRows) {
+        const bgI = h('input', { type: 'color', value: parseSheetColor(r.bg, '#ffe599'), oninput: () => { r.bg = bgI.value; sample.style.background = r.bg; } });
+        const fgI = h('input', { type: 'color', value: parseSheetColor(r.color, '#000000'), oninput: () => { r.color = fgI.value; sample.style.color = r.color; } });
+        const sample = h('span', { style: { display: 'inline-block', minWidth: '84px', textAlign: 'center', padding: '2px 6px', background: r.bg, color: r.color } }, r.komis);
+        kBox.append(h('div', { class: 'row', style: { margin: '4px 0', alignItems: 'center' } }, sample, h('span', { class: 'muted' }, 'tło'), bgI, h('span', { class: 'muted' }, 'tekst'), fgI,
+          h('button', { class: 'btn small', onclick: () => { kRows.splice(kRows.indexOf(r), 1); kRender(); } }, 'Usuń')));
+      }
+    };
+    kRender();
+    const komisI = h('input', { type: 'text', placeholder: 'Komis, np. 25/803', style: { padding: '4px', width: '220px' }, spellcheck: 'false', list: 'harm-komis-list' });
+    const komisHints = h('datalist', { id: 'harm-komis-list' }, ...[...new Set(((st.data && st.data.rows) || []).map((r) => r.komis).filter(Boolean))].sort().map((k) => h('option', { value: k })));
+    const kAdd = h('button', { class: 'btn small', onclick: () => {
+      const k = komisI.value.trim();
+      if (!k) { toast('Wpisz komis'); return; }
+      if (kRows.some((r) => r.komis === k)) { toast('Ten komis ma już kolor'); return; }
+      kRows.push({ komis: k, bg: '#ffe599', color: '#000000' }); komisI.value = ''; kRender();
+    } }, 'Dodaj komis');
+    const nameI = h('input', { type: 'text', placeholder: 'Nazwa nowego stanowiska, np. 4Fr', style: { padding: '4px', width: '220px' }, spellcheck: 'false' });
+    const addBtn = h('button', { class: 'btn small', onclick: () => {
+      const name = nameI.value.trim();
+      if (!name) { toast('Wpisz nazwę stanowiska'); return; }
+      if (rows.some((r) => r.name.toLowerCase() === name.toLowerCase())) { toast('Takie stanowisko już jest'); return; }
+      rows.push({ name, bg: '#cccccc', color: '#000000', sum: false, builtin: false }); nameI.value = ''; render();
+    } }, 'Dodaj stanowisko');
+    const save = async () => {
+      // zapisujemy tylko zmiany: stanowiska dodane i te, których kolory różnią się od domyślnych
+      const list = rows.filter((r) => { const d = DEFAULT_STATIONS.find((x) => x.name === r.name); return !d || d.bg !== r.bg || d.color !== r.color || r.sum; });
+      try { await saveSettings(list, kRows); m.close(); toast('Zapisano ustawienia'); } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
+    };
+    const m = modal('Ustawienia harmonogramu', h('div', {},
+      h('h3', { style: { margin: '4px 0' } }, 'Stanowiska'),
+      h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
+      box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli.'),
+      kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: save }, 'Zapisz'))));
+  }
+
   // ---------- rysowanie ----------
   function draw() {
     const sc = st.scale, HOUR = BASE.hour * sc, ROW = Math.round(BASE.row * sc), FONT = BASE.font * sc, HEAD = Math.round(BASE.head * sc);
@@ -134,17 +199,18 @@ export function mountHarmLive(el) {
 
     const chartEl = h('div', { style: { position: 'relative', width: chartW + 'px', flex: 'none' } });
     const head = h('div', { style: { position: 'sticky', top: 0, zIndex: 5, height: HEAD + 'px', width: chartW + 'px', overflow: 'hidden' } });
-    const rowsEl = h('div', { style: { position: 'relative', height: n * ROW + 'px', width: chartW + 'px' } });
+    const rowsEl = h('div', { style: { position: 'relative', height: n * ROW + 'px', width: chartW + 'px', background: '#f2f2f2' } });
     const holidays = H.holidaySet([]);
     let x = 0, day = new Date(Date.UTC(chart.axisStart.getUTCFullYear(), chart.axisStart.getUTCMonth(), chart.axisStart.getUTCDate()));
     const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     for (let i = 0; i < chart.totalDays + 1; i++) {
       const w = (i === 0 ? chart.firstDayHours : 24) * HOUR;
       const kind = H.dayKind(day, holidays), isToday = day.getTime() === todayUtc;
-      const bg = kind === 'sun' ? '#ffb3b3' : kind === 'sat' ? '#00b0f0' : '#eee';
+      const bg = kind === 'sun' ? '#ff0000' : kind === 'sat' ? '#00b0f0' : '#00b050';   // jak w arkuszu: dzień roboczy zielony, sobota niebieska, niedziela/święto czerwone
       head.append(h('div', { style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: HEAD + 'px', background: bg, borderRight: '1px solid #999', borderBottom: '1px solid #999', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
-        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isToday ? 700 : 400 } }, H.dayLabel(day))));
-      if (kind !== 'work' || isToday) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 2, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: isToday ? 'rgba(0,176,80,.18)' : kind === 'sun' ? 'rgba(255,179,179,.25)' : 'rgba(0,176,240,.12)' } }));
+        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isToday ? 700 : 400, color: kind === 'sat' ? '#000' : '#fff' } }, H.dayLabel(day))));
+      if (kind !== 'work') rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 0, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: '#ffffff' } }));   // weekend i święta: białe tło
+      if (isToday) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 2, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: 'rgba(0,176,80,.18)' } }));
       x += w; day = new Date(day.getTime() + 24 * 3600000);
     }
     const nowX = (now.getTime() - chart.axisStart.getTime()) / 3600000 * HOUR;
@@ -170,13 +236,15 @@ export function mountHarmLive(el) {
     for (let i = from; i < to; i++) {
       const it = chart.items[i], r = it.row;
       const done = String(r.status).trim().toLowerCase() === 'zak.';
-      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', borderBottom: '1px solid #ddd', boxSizing: 'border-box' } });
+      const kc = komisColor(r.komis);
+      const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', borderBottom: '1px solid #ddd', boxSizing: 'border-box' } });
       for (const col of cols) {
         const text = val(r, col);
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
         const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #e0e0e0',
-            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text' } }, text);
+            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
+            ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
         if (!col.ro) cell.addEventListener('click', () => startEdit(cell, r.id, col, text));
         line.append(cell);
       }
@@ -185,7 +253,7 @@ export function mountHarmLive(el) {
       g.dyn.append(h('div', { style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', borderBottom: '1px solid #e8e8e8', boxSizing: 'border-box', pointerEvents: 'none' } }));
       if (it.noBar) continue;
       const left0 = it.startHours * HOUR, w = Math.max(2, it.durationHours * HOUR);
-      const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#6d9f3d');
+      const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
       g.dyn.append(h('div', { title: [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`,
         style: { position: 'absolute', zIndex: 1, left: left0 + 'px', top: i * ROW + 2 + 'px', width: w + 'px', height: ROW - 4 + 'px', background: bg, border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } },
         h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - '))));
@@ -233,6 +301,7 @@ export function mountHarmLive(el) {
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp) }, 'Dodaj operację'),
+    h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,
     h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza'),
     h('button', { class: 'btn', onclick: load }, 'Odśwież')), body);

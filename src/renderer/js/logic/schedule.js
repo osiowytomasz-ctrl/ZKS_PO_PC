@@ -30,9 +30,9 @@ export function isSumStation(station) {
  * Godziny na dobę na stanowisku. `slotCodes` to kody miejsc pracy 1..9 (indeks 0 = miejsce 1); brak = pusty tekst.
  * Suma: wszystkie litery a/b/c ze wszystkich 9 miejsc. Maszyna: osobno dla a, b i c suma z miejsc 1–3, każda ograniczona do 8 h.
  */
-export function stationHours(station, slotCodes) {
+export function stationHours(station, slotCodes, forceSum) {
   const hours = (slotCodes || []).slice(0, 9).map(shiftHours);
-  if (isSumStation(station)) return hours.reduce((s, h) => s + h.a + h.b + h.c, 0);
+  if (forceSum ?? isSumStation(station)) return hours.reduce((s, h) => s + h.a + h.b + h.c, 0);
   const first3 = hours.slice(0, 3);
   return ['a', 'b', 'c'].reduce((s, l) => s + Math.min(MACHINE_SHIFT_CAP, first3.reduce((x, h) => x + h[l], 0)), 0);
 }

@@ -25,7 +25,7 @@ export async function watchHarm(onChange, onError) {
 
 const clean = (o) => { const r = {}; for (const [k, v] of Object.entries(o)) if (v !== undefined) r[k] = v; return r; };
 
-/** Import operacji z arkusza (wynik opsFromSheetRows): zastępuje całą zawartość harm_ops. Tylko suche dane; stary config/main (kolory) jest usuwany. */
+/** Import operacji z arkusza (wynik opsFromSheetRows): zastępuje całą zawartość harm_ops. Tylko suche dane; ustawienia stanowisk (config/main) zostają. */
 export async function importOps(operations) {
   const { sdk, db } = await firebase();
   const chunks = new Map();
@@ -40,7 +40,6 @@ export async function importOps(operations) {
   old.forEach((d) => { if (!chunks.has(d.id)) writes.push((b) => b.delete(d.ref)); });
   for (const [id, ops] of chunks) writes.push((b) => b.set(sdk.doc(db, 'harm_ops', id), { ops }));
   await commit(sdk, db, writes);
-  try { await sdk.deleteDoc(sdk.doc(db, 'config', 'main')); } catch { /* brak dokumentu */ }
   return { chunks: chunks.size, operations: operations.length };
 }
 
@@ -69,4 +68,13 @@ async function commit(sdk, db, writes) {
     for (const w of writes.slice(i, i + BATCH)) w(b);
     await b.commit();
   }
+}
+
+/** Zapis ustawień harmonogramu: stanowiska [{name, bg, color, sum?}] i kolory komisów [{komis, bg, color}] (zamienia całe listy). */
+export async function saveSettings(stations, komisColors) {
+  const { sdk, db } = await firebase();
+  await sdk.setDoc(sdk.doc(db, 'config', 'main'), {
+    stations: stations.map(({ name, bg, color, sum }) => (sum ? { name, bg, color, sum: true } : { name, bg, color })),
+    komisColors: komisColors.map(({ komis, bg, color }) => ({ komis, bg, color })),
+  }, { merge: true });
 }
