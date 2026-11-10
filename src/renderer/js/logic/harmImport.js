@@ -46,10 +46,10 @@ export function detectDelimiter(src) {
 export function parseDateTime(value) {
   const t = String(value ?? '').trim();
   if (!t) return null;
-  let m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2})(?::(\d{2}))?)?$/.exec(t);
+  let m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2}|\d{4})(?:[\sT]+(\d{1,2})(?::(\d{2}))?(?::\d{2})?)?$/.exec(t);
   let y, mo, d, h = 0, mi = 0;
-  if (m) { d = +m[1]; mo = +m[2]; y = +m[3]; h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; }
-  else if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?)?$/.exec(t))) { y = +m[1]; mo = +m[2]; d = +m[3]; h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; }
+  if (m) { d = +m[1]; mo = +m[2]; y = +m[3]; if (y < 100) y += 2000; h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; }
+  else if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T]+(\d{1,2})(?::(\d{2}))?(?::\d{2})?)?$/.exec(t))) { y = +m[1]; mo = +m[2]; d = +m[3]; h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; }
   else return null;
   const ms = Date.UTC(y, mo - 1, d, h, mi);
   const back = new Date(ms);
