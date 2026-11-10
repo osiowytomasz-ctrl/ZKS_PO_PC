@@ -2,6 +2,7 @@ import { h, clear, api, apiCached, toast, modal, field, filterHeader, columnFilt
 import * as G from '../logic/grafik.js';
 import { updateSorts, sortLabels, parseSheetColor, filterSummary } from '../logic/common.js';
 import { sortSummary } from '../logic/tableFilter.js';
+import { GR_MAX_AGE } from '../prefetch.js';
 
 export function mountGrafik(el, ctx) {
   const canWrite = ctx.level('grafik') === 'write';
@@ -25,16 +26,16 @@ export function mountGrafik(el, ctx) {
   }
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(st.zoom + (e.deltaY < 0 ? 10 : -10)); } }, { passive: false });
 
-  async function load(s, e) {
+  async function load(s, e, force = false) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…')); message.textContent = '';
     st.changes = new Map(); st.filters = {}; st.sorts = []; st.fresh = false;
     const show = (range) => (data, meta) => { st.data = data; st.loaded = range; st.fresh = !meta.cached; if (st.fresh) st.changes = new Map(); draw(); };
     try {
       try {
-        await apiCached('getGrData', [s, e], show({ start: s, end: e }));
+        await apiCached('getGrData', [s, e], show({ start: s, end: e }), { maxAge: GR_MAX_AGE, force });
       } catch (err) {
         // Gdy arkusz nie ma dat z zakresu, pokazujemy cały grafik (jak w aplikacji na Androida).
-        if (/zakres/i.test(err.message)) { startIn.value = ''; endIn.value = ''; await apiCached('getGrData', ['', ''], show({ start: '', end: '' })); }
+        if (/zakres/i.test(err.message)) { startIn.value = ''; endIn.value = ''; await apiCached('getGrData', ['', ''], show({ start: '', end: '' }), { maxAge: GR_MAX_AGE, force }); }
         else throw err;
       }
     } catch (err) {
@@ -136,7 +137,7 @@ export function mountGrafik(el, ctx) {
       const r = await api('saveGrData', [list, st.loaded.start, st.loaded.end]);
       toast((r && r.message) || 'Grafik zapisany.');
       st.changes = new Map(); st.saving = false;
-      await load(st.loaded.start, st.loaded.end);
+      await load(st.loaded.start, st.loaded.end, true);   // po zapisie zawsze świeże dane z serwera
     } catch (e) {
       st.saving = false;
       const hint = e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież grafik i sprawdź, zanim spróbujesz ponownie.' : '';
@@ -145,7 +146,7 @@ export function mountGrafik(el, ctx) {
     }
   }
 
-  const apply = h('button', { class: 'btn', onclick: () => load(startIn.value, endIn.value) }, 'Pokaż');
+  const apply = h('button', { class: 'btn', onclick: () => load(startIn.value, endIn.value, true) }, 'Pokaż');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '8px';
   el.append(
     h('div', { class: 'row panel' }, 'Od', startIn, 'do', endIn, apply, h('span', { class: 'grow' }),

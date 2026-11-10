@@ -1,6 +1,7 @@
 import { h, clear, api, apiCached, modal } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { parseSheetColor } from '../logic/common.js';
+import { HARM_MAX_AGE } from '../prefetch.js';
 
 // Wymiary przy skali 100% (px). Skala zmienia je wszystkie razem, jak w aplikacji na Androida.
 const BASE = { hour: 0.75, row: 22, font: 11, head: 78, startW: 92, endW: 92, stationW: 48 };
@@ -12,10 +13,10 @@ export function mountHarm(el, ctx) {
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, position: 'relative' } });
   const info = h('span', { class: 'muted' });
 
-  async function load() {
+  async function load(force = false) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie harmonogramu…'));
-    try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000 }); }
-    catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
+    try { await apiCached('getHarmData', [], (d) => { st.data = d; draw(); }, { timeoutMs: 180000, maxAge: HARM_MAX_AGE, force }); }
+    catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
   }
 
   function openFilter(kind, title, values) {
@@ -135,6 +136,6 @@ export function mountHarm(el, ctx) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     fK, fS, ...Object.values(sortBtns),
     h('button', { class: 'btn small', onclick: () => { st.filters = { komis: new Set(), station: new Set() }; st.sorts = H.emptySorts(); draw(); } }, 'Wyczyść'),
-    h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: load }, 'Odśwież')), body);
+    h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), body);
   load();
 }

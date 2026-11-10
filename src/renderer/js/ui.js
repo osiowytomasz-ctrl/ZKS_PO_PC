@@ -37,19 +37,39 @@ export async function api(fn, args = [], opts = {}) {
  * wywoływane jest od razu, a potem `onData(świeże, {cached:false})`, gdy dojdą z serwera. Zwraca obietnicę rozwiązywaną przy
  * pierwszych danych (z pamięci albo z serwera). Błąd serwera przy istniejących danych z pamięci to tylko komunikat.
  */
+const inflight = new Map();
+/** To samo wywołanie (funkcja + argumenty) w toku jest wspólne: wejście w moduł w trakcie pobierania w tle nie zaczyna drugiego zapytania. */
+function apiShared(fn, args, opts) {
+  const k = fn + '|' + JSON.stringify(args || []);
+  if (inflight.has(k)) return inflight.get(k);
+  const p = api(fn, args || [], { ...opts, cache: true }).finally(() => inflight.delete(k));
+  inflight.set(k, p);
+  return p;
+}
+
+/**
+ * Odczyt z pamięcią podręczną (stale-while-revalidate): jeśli są zapisane dane z poprzedniego razu, `onData(dane, {cached:true, age})`
+ * wywoływane jest od razu, a potem `onData(świeże, {cached:false})`, gdy dojdą z serwera. Zwraca obietnicę rozwiązywaną przy
+ * pierwszych danych (z pamięci albo z serwera). Błąd serwera przy istniejących danych z pamięci to tylko komunikat (chyba że `silent`).
+ * Opcje: `maxAge` (ms): dane z pamięci nie starsze niż tyle traktujemy jako świeże i nie pytamy serwera;
+ * `force`: pomija pamięć i pyta serwer; `silent`: bez komunikatu o błędzie (odświeżanie w tle).
+ */
 export async function apiCached(fn, args, onData, opts = {}) {
-  const cached = await window.zks.cacheGet(fn, args || []);
+  const { maxAge = 0, silent = false, force = false, ...apiOpts } = opts;
+  const cached = force ? null : await window.zks.cacheGet(fn, args || []);
   let resolveFirst, rejectFirst, settled = false;
   const first = new Promise((res, rej) => { resolveFirst = res; rejectFirst = rej; });
   if (cached && cached.data !== undefined) {
-    onData(cached.data, { cached: true, age: Date.now() - cached.t });
+    const age = Date.now() - cached.t;
+    if (maxAge && age <= maxAge) { onData(cached.data, { cached: false, age, recent: true }); return cached.data; }
+    onData(cached.data, { cached: true, age });
     settled = true; resolveFirst(cached.data);
   }
-  api(fn, args || [], { ...opts, cache: true }).then((data) => {
-    onData(data, { cached: false });
+  apiShared(fn, args, apiOpts).then((data) => {
+    onData(data, { cached: false, age: 0 });
     if (!settled) { settled = true; resolveFirst(data); }
   }).catch((e) => {
-    if (settled) toast('Nie udało się odświeżyć danych: ' + e.message + ' (widać dane z pamięci)', true);
+    if (settled) { if (!silent) toast('Nie udało się odświeżyć danych: ' + e.message + ' (widać dane z pamięci)', true); }
     else rejectFirst(e);
   });
   return first;

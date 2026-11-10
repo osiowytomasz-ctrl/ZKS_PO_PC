@@ -1,5 +1,6 @@
 import { h, clear, api, apiCached, toast } from './ui.js';
 import { preload } from './catalog.js';
+import { startBackgroundRefresh } from './prefetch.js';
 import { permissionsSummary } from './logic/common.js';
 import { mountHome } from './views/home.js';
 import { mountSettings } from './views/settings.js';
@@ -104,5 +105,8 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   const cfg = await window.zks.getSettings();
   if (cfg.url && cfg.key) await ctx.loadUser();
   go(cfg.url && cfg.key ? 'home' : 'settings');
-  if (cfg.url && cfg.key) { preload(); apiCached('getProductCodes', [], () => {}).catch(() => {}); }
+  if (cfg.url && cfg.key) {
+    preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
+    startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none');
+  }
 })();
