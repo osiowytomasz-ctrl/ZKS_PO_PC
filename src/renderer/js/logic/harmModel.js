@@ -60,21 +60,33 @@ export function renamePlan(opsByLp, oldId, newId) {
   if (err) return { error: err };
   if (neu === oldId) return { error: null, same: true };
   const idMap = new Map([[oldId, neu]]);
-  const wasMain = /^\d+$/.test(oldId);
-  if (wasMain) {
-    if (!/^\d+$/.test(neu)) return { error: 'Operacja główna musi mieć numer liczbowy (litery dodaje się tylko do suboperacji)' };
-    for (const sub of subOps(opsByLp, oldId)) {
-      const target = neu + sub.slice(oldId.length);
-      if (opsByLp[target]) return { error: `Nie można przenieść suboperacji ${sub}: numer ${target} już istnieje` };
-      idMap.set(sub, target);
+  if (/^\d+$/.test(oldId)) {
+    const subs = subOps(opsByLp, oldId);
+    if (/^\d+$/.test(neu)) {
+      for (const sub of subs) {                                  // operacja główna zabiera swoje suboperacje pod nowy numer
+        const target = neu + sub.slice(oldId.length);
+        if (opsByLp[target]) return { error: `Nie można przenieść suboperacji ${sub}: numer ${target} już istnieje` };
+        idMap.set(sub, target);
+      }
+    } else if (subs.length) {                                    // operacja główna → suboperacja innej operacji: tylko gdy sama nie ma suboperacji
+      return { error: `Operacja ${oldId} ma suboperacje (${subs.join(', ')}); najpierw zmień ich numery albo je usuń` };
     }
-  } else if (subParent(oldId) && !subParent(neu) && /^\d+$/.test(neu) === false) {
-    return { error: 'Nieprawidłowy numer' };
   }
   const fix = (preds) => (preds || []).map((p) => idMap.get(p) ?? p);
   const moves = [...idMap].map(([from, to]) => ({ oldId: from, newId: to, op: { ...opsByLp[from], preds: fix(opsByLp[from].preds) } }));
   const referrers = [];
   for (const [lp, op] of Object.entries(opsByLp)) if (!idMap.has(lp) && (op.preds || []).some((p) => idMap.has(p))) referrers.push([lp, fix(op.preds)]);
+  // Po zmianie numeru operacja może trafić pod inną operację główną (albo spod niej wyjść), więc sprawdzamy, czy powiązania nie utworzą cyklu.
+  const newParent = subParent(neu);
+  if (newParent && (opsByLp[oldId].preds || []).includes(newParent)) return { error: `Operacja ${oldId} zależy od ${newParent}, która byłaby jej operacją główną; usuń najpierw to powiązanie` };
+  const sim = { ...opsByLp };
+  for (const m of moves) delete sim[m.oldId];
+  for (const m of moves) sim[m.newId] = m.op;
+  for (const [lp, preds] of referrers) sim[lp] = { ...sim[lp], preds };
+  const cyclesOf = (ops) => new Set([...computeSchedule(Object.entries(ops).map(([lp, o]) => ({ lp, ...o })), {})].filter(([, r]) => r.state === 'cycle').map(([lp]) => lp));
+  const before = cyclesOf(opsByLp), after = cyclesOf(sim);
+  const fresh = [...after].filter((lp) => !before.has([...idMap].find(([, to]) => to === lp)?.[0] ?? lp));
+  if (fresh.length) return { error: `Zmiana numeru utworzyłaby cykl zależności (operacje: ${fresh.slice(0, 5).join(', ')}); popraw najpierw powiązania` };
   return { error: null, oldId, newId: neu, op: moves[0].op, moves, referrers };
 }
 

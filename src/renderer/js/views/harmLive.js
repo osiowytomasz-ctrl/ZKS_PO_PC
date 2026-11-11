@@ -25,7 +25,7 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    collapsed: new Set(), collapsedInit: false, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(), collapsedInit: false, selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
@@ -109,6 +109,19 @@ export function mountHarmLive(el) {
   }
 
   const komisColor = (komis) => { const k = String(komis ?? '').trim(); const f = k && st.m && st.m.cfg && (st.m.cfg.komisColors || []).find((x) => x.komis === k); return f || null; };
+
+  // Zaznaczenie wiersza: kliknięcie w dowolne miejsce linii (tabela albo wykres) podświetla ją zieloną ramką z poświatą.
+  const applySelection = () => {
+    const g = st.geom; if (!g || !g.rowEls) return;
+    for (const [id, els] of g.rowEls) {
+      const on = id === st.selected;
+      els.line.style.boxShadow = on ? 'inset 0 0 0 2px #00b050, 0 0 8px 2px rgba(0,176,80,.8)' : '';
+      els.line.style.zIndex = on ? '3' : '';
+      els.chart.style.boxShadow = on ? 'inset 0 0 0 2px #00b050, 0 0 8px 2px rgba(0,176,80,.8)' : '';
+      els.chart.style.background = on ? 'rgba(0,176,80,.14)' : '';
+    }
+  };
+  const selectRow = (id) => { st.selected = id; applySelection(); };
 
   // Szczegóły operacji (po kliknięciu paska albo wiersza wykresu)
   function detail(r) {
@@ -313,7 +326,7 @@ export function mountHarmLive(el) {
     const { ROW, FONT, HEAD, HOUR, cols, colW, LEFT } = g, chart = st.chart, n = chart.items.length;
     const top = Math.max(0, body.scrollTop - HEAD - ROW * 3), vh = body.clientHeight || 700;
     const from = Math.max(0, Math.floor(top / ROW)), to = Math.min(n, Math.ceil((top + vh + 6 * ROW) / ROW));
-    clear(g.leftRows); clear(g.dyn);
+    clear(g.leftRows); clear(g.dyn); g.rowEls = new Map();
     for (let i = from; i < to; i++) {
       const it = chart.items[i], r = it.row;
       const done = String(r.status).trim().toLowerCase() === 'zak.';
@@ -341,8 +354,10 @@ export function mountHarmLive(el) {
         line.append(cell);
       }
       line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
+      line.addEventListener('mousedown', () => selectRow(r.id));
       g.leftRows.append(line);
-      g.dyn.append(h('div', { onclick: () => detail(r), style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer' } }));   // klik w wiersz wykresu
+      const chartRow = h('div', { onclick: () => { selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box' } });   // klik w wiersz wykresu
+      g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow });
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
       const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
@@ -350,7 +365,7 @@ export function mountHarmLive(el) {
       // suboperacja: czarna ramka, w środku tylko 2-pikselowa ramka w kolorze stanowiska (bez wypełnienia); operacja główna: pełny pasek
       // operacja główna złożona z suboperacji: pasek poszatkowany na odcinki suboperacji, przerwy między nimi to przesunięcia suboperacji
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, onclick: () => detail(r), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
+        const box = h('div', { title: tip, onclick: () => { selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
         if (r.sub) box.append(h('div', { style: { position: 'absolute', inset: 0, border: '2px solid ' + bg, boxSizing: 'border-box', pointerEvents: 'none' } }));
         if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
         g.dyn.append(box);
@@ -360,7 +375,7 @@ export function mountHarmLive(el) {
         const lefts = r.segs.map(([s0]) => Math.max(0, hoursAt(s0)) * HOUR), rights = r.segs.map(([, e0]) => Math.max(0, hoursAt(e0)) * HOUR);
         const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
         if (Math.max(...rights) > 0) {
-          const box = h('div', { title: tip, onclick: () => detail(r), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+          const box = h('div', { title: tip, onclick: () => { selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
           r.segs.forEach((_, k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: bg, pointerEvents: 'none' } })); });
           if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
           g.dyn.append(box);
@@ -376,6 +391,7 @@ export function mountHarmLive(el) {
       if (a === b || b < from || a >= to) continue;
       g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 3, pointerEvents: 'none', left: d.x * HOUR + 'px', top: a * ROW + ROW / 2 + 'px', width: 0, height: (b - a) * ROW + 'px', borderLeft: '1px dashed #555' } }));
     }
+    applySelection();
   }
   body.addEventListener('scroll', () => requestAnimationFrame(paintWindow));
 

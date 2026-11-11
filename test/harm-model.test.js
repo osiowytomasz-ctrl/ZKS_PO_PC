@@ -124,7 +124,7 @@ test('numery: operacja główna = liczba, suboperacja = liczba + litera; kolejno
   assert.deepEqual(plan.moves.map((m) => [m.oldId, m.newId]).sort(), [['3000', '3005'], ['3000a', '3005a'], ['3000b', '3005b']]);
   assert.deepEqual(plan.referrers, [['3001', ['3005']]]);
   assert.match(renamePlan(ops, '3000', '3001').error, /już istnieje/); assert.match(renamePlan(ops, '3000', '3000a').error, /już istnieje|główna/);
-  assert.match(renamePlan(ops, '3000', '5000a').error, /główna musi mieć numer liczbowy|wymaga/);
+  assert.match(renamePlan(ops, '3000', '5000a').error, /wymaga istniejącej operacji głównej 5000/);
   assert.equal(renamePlan(ops, '3000', '3000').same, true); assert.match(renamePlan(ops, '99', '100').error, /nie istnieje/);
   const rp = renamePlan(ops, '3000a', '3000c'); assert.equal(rp.moves.length, 1); assert.equal(rp.newId, '3000c');
   // dodawanie: suboperacja razem z operacją główną w jednej tabeli, bez operacji głównej – błąd
@@ -209,4 +209,22 @@ test('operacja główna bez zależności dziedziczy start po pierwszej suboperac
   // wykrywanie cyklu uwzględnia dziedziczenie: operacja 10 zależy teraz od końca 5, więc 5 nie może zależeć od 10
   const m = { 5: { preds: [] }, 10: { preds: [] }, '10a': { preds: ['5'], hours: 2 } };
   assert.match(predError(m, '5', 0, '10'), /cykl/);
+});
+
+test('zmiana numeru: operacja główna → suboperacja istniejącej operacji i suboperacja → wolny numer operacji', () => {
+  const ops = { 800: { preds: [] }, 805: { preds: ['700'], hours: 3 }, 700: { preds: [] }, 810: { preds: ['805'] }, 900: { preds: [] }, '900a': { hours: 1 }, 760: { preds: [] } };
+  // 805 → 800a: operacja 800 istnieje; powiązania innych operacji idą za nowym numerem
+  const p = renamePlan(ops, '805', '800a');
+  assert.equal(p.error, null); assert.deepEqual(p.moves.map((m) => [m.oldId, m.newId]), [['805', '800a']]); assert.deepEqual(p.referrers, [['810', ['800a']]]);
+  assert.deepEqual(p.moves[0].op.preds, ['700']);
+  assert.match(renamePlan(ops, '805', '850a').error, /wymaga istniejącej operacji głównej 850/);       // nie ma operacji 850
+  assert.match(renamePlan(ops, '800', '800a').error, /wymaga istniejącej operacji głównej 800/);       // 800 nie może zostać własną suboperacją
+  assert.match(renamePlan(ops, '900', '800a').error, /ma suboperacje/);                               // operacja z suboperacjami nie może zostać suboperacją
+  // powiązanie z przyszłą operacją główną blokuje zmianę (cykl)
+  assert.match(renamePlan({ ...ops, 805: { preds: ['800'] } }, '805', '800a').error, /byłaby jej operacją główną/);
+  assert.match(renamePlan({ ...ops, 800: { preds: ['805'] } }, '805', '800a').error, /cykl/);         // 800 zależałaby od własnej suboperacji
+  // suboperacja → operacja: tylko na wolny numer
+  const q = renamePlan(ops, '900a', '761');
+  assert.equal(q.error, null); assert.equal(q.newId, '761');
+  assert.match(renamePlan(ops, '900a', '760').error, /już istnieje/);
 });
