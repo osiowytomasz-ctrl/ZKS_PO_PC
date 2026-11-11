@@ -89,13 +89,14 @@ export function toast(message, isError = false) {
 }
 
 /** Okno modalne. Zwraca {close, root}. */
-export function modal(title, content, { wide = false, onClose } = {}) {
+export function modal(title, content, { wide = false, onClose, sticky = false } = {}) {
   const overlay = h('div', { class: 'overlay' });
   const box = h('div', { class: 'dialog' + (wide ? ' wide' : '') }, title ? h('h3', {}, title) : null, content);
   overlay.append(box);
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); if (onClose) onClose(); };
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
-  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+  // sticky: okno z edycją nie zamyka się klawiszem Esc ani kliknięciem obok (żeby nie stracić zmian)
+  const onKey = (e) => { if (e.key === 'Escape' && !sticky) close(); };
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay && !sticky) close(); });
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);
   return { close, root: box };

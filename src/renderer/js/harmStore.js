@@ -79,6 +79,19 @@ export async function renameOp(plan) {
   await b.commit();
 }
 
+/**
+ * Zapis gałęzi z edytora (plan z planTree): najpierw kasowanie numerów z [plan.remove] (stare numery, usunięte i nadpisywane operacje),
+ * potem zapis [plan.sets] – jednym zapisem wsadowym, więc działa też zamiana numerów miejscami.
+ */
+export async function applyTree(plan) {
+  const { sdk, db } = await firebase();
+  const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
+  const b = sdk.writeBatch(db);
+  for (const lp of plan.remove) b.update(ref(lp), { [`ops.${lp}`]: sdk.deleteField() });
+  for (const [lp, op] of plan.sets) b.set(ref(lp), { ops: { [lp]: clean(op) } }, { merge: true });
+  await b.commit();
+}
+
 /** Usunięcie kilku operacji naraz (np. operacji głównej razem z suboperacjami). */
 export async function deleteOps(lps) {
   const { sdk, db } = await firebase();

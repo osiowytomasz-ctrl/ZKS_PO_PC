@@ -89,7 +89,7 @@ export function predPicker(opsByLp, id, slot, onDone) {
 }
 
 /** Rozwijana lista stanowisk z kolorami (jak w harmonogramie). */
-function stationDropdown(stations, initial, onChange) {
+export function stationDropdown(stations, initial, onChange) {
   let value = initial || '';
   const chip = (s) => h('span', { style: { display: 'inline-block', minWidth: '52px', textAlign: 'center', padding: '1px 8px', fontStyle: 'italic', fontWeight: 700, background: s ? s.bg : '#fff', color: s ? s.color : '#000', border: '1px solid #bbb' } }, s ? s.name : '—');
   const btn = h('div', { style: { cursor: 'pointer', border: '1px solid #999', padding: '2px 4px', minHeight: '22px', background: '#fff' } });
@@ -111,7 +111,7 @@ const ADD_COLS = [
 const ADD_ROWS = 10;
 
 /** Dodawanie operacji: tabela na dziesięć wierszy (kolumny jak w danych twardych). Puste wiersze są pomijane, numery nie mogą się powtarzać. */
-export function addDialog(opsByLp, stations, onSaved) {
+export function addDialog(opsByLp, stations, onSaved, onTree) {
   let n = 1; for (const k of Object.keys(opsByLp)) if (/^\d+$/.test(k)) n = Math.max(n, Number(k) + 1);   // kolejne wolne numery; można wpisać też numery z literami
   const rows = Array.from({ length: ADD_ROWS }, (_, i) => ({ lp: String(n + i), client: '', komis: '', element: '', station: '', hours: '', wysylka: '', dostawa: '' }));
   const lpInputs = [];
@@ -131,7 +131,9 @@ export function addDialog(opsByLp, stations, onSaved) {
     h('p', { class: 'muted' }, `Wpisz do ${ADD_ROWS} operacji. Puste wiersze są pomijane. Numer: liczba (operacja, np. 100), liczba + litera (suboperacja/detal, np. 100a) albo liczba + dwie litery (subsuboperacja, np. 100aa); rodzic musi istnieć albo być w tej samej tabeli. Poprzedników, start i koniec ręczny ustawisz potem w tabeli. Daty np. 14.11.2026 14:00.`),
     h('div', { style: { overflow: 'auto', maxHeight: '60vh' } }, h('table', { style: { borderCollapse: 'collapse' } }, h('thead', {}, head), h('tbody', {}, ...body))),
     errBox,
-    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {
+    h('div', { class: 'actions' },
+      onTree ? h('button', { class: 'btn', style: { marginRight: 'auto' }, title: 'Nowa operacja z suboperacjami i subsuboperacjami jako drzewo (z notatnikiem, importem i eksportem pliku)', onclick: () => { m.close(); onTree(String(n)); } }, 'Konfigurator drzewa…') : null,
+      h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {
       const { ops, errors } = validateNewOps(rows, opsByLp, parseDateTime, parseNumber);
       if (errors.length) { errBox.textContent = errors.join('\n'); return; }
       try { await saveOps(ops); m.close(); toast(`Dodano operacji: ${ops.length}`); if (onSaved) onSaved(); } catch (e) { errBox.textContent = 'Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e); }
