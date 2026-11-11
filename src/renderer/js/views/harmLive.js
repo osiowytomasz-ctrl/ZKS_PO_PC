@@ -3,7 +3,7 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
@@ -109,15 +109,19 @@ export function mountHarmLive(el) {
 
   const komisColor = (komis) => { const k = String(komis ?? '').trim(); const f = k && st.m && st.m.cfg && (st.m.cfg.komisColors || []).find((x) => x.komis === k); return f || null; };
 
-  // Zaznaczenie wiersza: kliknięcie w dowolne miejsce linii (tabela albo wykres) podświetla ją zieloną ramką z poświatą.
+  // Zaznaczenie wiersza: kliknięcie w dowolne miejsce linii (tabela albo wykres) podświetla ją ramką z poświatą.
+  // Kliknięta linia: zielona poświata; jej suboperacje (dzieci): pomarańczowa; subsuboperacje (wnuki): żółta.
+  const GLOW = { self: '0, 176, 80', child: '255, 140, 0', grand: '255, 215, 0' };
+  const relationTo = (id, sel) => (sel == null ? null : id === sel ? 'self' : subParent(id) === sel ? 'child' : subParent(subParent(id) || '') === sel ? 'grand' : null);
   const applySelection = () => {
     const g = st.geom; if (!g || !g.rowEls) return;
     for (const [id, els] of g.rowEls) {
-      const on = id === st.selected;
-      els.line.style.boxShadow = on ? 'inset 0 0 0 2px #00b050, 0 0 8px 2px rgba(0,176,80,.8)' : '';
-      els.line.style.zIndex = on ? '3' : '';
-      els.chart.style.boxShadow = on ? 'inset 0 0 0 2px #00b050, 0 0 8px 2px rgba(0,176,80,.8)' : '';
-      els.chart.style.background = on ? 'rgba(0,176,80,.14)' : '';
+      const rel = relationTo(id, st.selected), c = rel && GLOW[rel];
+      const shadow = c ? `inset 0 0 0 2px rgb(${c}), 0 0 8px 2px rgba(${c}, .8)` : '';
+      els.line.style.boxShadow = shadow;
+      els.line.style.zIndex = c ? '3' : '';
+      els.chart.style.boxShadow = shadow;
+      els.chart.style.background = c ? `rgba(${c}, .14)` : '';
     }
   };
   const selectRow = (id) => { st.selected = id; applySelection(); };
