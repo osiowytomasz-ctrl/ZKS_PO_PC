@@ -1,11 +1,9 @@
-// Edytor gałęzi operacji (operacja › suboperacja › subsuboperacja): drzewo do edycji w oknie, ten sam zapis jako tekst do notatnika
+// Edytor gałęzi operacji (operacja › suboperacja › subsuboperacja): drzewo do edycji w oknie, opisy jako tekst do notatnika
 // (eksport/import pliku .txt) i plan zapisu ze sprawdzeniem całej logiki (numery, poziomy, duplikaty, zależności, cykle, odwołania z zewnątrz).
 // Czyste funkcje – testy: test/harm-tree.test.js. Okno: views/harmLive.js (treeEditor).
 import { ID_PATTERN, isSyntheticId, lpCompare, descendants } from './harmModel.js';
 import { computeSchedule, subParent, depthOf } from './schedule.js';
 
-const FIELDS = ['lp', 'element', 'station', 'hours', 'preds', 'komis', 'client'];
-export const TREE_COLUMNS = ['lp', 'opis', 'stanowisko', 'czas [h]', 'zależności (Z1, Z2…)', 'komis', 'klient'];
 let keySeq = 0;
 const newKey = () => 'n' + (++keySeq);
 const num = (v) => (v == null || v === '' ? '' : String(v));
@@ -85,50 +83,18 @@ export function removeNode(nodes, key) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Notatnik: tekst z kolumnami oddzielonymi „|”, wcięcie pokazuje poziom
+// Notatnik: tylko opisy operacji – jedna linia na operację, tyle linii, ile operacji otwarto do edycji (ani mniej, ani więcej)
 // ---------------------------------------------------------------------------------------------------------------------
 
-const cell = (t) => String(t ?? '').replace(/\|/g, '¦').replace(/[\r\n]+/g, ' ').trim();
+/** Opisy gałęzi jako tekst: linia N = opis N-tej operacji w kolejności drzewa. */
+export const descriptionsToText = (nodes) => nodes.map((n) => String(n.element ?? '').replace(/[\r\n]+/g, ' ')).join('\n');
 
-/** Gałąź jako tekst do notatnika (Notepad++ i podobne). */
-export function treeToText(nodes, title = '') {
-  const base = Math.min(...nodes.map((n) => depthOf(n.lp.trim()) || 0));
-  const lines = [
-    `# ${title || 'Gałąź operacji'} – edycja w notatniku. Kolumny oddziela znak |, wcięcie pokazuje poziom (nie jest wymagane).`,
-    '# Numer: liczba = operacja, + litera = suboperacja, + dwie litery = subsuboperacja. Puste komis i klient = dziedziczone po operacji nadrzędnej.',
-    '# Linia zaczynająca się od # jest komentarzem. Usunięcie linii usuwa operację (program pokaże listę zmian przed zapisem).',
-    '# ' + TREE_COLUMNS.join(' | '),
-  ];
-  for (const n of nodes) lines.push('  '.repeat(Math.max(0, (depthOf(n.lp.trim()) || 0) - base)) + FIELDS.map((f) => cell(n[f])).join(' | ').replace(/( \| )+$/, ''));
-  return lines.join('\n') + '\n';
-}
-
-/**
- * Tekst z notatnika → węzły. Węzeł z tym samym numerem co wcześniej to ta sama operacja; pozostałe nowe linie są parowane po kolei
- * z operacjami, których numer zniknął (zmiana numeru), reszta to nowe operacje. Zwraca {nodes, errors}.
- */
-export function textToTree(text, prev = []) {
-  const rows = [], errors = [];
-  String(text ?? '').split(/\r?\n/).forEach((raw, i) => {
-    const line = raw.replace(/\t/g, ' ').trim();
-    if (!line || line.startsWith('#')) return;
-    const parts = line.split('|').map((x) => x.trim());
-    if (parts.length > FIELDS.length) { errors.push(`Linia ${i + 1}: za dużo kolumn (${parts.length}); znak | oddziela kolumny`); return; }
-    const r = { line: i + 1 };
-    FIELDS.forEach((f, k) => { r[f] = (parts[k] ?? '').replace(/¦/g, '|'); });
-    if (!r.lp) { errors.push(`Linia ${i + 1}: brak numeru operacji`); return; }
-    rows.push(r);
-  });
-  const free = prev.filter((p) => !rows.some((r) => r.lp === p.lp.trim()));
-  const used = new Set();
-  const nodes = rows.map((r) => {
-    let p = prev.find((x) => x.lp.trim() === r.lp && !used.has(x.key));
-    if (!p) p = free.find((x) => !used.has(x.key));
-    if (p) used.add(p.key);
-    const { line, ...fields } = r;
-    return { key: p ? p.key : newKey(), orig: p ? p.orig : null, line, ...fields };
-  });
-  return { nodes: sortTree(nodes), errors };
+/** Tekst z notatnika → nowe opisy. Liczba linii musi się zgadzać z liczbą operacji (końcowy pusty wiersz jest pomijany). Zwraca {nodes, errors}. */
+export function descriptionsFromText(text, nodes) {
+  const lines = String(text ?? '').replace(/^\uFEFF/, '').split(/\r?\n/);
+  if (lines.length === nodes.length + 1 && lines[lines.length - 1] === '') lines.pop();
+  if (lines.length !== nodes.length) return { nodes, errors: [`Notatnik musi mieć dokładnie ${nodes.length} ${nodes.length === 1 ? 'linię' : 'linii'} – jedną na operację (jest ${lines.length})`] };
+  return { nodes: nodes.map((n, i) => ({ ...n, element: lines[i].trim() })), errors: [] };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

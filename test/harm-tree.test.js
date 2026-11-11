@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { treeFromOps, renameNode, moveNode, addChild, removeNode, treeToText, textToTree, planTree, emptyNode } from '../src/renderer/js/logic/harmTree.js';
+import { treeFromOps, renameNode, moveNode, addChild, removeNode, descriptionsToText, descriptionsFromText, planTree, emptyNode } from '../src/renderer/js/logic/harmTree.js';
 
 const ops = () => ({
   600: { element: 'Zespół', komis: '26/934', preds: [], startManual: 1, status: '' },
@@ -32,17 +32,15 @@ test('dodawanie i usuwanie węzłów', () => {
   assert.deepEqual(lps(removeNode(t, t[1].key)), ['600', '600b', '600ba']);
 });
 
-test('notatnik: tekst tam i z powrotem, parowanie zmian numerów', () => {
+test('notatnik: tylko opisy, linia na operację', () => {
   const t = treeFromOps(ops(), '600');
-  const txt = treeToText(t, 'Operacja 600');
-  assert.match(txt, /\n {4}600aa \| ust1 \| 2Un \| 110\n/);
-  const back = textToTree(txt, t);
-  assert.deepEqual(back.errors, []); assert.deepEqual(lps(back.nodes), lps(t)); assert.equal(back.nodes[3].preds, '600aa');
-  const edited = txt.replace('600ba | UST1', '600bc | UST1 nowe').replace('ust2 | 2Un | 16', 'ust2 | 2Un | 18');
-  const e = textToTree(edited, t);
-  const n = e.nodes.find((x) => x.lp === '600bc');
-  assert.equal(n.orig, '600ba'); assert.equal(n.element, 'UST1 nowe');
-  assert.ok(textToTree('600 | a | b | c | d | e | f | g | h').errors[0].includes('za dużo kolumn'));
+  const txt = descriptionsToText(t);
+  assert.equal(txt, 'Zespół\nCz.d\nust1\nust2\nCz.g\nUST1');
+  const e = descriptionsFromText(txt.replace('ust2', 'ust2 – podział pionowy') + '\r\n', t);
+  assert.deepEqual(e.errors, []); assert.equal(e.nodes[3].element, 'ust2 – podział pionowy'); assert.equal(e.nodes[3].lp, '600ab'); assert.equal(e.nodes[3].hours, '16');
+  assert.match(descriptionsFromText(txt + '\nnadmiarowa', t).errors[0], /dokładnie 6 linii.*jest 7/);
+  assert.match(descriptionsFromText('Zespół\nCz.d', t).errors[0], /jest 2/);
+  assert.equal(descriptionsFromText('\n\n\n\n\n', t).nodes[0].element, '');      // puste opisy też się liczą
 });
 
 test('plan zapisu: zmiany, zmiana numeru, odwołania z zewnątrz, usuwanie', () => {

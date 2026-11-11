@@ -2,7 +2,7 @@
 // eksport i import pliku .txt (np. do Notepad++), przeciąganie i ↑ ↓ (zmiana kolejności = zmiana liter), dodawanie i usuwanie węzłów.
 // Zapis po podglądzie zmian i sprawdzeniu całej logiki (logic/harmTree.js: planTree).
 import { h, clear, modal, toast } from '../ui.js';
-import { treeFromOps, emptyNode, renameNode, moveNode, addChild, removeNode, treeToText, textToTree, planTree, sortTree } from '../logic/harmTree.js';
+import { treeFromOps, emptyNode, renameNode, moveNode, addChild, removeNode, descriptionsToText, descriptionsFromText, planTree } from '../logic/harmTree.js';
 import { depthOf, subParent } from '../logic/schedule.js';
 import { parseNumber } from '../logic/harmImport.js';
 import { applyTree } from '../harmStore.js';
@@ -18,12 +18,16 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
   const opsAtStart = getOps();
   const origIds = rootId ? treeFromOps(opsAtStart, rootId).map((n) => n.orig) : [];
   let nodes = rootId ? treeFromOps(opsAtStart, rootId) : [emptyNode(newLp)];
-  const startText = treeToText(nodes, rootId ? `Gałąź operacji ${rootId}` : 'Nowa operacja');
   let mode = 'tree', parseErrors = [];
   const stationNames = stations.map((s) => s.name);
   const body = h('div', { style: { maxHeight: '58vh', overflow: 'auto', border: '1px solid #ddd' } });
   const status = h('div', { style: { marginTop: '6px', whiteSpace: 'pre-wrap', fontSize: '12px', maxHeight: '110px', overflow: 'auto' } });
-  const textArea = h('textarea', { spellcheck: 'false', wrap: 'off', style: { width: '100%', height: '56vh', boxSizing: 'border-box', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '13px', whiteSpace: 'pre', tabSize: 4 } });
+  // notatnik: z lewej numery operacji (tylko do odczytu), z prawej opisy – jedna linia na operację
+  const MONO = { fontFamily: 'Consolas, "Courier New", monospace', fontSize: '13px', lineHeight: '19px' };
+  const textArea = h('textarea', { spellcheck: 'false', wrap: 'off', style: { flex: 1, height: '56vh', boxSizing: 'border-box', border: 'none', outline: 'none', padding: '4px 6px', whiteSpace: 'pre', resize: 'none', ...MONO } });
+  const gutter = h('div', { style: { width: '92px', height: '56vh', overflow: 'hidden', background: '#f2f2f2', borderRight: '1px solid #ccc', padding: '4px 6px', boxSizing: 'border-box', color: '#555', whiteSpace: 'pre', textAlign: 'right', userSelect: 'none', ...MONO } });
+  const notepad = h('div', { style: { display: 'flex', border: '1px solid #bbb' } }, gutter, textArea);
+  textArea.addEventListener('scroll', () => { gutter.scrollTop = textArea.scrollTop; });
   const plan = () => planTree(getOps(), origIds, nodes, { stations: stationNames, parseNum: parseNumber });
   const origOf = (n) => (n.orig ? opsAtStart[n.orig] : null);
 
@@ -90,23 +94,23 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
     if (!nodes.length) body.append(h('div', { class: 'muted', style: { padding: '8px' } }, 'Wszystkie operacje gałęzi są usunięte (zapis je skasuje).'));
   };
 
-  // --- notatnik
-  const toText = () => { textArea.value = treeToText(nodes, rootId ? `Gałąź operacji ${rootId}` : 'Nowa operacja'); };
-  const fromText = () => { const r = textToTree(textArea.value, nodes); parseErrors = r.errors; nodes = r.nodes; };
+  // --- notatnik: tylko opisy, tyle linii, ile operacji (ani mniej, ani więcej)
+  const toText = () => { textArea.value = descriptionsToText(nodes); gutter.textContent = nodes.map((n) => '  '.repeat(Math.max(0, (depthOf(n.lp.trim()) || 0) - Math.min(...nodes.map((x) => depthOf(x.lp.trim()) || 0)))) + n.lp.trim()).join('\n'); };
+  const fromText = () => { const r = descriptionsFromText(textArea.value, nodes); parseErrors = r.errors; nodes = r.nodes; };
   textArea.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { fromText(); refresh(); }, 400); });
   textArea.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); const s = textArea.selectionStart; textArea.setRangeText('  ', s, textArea.selectionEnd, 'end'); } });
   const setMode = (m) => {
     if (m === mode) return;
     if (m === 'text') toText(); else { fromText(); if (parseErrors.length) { refresh(); toast('Popraw najpierw błędy w tekście'); return; } }
     mode = m; clear(body);
-    if (mode === 'text') body.append(textArea); else renderTree();
+    if (mode === 'text') body.append(notepad); else renderTree();
     treeBtn.classList.toggle('primary', mode === 'tree'); textBtn.classList.toggle('primary', mode === 'text');
     refresh();
   };
   const treeBtn = h('button', { class: 'btn small primary', onclick: () => setMode('tree') }, 'Drzewo');
-  const textBtn = h('button', { class: 'btn small', title: 'Ta sama gałąź jako linie tekstu: lp | opis | stanowisko | czas | zależności | komis | klient', onclick: () => setMode('text') }, 'Notatnik');
-  const exportBtn = h('button', { class: 'btn small', title: 'Zapis gałęzi do pliku .txt (np. do edycji w Notepad++)', onclick: async () => {
-    if (mode === 'tree') toText(); else fromText();
+  const textBtn = h('button', { class: 'btn small', title: 'Opisy operacji jako linie tekstu – jedna linia na operację', onclick: () => setMode('text') }, 'Notatnik');
+  const exportBtn = h('button', { class: 'btn small', title: 'Zapis opisów do pliku .txt (jedna linia na operację, np. do edycji w Notepad++)', onclick: async () => {
+    if (mode === 'tree') toText(); else { fromText(); if (parseErrors.length) { refresh(); toast(parseErrors[0]); return; } }
     const name = `harmonogram_${rootId || nodes[0]?.lp || 'galaz'}_${stamp()}.txt`;
     if (await window.zks.saveFile(name, 'text/plain', b64(textArea.value.replace(/\n/g, '\r\n')))) toast('Zapisano ' + name);
   } }, 'Eksport do pliku…');
@@ -114,10 +118,10 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
     const f = fileIn.files && fileIn.files[0]; fileIn.value = '';
     if (!f) return;
     textArea.value = (await f.text()).replace(/^﻿/, '');
-    if (mode !== 'text') { mode = 'text'; clear(body); body.append(textArea); treeBtn.classList.remove('primary'); textBtn.classList.add('primary'); }
+    if (mode !== 'text') { const t = textArea.value; toText(); textArea.value = t; mode = 'text'; clear(body); body.append(notepad); treeBtn.classList.remove('primary'); textBtn.classList.add('primary'); }
     fromText(); refresh(); toast(`Wczytano ${f.name} – sprawdź listę zmian i zapisz`);
   } });
-  const importBtn = h('button', { class: 'btn small', title: 'Wczytanie gałęzi z pliku .txt (po edycji w notatniku)', onclick: () => fileIn.click() }, 'Import z pliku…');
+  const importBtn = h('button', { class: 'btn small', title: 'Wczytanie opisów z pliku .txt (tyle linii, ile operacji)', onclick: () => fileIn.click() }, 'Import z pliku…');
 
   // --- zapis: podgląd zmian i zapis wsadowy
   const saveBtn = h('button', { class: 'btn primary', onclick: () => {
@@ -136,12 +140,12 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
   } }, 'Sprawdź i zapisz');
   const closeBtn = h('button', { class: 'btn', onclick: () => {
     if (mode === 'text') fromText();
-    if (plan().changes.length && treeToText(nodes) !== startText && !window.confirm('Zamknąć bez zapisywania zmian?')) return;
+    if (plan().changes.length && !window.confirm('Zamknąć bez zapisywania zmian?')) return;
     m.close();
   } }, 'Zamknij');
 
   const m = modal(rootId ? `Edycja gałęzi: ${subParent(rootId) ? 'suboperacja' : 'operacja'} ${rootId}` : 'Nowa operacja – konfigurator drzewa', h('div', {},
-    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Edytuj numery, opisy, stanowiska, czasy, zależności, komis i klienta. ↑ ↓ albo przeciąganie zmienia kolejność w obrębie tej samej operacji (zmieniają się litery), + dodaje suboperację, ✕ usuwa z potomkami. „Notatnik” pokazuje to samo jako linie tekstu; plik .txt można edytować np. w Notepad++. Przed zapisem program sprawdza numery, poziomy, zależności i cykle oraz pokazuje listę zmian.'),
+    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Edytuj numery, opisy, stanowiska, czasy, zależności, komis i klienta. ↑ ↓ albo przeciąganie zmienia kolejność w obrębie tej samej operacji (zmieniają się litery), + dodaje suboperację, ✕ usuwa z potomkami. „Notatnik” pokazuje same opisy – jedna linia na operację (numery z lewej); plik .txt można edytować np. w Notepad++, liczba linii musi się zgadzać. Przed zapisem program sprawdza numery, poziomy, zależności i cykle oraz pokazuje listę zmian.'),
     h('div', { class: 'row', style: { gap: '6px', marginBottom: '6px' } }, treeBtn, textBtn, h('span', { style: { flex: 1 } }), exportBtn, importBtn, fileIn),
     body, status,
     h('div', { class: 'actions' }, closeBtn, saveBtn)), { wide: true, sticky: true });
