@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
-import { reorderIds, reorderPlan, capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { reorderIds, reorderPlan, capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt, withKomisRows, isKomisId } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -289,4 +289,38 @@ test('zmiana kolejności suboperacji (przeciągnij i upuść): litery zostają w
   // cykl: 100b zależy od 100a; po zamianie 100a ↔ 100b pierwsze dziecko czekałoby na swoje następne rodzeństwo
   const c = { 100: { startManual: 0 }, '100a': { hours: 1 }, '100b': { hours: 1, preds: ['100a'] } };
   assert.match(reorderPlan(c, '100', { 100: ['100b', '100a'] }).error, /cykl/);
+});
+
+test('poziom IV: pasek komisu – podsumowanie z operacji komisu, nie zmienia harmonogramu', () => {
+  const D = (d, h) => Date.UTC(2026, 10, d, h);
+  const days = {}; for (let i = 0; i < 10; i++) days[`2026-11-${String(2 + i).padStart(2, '0')}`] = { '1Si1': 'a8', '1Si2': 'b8', '2Un1': 'a8', '2Un2': 'b8', '3Co1': 'a8', '3Co2': 'b8' };
+  const ops = {
+    100: { startManual: D(2, 6), komis: 'Z1', element: 'Zespół', client: 'ACME', wysylka: D(3, 12) },
+    '100a': { hours: 4, station: '1Si', status: 'zak.' }, '100b': { hours: 2, station: '2Un', wysylka: D(5, 12), dostawa: D(1, 8) },
+    200: { startManual: D(2, 16), hours: 2, station: '1Si', komis: '300' },     // komis „300” nie myli się z operacją 300
+    300: { startManual: D(4, 6), hours: 3, station: '3Co', komis: 'Z1', preds: [] },
+    400: { startManual: D(2, 6), hours: 1, station: '3Co' },                     // bez komisu: bez paska komisu
+  };
+  const without = buildHarmData(Object.fromEntries(Object.entries(ops).map(([k, o]) => [k, { ...o, komis: '' }])), days, null, D(2, 6));
+  const d = buildHarmData(ops, days, null, D(2, 6));
+  for (const r of without.rows) assert.equal(d.rows.find((x) => x.id === r.id).koniec, r.koniec);   // komisy nie zmieniają terminów
+  assert.equal(d.rows.length, 6);                                                                       // paski komisów nie są wierszami danych
+  const k = d.komisRows.get('Z1');
+  assert.equal(k.id, 'K:Z1'); assert.ok(isKomisId(k.id)); assert.equal(k.level, 4); assert.equal(k.lp, '');
+  assert.equal(k.opCount, 4); assert.equal(k.leafCount, 3); assert.equal(k.zakCount, 1); assert.equal(k.status, '1/3');
+  assert.equal(k.hoursShown, 'Σ9'); assert.equal(k.client, 'ACME');
+  assert.equal(k.ms.start, D(2, 6)); assert.equal(k.ms.koniec, D(4, 9)); assert.equal(k.ms.wysylka, D(3, 12)); assert.equal(k.ms.dostawa, D(1, 8));
+  assert.equal(k.late, true);
+  assert.deepEqual(k.segs.map((x) => x[2]), ['#93c47d', '#00b0f0', '#ffc000']);                         // zakończona operacja na zielono
+  assert.equal(d.komisRows.get('300').opCount, 1); assert.equal(d.komisRows.size, 2);
+  // wstawianie: pasek komisu nad pierwszą operacją komisu; zwinięcie chowa operacje komisu; ukryty poziom IV chowa tylko paski
+  const rows = arrangeRows(d.rows, new Set(), new Set());
+  const ins = withKomisRows(rows, d.komisRows, new Set(), new Set());
+  assert.equal(ins.length, rows.length + 2);
+  const iK = ins.findIndex((r) => r.id === 'K:Z1');
+  assert.ok(iK < ins.findIndex((r) => r.id === '100') && iK < ins.findIndex((r) => r.id === '300'));
+  const col = withKomisRows(rows, d.komisRows, new Set(['K:Z1']), new Set());
+  assert.deepEqual(col.filter((r) => String(r.komis) === 'Z1').map((r) => r.id), ['K:Z1']);
+  const hid = withKomisRows(rows, d.komisRows, new Set(['K:Z1']), new Set([4]));
+  assert.equal(hid.length, rows.length);
 });

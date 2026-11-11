@@ -286,7 +286,73 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
       segs: chopped(o.lp) ? leafSegs(o.lp).sort((a, b) => a[0] - b[0]) : [], zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
   }
-  return { rows, holidays: [], rapData: {}, result };
+  return { rows, holidays: [], rapData: {}, result, komisRows: komisSummaries(rows, list, kids, result, up, look) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Poziom IV: pasek podsumowania komisu. Tworzy się sam z operacji, które mają ten komis (także dziedziczony po rodzicu); nie jest zapisywany
+// w bazie, nie ma numeru operacji i nie wpływa na liczenie harmonogramu ani na powiązania. Pokazuje: start pierwszej i koniec ostatniej operacji,
+// odcinki wszystkich operacji-liści w kolorach stanowisk (zakończone na zielono), sumę godzin, postęp (zak.), najbliższą wysyłkę i ostatnią dostawę.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export const KOMIS_PREFIX = 'K:';
+export const isKomisId = (id) => typeof id === 'string' && id.startsWith(KOMIS_PREFIX);
+const KOMIS_DONE_BAR = '#93c47d';
+
+function komisSummaries(rows, list, kids, result, up, look) {
+  const byKomis = new Map();
+  for (const o of list) { const k = String(up(o.lp, 'komis') || '').trim(); if (!k) continue; if (!byKomis.has(k)) byKomis.set(k, []); byKomis.get(k).push(o); }
+  const out = new Map();
+  for (const [k, ops] of byKomis) {
+    const leaves = ops.filter((o) => !kids.has(o.lp));
+    const done = (o) => String(o.status || '').trim().toLowerCase() === 'zak.';
+    const zak = leaves.filter(done).length;
+    const segs = [];
+    let hours = 0, start = null, end = null, wys = null, dost = null;
+    for (const o of leaves) {
+      if (o.hours > 0) hours += o.hours;
+      const r = result.get(o.lp);
+      if (r && r.start != null && r.end != null) {
+        segs.push([r.start, r.end, done(o) ? KOMIS_DONE_BAR : (look[up(o.lp, 'station')] || {}).bg || '#cccccc']);
+        start = start == null ? r.start : Math.min(start, r.start); end = end == null ? r.end : Math.max(end, r.end);
+      }
+    }
+    for (const o of ops) {
+      if (o.wysylka != null) wys = wys == null ? o.wysylka : Math.min(wys, o.wysylka);
+      if (o.dostawa != null) dost = dost == null ? o.dostawa : Math.max(dost, o.dostawa);
+    }
+    segs.sort((a, b) => a[0] - b[0]);
+    const h = Math.round(hours * 100) / 100;
+    const status = leaves.length && zak === leaves.length ? 'zak.' : `${zak}/${leaves.length}`;
+    out.set(k, {
+      id: KOMIS_PREFIX + k, komisRow: true, komisName: k, sub: false, parent: null, depth: 0, level: 4, subCount: ops.length, opCount: ops.length, leafCount: leaves.length, zakCount: zak,
+      hours: '', hoursShown: h > 0 ? `Σ${h}` : '', godziny: h > 0 ? `Σ${h}` : '', sumHours: h, station: '', stanowisko: '', stanowiskoBg: '#cccccc', stanowiskoColor: '#000000',
+      client: String(ops.map((o) => up(o.lp, 'client')).find(Boolean) || ''), status, endManual: '', startManual: '', key: '',
+      lp: '', z1: '', z2: '', z3: '', z4: '', komis: k, element: `Komis ${k}: operacji ${ops.length}, zakończonych ${zak}/${leaves.length}`,
+      start: fmtDt(start), koniec: fmtDt(end), wysylka: fmtDt(wys), dostawa: fmtDt(dost), late: wys != null && end != null && end > wys,
+      ms: { start, koniec: end, wysylka: wys, dostawa: dost }, segs, zak: status === 'zak.' ? 'zak.' : '', state: 'ok',
+    });
+  }
+  return out;
+}
+
+/**
+ * Wstawia paski komisów (poziom IV) nad pierwszą widoczną operacją każdego komisu. Zwinięty komis (id „K:<komis>” w [collapsed]) chowa swoje operacje;
+ * ukryty poziom IV nie chowa niczego poza samymi paskami komisów.
+ */
+export function withKomisRows(rows, komisRows, collapsed, hiddenLevels) {
+  if (!komisRows || !komisRows.size) return rows;
+  const show = !(hiddenLevels && hiddenLevels.has(4));
+  const seen = new Set(), out = [];
+  for (const r of rows) {
+    const k = String(r.komis || '').trim();
+    if (k && komisRows.has(k)) {
+      if (!seen.has(k)) { seen.add(k); if (show) out.push(komisRows.get(k)); }
+      if (show && collapsed && collapsed.has(KOMIS_PREFIX + k)) continue;
+    }
+    out.push(r);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

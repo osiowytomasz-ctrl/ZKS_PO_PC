@@ -3,7 +3,7 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings, renameOp } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
@@ -113,11 +113,13 @@ export function mountHarmLive(el) {
   // Zaznaczenie wiersza: kliknięcie w dowolne miejsce linii (tabela albo wykres) podświetla ją ramką z poświatą.
   // Kliknięta linia: zielona poświata; jej suboperacje (dzieci): pomarańczowa; subsuboperacje (wnuki): żółta.
   const GLOW = { self: '0, 176, 80', child: '255, 140, 0', grand: '255, 215, 0' };
-  const relationTo = (id, sel) => (sel == null ? null : id === sel ? 'self' : subParent(id) === sel ? 'child' : subParent(subParent(id) || '') === sel ? 'grand' : null);
+  // Zaznaczony pasek komisu (poziom IV): wszystkie operacje komisu świecą na pomarańczowo.
+  const relationTo = (id, sel, komis) => (sel == null ? null : id === sel ? 'self' : isKomisId(sel) ? (String(komis || '').trim() === sel.slice(KOMIS_PREFIX.length) ? 'child' : null)
+    : isKomisId(id) ? null : subParent(id) === sel ? 'child' : subParent(subParent(id) || '') === sel ? 'grand' : null);
   const applySelection = () => {
     const g = st.geom; if (!g || !g.rowEls) return;
     for (const [id, els] of g.rowEls) {
-      const rel = relationTo(id, st.selected), c = rel && GLOW[rel];
+      const rel = relationTo(id, st.selected, els.komis), c = rel && GLOW[rel];
       const shadow = c ? `inset 0 0 0 2px rgb(${c}), 0 0 8px 2px rgba(${c}, .8)` : '';
       els.line.style.boxShadow = shadow;
       els.line.style.zIndex = c ? '3' : '';
@@ -192,27 +194,31 @@ export function mountHarmLive(el) {
   function openShare() {
     if (!st.data || !st.m) { toast('Poczekaj na wczytanie danych'); return; }
     const ops = st.m.opsByLp, res = st.data.result;
-    const dateMs = (r, key) => (key === 'start' ? res.get(r.id)?.start : key === 'koniec' ? res.get(r.id)?.end : (ops[r.id] || {})[key]) ?? null;
+    const dateMs = (r, key) => (r.komisRow ? r.ms[key] ?? null : key === 'start' ? res.get(r.id)?.start : key === 'koniec' ? res.get(r.id)?.end : (ops[r.id] || {})[key]) ?? null;
     const stationBg = (r) => parseSheetColor(r.stanowiskoBg, '#cccccc');
     const all = st.data.rows;
     const maxEnd = Math.max(Date.now(), ...all.map((r) => res.get(r.id)?.end || 0));
     shareDialog({
-      cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: arrangeRows(all, new Set(), new Set()), selectedId: st.selected,
+      cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), st.data.komisRows, new Set(), new Set()), selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
       axisStart: axisStartMs(H.localNow().getTime(), st.shift), maxEnd, nowMs: H.localNow().getTime(),
       cellOf: (r, c) => {
-        const text = c.key === 'lp' ? '\u00a0\u00a0'.repeat(r.depth || 0) + (r.lp || '') : val(r, c);
+        const text = c.key === 'lp' ? (r.komisRow ? r.komisName : '\u00a0\u00a0'.repeat(r.depth || 0) + (r.lp || '')) : val(r, c);
+        if (r.komisRow && c.key === 'koniec' && r.late) return { text, date: r.ms.koniec, bg: '#ff0000', color: '#ffffff', bold: true };
+        if (r.komisRow && c.key === 'hours') return r.sumHours > 0 ? { text, value: r.sumHours, bold: true } : { text, bold: true };
         if (c.key === 'station' && r.station) return { text, bg: stationBg(r), color: parseSheetColor(r.stanowiskoColor, '#000000'), bold: true, italic: true };
         if (c.isDate) { const ms = dateMs(r, c.key); return { text, date: ms == null ? null : ms }; }
         if (c.key === 'hours') { const v = (ops[r.id] || {}).hours; return v > 0 ? { text, value: v } : { text }; }
         return { text };
       },
       rowStyle: (r) => {
+        if (r.komisRow) { const kc0 = komisColor(r.komis); return { bg: kc0 ? parseSheetColor(kc0.bg, '#fff2cc') : '#fff2cc', color: kc0 ? parseSheetColor(kc0.color, '#000000') : '#000000', bold: true }; }
         const kc = komisColor(r.komis), done = String(r.status).trim().toLowerCase() === 'zak.';
         return kc ? { bg: parseSheetColor(kc.bg, '#ffffff'), color: parseSheetColor(kc.color, '#000000'), bold: !!kc.bold, italic: !!kc.italic, underline: !!kc.underline } : { bg: done ? '#e6f2e0' : '#ffffff' };
       },
       barsOf: (r) => {
         const done = String(r.status).trim().toLowerCase() === 'zak.';
+        if (r.komisRow) return { label: [r.komisName, r.hoursShown, r.status].filter(Boolean).join(' · '), frame: r.segs.length ? { start: r.ms.start, end: r.ms.koniec } : null, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: c })) };
         const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
         if (r.segs && r.segs.length) return { label, frame: { start: Math.min(...r.segs.map((x) => x[0])), end: Math.max(...r.segs.map((x) => x[1])) }, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: done ? ZAK_BAR : c })) };
         const rr = res.get(r.id);
@@ -223,6 +229,7 @@ export function mountHarmLive(el) {
 
   // Szczegóły operacji: tylko prawy przycisk myszy (lewy zaznacza linię i edytuje komórki)
   function detail(r) {
+    if (r.komisRow) { komisDetail(r); return; }
     const subs = st.data ? st.data.rows.filter((x) => x.parent === r.id) : [];
     const line = (k, v) => (String(v ?? '').trim() ? h('div', { class: 'row', style: { margin: '2px 0' } }, h('b', { style: { width: '150px' } }, k), h('span', {}, v)) : null);
     const body = [
@@ -236,6 +243,22 @@ export function mountHarmLive(el) {
     const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' },
       r.subCount ? h('button', { class: 'btn', title: 'Zmiana kolejności suboperacji przeciąganiem', onclick: () => { m.close(); reorderDialog(r.id); } }, 'Kolejność suboperacji…') : null,
       h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
+  }
+
+  // Podsumowanie komisu (poziom IV): terminy, godziny, postęp, godziny na stanowiskach i lista operacji
+  function komisDetail(r) {
+    const ops = st.data.rows.filter((x) => String(x.komis || '').trim() === r.komisName);
+    const line = (k, v) => (String(v ?? '').trim() ? h('div', { class: 'row', style: { margin: '2px 0' } }, h('b', { style: { width: '170px' } }, k), h('span', {}, v)) : null);
+    const perStation = new Map();
+    for (const x of ops) if (!x.subCount && x.stanowisko) perStation.set(x.stanowisko, (perStation.get(x.stanowisko) || 0) + (Number(x.hours) || 0));
+    const m = modal(`Komis ${r.komisName}`, h('div', {},
+      h('div', { class: 'muted', style: { marginBottom: '6px' } }, 'Pasek informacyjny (poziom IV): liczony z operacji komisu, nie zapisuje się w bazie i nie wpływa na harmonogram.'),
+      line('Klient', r.client), line('Start pierwszej operacji', r.start), line('Koniec ostatniej operacji', r.koniec),
+      line('Najbliższa wysyłka', r.wysylka), r.late ? h('div', { class: 'err' }, 'Koniec ostatniej operacji jest po wysyłce.') : null, line('Ostatnia dostawa', r.dostawa),
+      line('Godziny (suma)', r.hoursShown), line('Operacji', `${r.opCount} (wykonywanych na stanowiskach: ${r.leafCount}, zakończonych: ${r.zakCount})`),
+      perStation.size ? line('Godziny na stanowiskach', [...perStation].map(([k, v]) => `${k}: ${Math.round(v * 100) / 100}`).join(', ')) : null,
+      h('div', { style: { marginTop: '6px', maxHeight: '300px', overflow: 'auto' } }, ...ops.map((x) => h('div', { style: { margin: '2px 0 2px ' + (6 + 14 * (x.depth || 0)) + 'px' } }, [x.lp || '—', x.stanowisko, `${x.start || '—'} → ${x.koniec || '—'}`, x.hoursShown ? x.hoursShown + ' h' : '', x.element, x.status].filter(Boolean).join('  ·  ')))),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
   }
 
   // Zwijanie strzałką ▾/▸ w kolumnie lp. (chowa potomków jednego węzła); całe poziomy chowają przyciski III, II, I.
@@ -363,14 +386,16 @@ export function mountHarmLive(el) {
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
-    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels);   // suboperacje pod operacją główną; zwinięte pomijane
+    // suboperacje pod operacją główną; zwinięte pomijane; nad pierwszą operacją komisu jego pasek podsumowania (poziom IV)
+    const rows = withKomisRows(arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels), st.data.komisRows, st.collapsed, st.hiddenLevels);
     const startMs = axisStartMs(now.getTime(), st.shift);
     const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now, { keepAll: true, axisStartMs: startMs });
     const maxEnd = Math.max(startMs, ...chart.items.filter((it) => it.end).map((it) => it.end.getTime()));
     const cells = buildCells(startMs, maxEnd, st.interval, holidayMap(st.m && st.m.cfg && st.m.cfg.holidays));
     const n = chart.items.length, chartW = Math.ceil(cells.reduce((a, c) => a + c.hours, 0) * HOUR);
     st.rows = rows; st.chart = chart; st.geom = { HOUR, ROW, FONT, HEAD, cols, colW, LEFT, chartW, now };
-    info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
+    const nOps = rows.filter((r) => !r.komisRow).length;
+    info.textContent = `Operacji: ${nOps}` + (nOps !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
     scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
     for (const [lvl, b] of levelBtns) { const on = !st.hiddenLevels.has(lvl); b.classList.toggle('primary', on); b.style.textDecoration = on ? 'none' : 'line-through'; }
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
@@ -425,8 +450,39 @@ export function mountHarmLive(el) {
     const top = Math.max(0, body.scrollTop - HEAD - ROW * 3), vh = body.clientHeight || 700;
     const from = Math.max(0, Math.floor(top / ROW)), to = Math.min(n, Math.ceil((top + vh + 6 * ROW) / ROW));
     clear(g.leftRows); clear(g.dyn); g.rowEls = new Map();
+    // pasek komisu (poziom IV): tylko informacja – bez edycji i usuwania; strzałka zwija operacje komisu, prawy przycisk pokazuje podsumowanie
+    const paintKomis = (i, r) => {
+      const kc = komisColor(r.komis);
+      const bgRow = kc ? parseSheetColor(kc.bg, '#fff2cc') : '#fff2cc';
+      const line = h('div', { title: 'Podsumowanie komisu (poziom IV) – nie wpływa na harmonogram. Prawy przycisk: szczegóły',
+        style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: bgRow, color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: 700, borderTop: '2px solid #000', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
+      for (const col of cols) {
+        let text = col.key === 'lp' ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') + r.komisName : col.key === 'station' ? '' : val(r, col);
+        const late = col.key === 'koniec' && r.late;
+        const cell = h('div', { title: late ? 'Koniec ostatniej operacji jest po najbliższej wysyłce komisu' : col.key === 'lp' ? 'Kliknij strzałkę, aby zwinąć lub rozwinąć operacje komisu' : '',
+          style: { width: colW(col) + 'px', flex: 'none', height: ROW - 2 + 'px', lineHeight: ROW - 3 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c', cursor: col.key === 'lp' ? 'pointer' : 'default', ...(late ? { background: '#ff0000', color: '#fff' } : {}) } }, text);
+        if (col.key === 'lp') cell.addEventListener('click', () => toggleCollapse(r.id));
+        line.append(cell);
+      }
+      line.addEventListener('mousedown', () => selectRow(r.id));
+      line.addEventListener('contextmenu', (e) => { e.preventDefault(); selectRow(r.id); detail(r); });
+      g.leftRows.append(line);
+      const chartRow = h('div', { onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box', borderTop: '2px solid rgba(0,0,0,.35)' } });
+      g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow, komis: r.komis });
+      const x0 = chart.axisStart.getTime(), at = (ms) => Math.max(0, (ms - x0) / 3600000) * HOUR;
+      if (r.segs.length && r.ms.koniec > x0) {
+        const L = at(r.ms.start), W = Math.max(2, at(r.ms.koniec) - L);
+        const tip = `Komis ${r.komisName}\n${r.start} → ${r.koniec}\nGodziny: ${r.hoursShown || '—'}, zakończone ${r.zakCount}/${r.leafCount}` + (r.wysylka ? `\nWysyłka: ${r.wysylka}` : '');
+        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '2px solid #000', boxSizing: 'border-box', background: '#fff', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+        for (const [s0, e0, color] of r.segs) { if (e0 <= x0) continue; const l = at(s0) - L, w = Math.max(1, at(e0) - at(s0)); box.append(h('div', { style: { position: 'absolute', left: l - 2 + 'px', top: 0, bottom: 0, width: w + 'px', background: color, borderRight: '1px solid #fff', boxSizing: 'border-box', pointerEvents: 'none' } })); }
+        box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 6 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25', background: 'rgba(255,255,255,.75)', padding: '0 2px' } }, [r.komisName, r.hoursShown, r.status].filter(Boolean).join(' · ')));
+        g.dyn.append(box);
+      }
+      if (r.ms.wysylka != null && r.ms.wysylka > x0) g.dyn.append(h('div', { title: 'Wysyłka komisu: ' + r.wysylka, style: { position: 'absolute', zIndex: 2, left: at(r.ms.wysylka) - 1 + 'px', top: i * ROW + 'px', width: '3px', height: ROW + 'px', background: '#c00000' } }));
+    };
     for (let i = from; i < to; i++) {
       const it = chart.items[i], r = it.row;
+      if (r.komisRow) { paintKomis(i, r); continue; }
       const done = String(r.status).trim().toLowerCase() === 'zak.';
       const kc = komisColor(r.komis);
       const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: kc && kc.bold ? 700 : 400, fontStyle: (kc && kc.italic) || (r.sub && !kc) ? 'italic' : 'normal', textDecoration: kc && kc.underline ? 'underline' : 'none', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
@@ -456,7 +512,7 @@ export function mountHarmLive(el) {
       line.addEventListener('contextmenu', (e) => { e.preventDefault(); selectRow(r.id); detail(r); });   // właściwości operacji: prawy przycisk myszy
       g.leftRows.append(line);
       const chartRow = h('div', { onclick: () => selectRow(r.id), ondblclick: () => { if (r.subCount) reorderDialog(r.id); }, oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box' } });   // klik w wiersz wykresu
-      g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow });
+      g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow, komis: r.komis });
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
       const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
@@ -525,9 +581,9 @@ export function mountHarmLive(el) {
     ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
   // poziomy III, II, I: przycisk wciśnięty = poziom widoczny; kliknięcie chowa albo pokazuje wszystkie wiersze tego poziomu
-  const LEVEL_TIPS = { 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
-  const levelBtns = new Map([3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
-    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
+  const LEVEL_TIPS = { 4: 'IV – paski komisów: podsumowanie wszystkich operacji komisu (tylko informacja, nie wpływa na harmonogram)', 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
+  const levelBtns = new Map([4, 3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
+    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III', 'IV'][lvl])]));
   const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap' } },
