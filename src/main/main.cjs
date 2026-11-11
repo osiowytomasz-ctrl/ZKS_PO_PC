@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage, clipboard, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -129,6 +129,24 @@ app.whenReady().then(() => {
       win.destroy();
     }
   });
+  // Raport HTML (Harmonogram) → plik PDF albo wydruk. HTML trafia do pliku tymczasowego (duże raporty nie mieszczą się w adresie data:).
+  const withReportWindow = async (html, fn) => {
+    const tmp = path.join(app.getPath('temp'), `zks-raport-${Date.now()}.html`);
+    fs.writeFileSync(tmp, String(html || ''), 'utf8');
+    const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+    try { await win.loadFile(tmp); return await fn(win); } finally { win.destroy(); fs.rmSync(tmp, { force: true }); }
+  };
+  ipcMain.handle('file:savePdf', async (_e, html, opts = {}) => withReportWindow(html, async (win) => {
+    const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: opts.pageSize === 'A3' ? 'A3' : 'A4', landscape: opts.landscape !== false, preferCSSPageSize: true });
+    const res = await dialog.showSaveDialog(mainWindow, { defaultPath: safeName(opts.name || 'harmonogram.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (res.canceled || !res.filePath) return false;
+    fs.writeFileSync(res.filePath, pdf);
+    return true;
+  }));
+  ipcMain.handle('file:print', async (_e, html, opts = {}) => withReportWindow(html, (win) => new Promise((resolve) => {
+    win.webContents.print({ silent: false, printBackground: true, landscape: opts.landscape !== false, pageSize: opts.pageSize === 'A3' ? 'A3' : 'A4' }, (ok) => resolve(!!ok));
+  })));
+  ipcMain.handle('clipboard:image', (_e, base64) => { clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(String(base64 || ''), 'base64'))); return true; });
   ipcMain.handle('shell:open', (_e, url) => {
     if (/^https?:\/\//i.test(String(url))) return shell.openExternal(String(url));
     return false;

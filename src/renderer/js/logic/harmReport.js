@@ -1,0 +1,157 @@
+// Raport Harmonogramu do udostępnienia: obraz (SVG → JPG/PNG), strony PDF i wydruku (HTML z SVG na każdej stronie) oraz plik Excel.
+// Model raportu buduje widok (views/harmLive.js) z wybranych kolumn, wierszy, poziomów i zakresu osi; tu jest tylko rysowanie i zapis.
+import { buildXlsx } from './xlsx.js';
+
+const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const DAY_BG = { work: '#00b050', sat: '#00b0f0', sun: '#ff0000', holiday: '#800000', span: '#00b050' };
+const GRID = '#8c8c8c';
+
+/** Tekst przycięty do szerokości (szacunkowo, czcionka proporcjonalna). */
+export function fitText(text, widthPx, fontPx) {
+  const t = String(text ?? ''), max = Math.max(0, Math.floor((widthPx - 6) / (fontPx * 0.56)));
+  return t.length <= max ? t : max <= 1 ? '' : t.slice(0, max - 1) + '…';
+}
+
+/**
+ * Geometria raportu. model = { title, subtitle, columns: [{title, w, vertical, text(row)}], rows: [{cells: [{text, bg, color, bold, italic, underline}],
+ * bg, bars: [{start, end, color}], frame: {start, end} | null, label}], chart: null | {cells: [{start, end, hours, label, kind}], cellW, nowMs}, rowH, font }.
+ */
+export function layout(model) {
+  const font = model.font || 11, rowH = model.rowH || 22;
+  const tableW = model.columns.reduce((a, c) => a + c.w, 0);
+  const chart = model.chart;
+  const pxH = chart ? chart.cellW / chart.nominalHours : 0;
+  const chartW = chart ? Math.ceil(chart.cells.reduce((a, c) => a + c.hours, 0) * pxH) : 0;
+  const labelLen = Math.max(10, ...(chart ? chart.cells.map((c) => c.label.length) : [0]), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length));
+  const headH = Math.ceil(labelLen * font * 0.58) + 14;
+  const titleH = model.title ? (model.subtitle ? 46 : 30) : 0;
+  return { font, rowH, tableW, chartW, pxH, headH, titleH, width: tableW + chartW + 2, height: titleH + headH + model.rows.length * rowH + 2 };
+}
+
+/** SVG raportu dla wierszy [from, to) (domyślnie wszystkich). */
+export function reportSvg(model, { from = 0, to = model.rows.length, page = '' } = {}) {
+  const L = layout(model), { font, rowH, tableW, chartW, pxH, headH, titleH } = L;
+  const rows = model.rows.slice(from, to), n = rows.length;
+  const H = titleH + headH + n * rowH + (page ? 18 : 2), W = L.width;
+  const out = [];
+  const text = (x, y, t, o = {}) => out.push(`<text x="${x}" y="${y}" font-size="${o.size || font}" font-family="Arial, Helvetica, sans-serif"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.underline ? ' text-decoration="underline"' : ''} fill="${o.color || '#000'}"${o.anchor ? ` text-anchor="${o.anchor}"` : ''}${o.rotate ? ` transform="rotate(-90 ${x} ${y})"` : ''}>${esc(t)}</text>`);
+  const rect = (x, y, w, h, fill, stroke, sw = 1) => out.push(`<rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${Math.max(0, h)}" fill="${fill || 'none'}"${stroke ? ` stroke="${stroke}" stroke-width="${sw}"` : ''}/>`);
+  rect(0, 0, W, H, '#ffffff');
+  if (titleH) { text(4, 20, model.title, { size: font + 6, bold: true }); if (model.subtitle) text(4, 38, model.subtitle, { size: font, color: '#444' }); }
+  const y0 = titleH, yRows = titleH + headH;
+  // nagłówek tabeli
+  let x = 0;
+  for (const c of model.columns) {
+    rect(x, y0, c.w, headH, '#e4e4e4', GRID);
+    if (c.vertical) text(x + c.w / 2 + font / 3, y0 + headH - 6, c.title, { bold: true, rotate: true });
+    else text(x + 3, y0 + headH - 6, fitText(c.title, c.w, font), { bold: true });
+    x += c.w;
+  }
+  // nagłówek osi
+  if (model.chart) {
+    let cx = tableW;
+    for (const c of model.chart.cells) {
+      const w = c.hours * pxH;
+      rect(cx, y0, w, headH, DAY_BG[c.kind] || DAY_BG.work, '#555', 0.5);
+      if (w >= font * 0.9) text(cx + w / 2 + font / 3, y0 + headH - 6, c.label, { color: c.kind === 'sat' ? '#000' : '#fff', bold: c.kind === 'holiday', rotate: true, size: Math.min(font, Math.max(6, w - 2)) });
+      cx += w;
+    }
+  }
+  // tło wykresu: dni robocze szare, weekend i święta białe, teraz zielone
+  if (model.chart) {
+    rect(tableW, yRows, chartW, n * rowH, '#f2f2f2');
+    let cx = tableW;
+    for (const c of model.chart.cells) {
+      const w = c.hours * pxH;
+      if (c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday') rect(cx, yRows, w, n * rowH, '#ffffff');
+      if (model.chart.nowMs >= c.start && model.chart.nowMs < c.end) rect(cx, yRows, w, n * rowH, 'rgba(0,176,80,0.18)');
+      cx += w;
+    }
+  }
+  // wiersze
+  const startMs = model.chart ? model.chart.cells[0].start : 0;
+  const px = (ms) => tableW + Math.max(0, (ms - startMs) / 3600000) * pxH;
+  rows.forEach((r, i) => {
+    const y = yRows + i * rowH;
+    let cx = 0;
+    model.columns.forEach((c, k) => {
+      const cell = r.cells[k] || {};
+      rect(cx, y, c.w, rowH, cell.bg || r.bg || '#ffffff', GRID, 0.6);
+      text(cx + 3, y + rowH / 2 + font / 2.8, fitText(cell.text, c.w, font), cell);
+      cx += c.w;
+    });
+    if (!model.chart) return;
+    const end = tableW + chartW;
+    const clipX = (v) => Math.min(end, v);
+    if (r.frame && r.frame.end >= startMs) {
+      const a = px(r.frame.start), b = clipX(px(r.frame.end));
+      rect(a, y + 2, Math.max(1, b - a), rowH - 4, '#ffffff');
+      for (const sg of r.bars) { const sa = px(sg.start), sb = clipX(px(sg.end)); if (sb > sa) rect(sa, y + 2, Math.max(1, sb - sa - 1), rowH - 4, sg.color); }
+      rect(a, y + 2, Math.max(1, b - a), rowH - 4, null, '#000', 1);
+      if (r.label) text(a + 3, y + rowH / 2 + font / 2.8, r.label, { bold: true });
+    } else if (r.bars.length && r.bars[0].end >= startMs) {
+      const sg = r.bars[0], a = px(sg.start), b = clipX(px(sg.end));
+      rect(a, y + 2, Math.max(2, b - a), rowH - 4, sg.color, '#000', 1);
+      if (r.label) text(a + 3, y + rowH / 2 + font / 2.8, r.label, { bold: true });
+    }
+  });
+  if (model.chart && model.chart.nowMs > startMs) { const nx = px(model.chart.nowMs); if (nx <= tableW + chartW) out.push(`<line x1="${nx}" y1="${yRows}" x2="${nx}" y2="${yRows + n * rowH}" stroke="#ff6600" stroke-width="2" stroke-dasharray="5 3"/>`); }
+  if (page) text(W - 4, H - 4, page, { size: font - 1, color: '#555', anchor: 'end' });
+  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${out.join('')}</svg>`, width: W, height: H };
+}
+
+const PAGE_PX = { A4: [794, 1123], A3: [1123, 1587] };   // 96 dpi, pionowo
+const MARGIN = 38;                                        // ok. 10 mm
+
+/** Strony do PDF i wydruku: SVG dopasowane do szerokości strony, wiersze podzielone na strony, nagłówek powtarzany na każdej. */
+export function reportPagesHtml(model, { pageSize = 'A4', landscape = true } = {}) {
+  const [pw0, ph0] = PAGE_PX[pageSize] || PAGE_PX.A4;
+  const [pw, ph] = landscape ? [ph0, pw0] : [pw0, ph0];
+  const L = layout(model);
+  const scale = Math.min(1, (pw - 2 * MARGIN) / L.width);
+  const usable = (ph - 2 * MARGIN) / scale - L.titleH - L.headH - 20;
+  const perPage = Math.max(1, Math.floor(usable / L.rowH));
+  const pages = [];
+  const total = Math.max(1, Math.ceil(model.rows.length / perPage));
+  for (let p = 0; p < total; p++) {
+    const { svg } = reportSvg(model, { from: p * perPage, to: Math.min(model.rows.length, (p + 1) * perPage), page: `Strona ${p + 1} z ${total}` });
+    pages.push(`<div class="page">${svg.replace('<svg ', `<svg style="width:${Math.round(L.width * scale)}px;height:auto" `)}</div>`);
+  }
+  const css = `@page { size: ${pageSize} ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; } html, body { margin: 0; padding: 0; background: #fff; } .page { page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; }`;
+  return { html: `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>${pages.join('')}</body></html>`, pages: total, perPage, scale };
+}
+
+/**
+ * Plik Excel: tabela (wartości: tekst, liczby, daty jako daty Excela) i – gdy jest oś – wykres w komórkach: jedna kolumna na kolumnę osi,
+ * komórka wypełniona kolorem stanowiska, gdy operacja w niej trwa (węzeł złożony z dzieci w kolorach dzieci).
+ */
+export function reportXlsx(model) {
+  const rows = [], merges = [], rowHeights = {};
+  const nCols = model.columns.length, chartCells = model.chart ? model.chart.cells : [];
+  rows.push([{ v: model.title || 'Harmonogram', style: { bold: true, size: 14 } }]);
+  rows.push([{ v: model.subtitle || '', style: { italic: true, color: '#444444' } }]);
+  const head = model.columns.map((c) => ({ v: c.title, style: { bold: true, bg: '#e4e4e4', border: true, rotate: c.vertical ? 90 : 0, wrap: !c.vertical } }));
+  for (const c of chartCells) head.push({ v: c.label, style: { bold: c.kind === 'holiday', bg: DAY_BG[c.kind] || DAY_BG.work, color: c.kind === 'sat' ? '#000000' : '#ffffff', rotate: 90, border: true, size: 8 } });
+  rows.push(head);
+  rowHeights[2] = Math.min(150, Math.max(40, Math.ceil(Math.max(10, ...chartCells.map((c) => c.label.length), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length)) * 5.6)));
+  const covers = (bars, c) => { for (const b of bars) if (b.start < c.end && b.end > c.start) return b.color; return null; };
+  for (const r of model.rows) {
+    const line = model.columns.map((c, k) => {
+      const cell = r.cells[k] || {};
+      const style = { border: true, bg: cell.bg || r.bg, color: cell.color, bold: cell.bold, italic: cell.italic, underline: cell.underline };
+      if (cell.date != null) return { v: cell.date, style: { ...style, date: true } };
+      if (typeof cell.value === 'number') return { v: cell.value, style };
+      return { v: cell.text || '', style };
+    });
+    for (const c of chartCells) {
+      const color = covers(r.bars, c);
+      const off = c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday';
+      line.push({ v: '', style: { bg: color || (off ? '#ffffff' : '#f2f2f2'), border: !!color } });
+    }
+    rows.push(line);
+  }
+  merges.push(`A1:${colLetter(Math.max(0, nCols - 1))}1`);
+  const colWidths = [...model.columns.map((c) => Math.max(4, Math.round(c.w / 7))), ...chartCells.map(() => 2.6)];
+  return buildXlsx({ name: 'Harmonogram', rows, rowHeights, merges, colWidths, freeze: { row: 3, col: nCols } });
+}
+const colLetter = (i) => { let s = ''; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };

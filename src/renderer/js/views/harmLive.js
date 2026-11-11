@@ -10,6 +10,7 @@ import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
+import { shareDialog } from './harmShare.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
@@ -185,6 +186,39 @@ export function mountHarmLive(el) {
       h('div', { style: { maxHeight: '60vh', overflow: 'auto' } }, box), status,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), applyBtn)), { wide: true });
     render();
+  }
+
+  // Udostępnianie: dane dla okna (wiersze, kolumny, style i paski jak na ekranie)
+  function openShare() {
+    if (!st.data || !st.m) { toast('Poczekaj na wczytanie danych'); return; }
+    const ops = st.m.opsByLp, res = st.data.result;
+    const dateMs = (r, key) => (key === 'start' ? res.get(r.id)?.start : key === 'koniec' ? res.get(r.id)?.end : (ops[r.id] || {})[key]) ?? null;
+    const stationBg = (r) => parseSheetColor(r.stanowiskoBg, '#cccccc');
+    const all = st.data.rows;
+    const maxEnd = Math.max(Date.now(), ...all.map((r) => res.get(r.id)?.end || 0));
+    shareDialog({
+      cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: arrangeRows(all, new Set(), new Set()), selectedId: st.selected,
+      levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
+      axisStart: axisStartMs(H.localNow().getTime(), st.shift), maxEnd, nowMs: H.localNow().getTime(),
+      cellOf: (r, c) => {
+        const text = c.key === 'lp' ? '\u00a0\u00a0'.repeat(r.depth || 0) + (r.lp || '') : val(r, c);
+        if (c.key === 'station' && r.station) return { text, bg: stationBg(r), color: parseSheetColor(r.stanowiskoColor, '#000000'), bold: true, italic: true };
+        if (c.isDate) { const ms = dateMs(r, c.key); return { text, date: ms == null ? null : ms }; }
+        if (c.key === 'hours') { const v = (ops[r.id] || {}).hours; return v > 0 ? { text, value: v } : { text }; }
+        return { text };
+      },
+      rowStyle: (r) => {
+        const kc = komisColor(r.komis), done = String(r.status).trim().toLowerCase() === 'zak.';
+        return kc ? { bg: parseSheetColor(kc.bg, '#ffffff'), color: parseSheetColor(kc.color, '#000000'), bold: !!kc.bold, italic: !!kc.italic, underline: !!kc.underline } : { bg: done ? '#e6f2e0' : '#ffffff' };
+      },
+      barsOf: (r) => {
+        const done = String(r.status).trim().toLowerCase() === 'zak.';
+        const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
+        if (r.segs && r.segs.length) return { label, frame: { start: Math.min(...r.segs.map((x) => x[0])), end: Math.max(...r.segs.map((x) => x[1])) }, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: done ? ZAK_BAR : c })) };
+        const rr = res.get(r.id);
+        return { label, frame: null, bars: rr && rr.start != null && rr.end != null ? [{ start: rr.start, end: rr.end, color: done ? ZAK_BAR : stationBg(r) }] : [] };
+      },
+    });
   }
 
   // Szczegóły operacji: tylko prawy przycisk myszy (lewy zaznacza linię i edytuje komórki)
@@ -506,6 +540,7 @@ export function mountHarmLive(el) {
     h('span', { class: 'muted' }, 'Poziomy:'), ...levelBtns.values(),
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
+    h('button', { class: 'btn small primary', title: 'JPG, obraz do schowka, Excel, PDF albo wydruk; wybór kolumn, wierszy, poziomów i zakresu wykresu', onclick: openShare }, 'Udostępnij…'),
     h('span', { class: 'grow' }), info,
     h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza'),
     h('button', { class: 'btn', onclick: load }, 'Odśwież')), body);
