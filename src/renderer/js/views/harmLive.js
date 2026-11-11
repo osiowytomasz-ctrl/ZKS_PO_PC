@@ -1,11 +1,10 @@
-// Harmonogram (Firebase): widok klasyczny jak w arkuszu. Jedna tabela: z lewej dane (kolumny jak w pliku), z prawej oś czasu z paskami w tych samych wierszach.
+// Harmonogram (baza Firebase): widok klasyczny jak w arkuszu. Jedna tabela: z lewej dane (kolumny jak w pliku), z prawej oś czasu z paskami w tych samych wierszach.
 // Dane twarde edytujesz w komórkach; Start, Koniec i klucz liczy program. Przycisk „Ukryj dane” chowa kolumny z listy ukrywanych (domyślnie „czerwone”).
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
-import { opsFromSheetRows } from '../logic/harmImport.js';
-import { watchHarm, importOps, saveSettings, renameOp } from '../harmStore.js';
+import { watchHarm, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
 import { parseSheetColor } from '../logic/common.js';
@@ -79,19 +78,6 @@ export function mountHarmLive(el) {
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
-  const importSheet = async () => {
-    try {
-      toast('Pobieranie z arkusza…');
-      const d = await api('getHarmData', ['fresh'], { timeoutMs: 180000 });
-      const r = opsFromSheetRows(d.rows);
-      if (!r.operations.length) { toast(r.warnings[0] || 'Brak operacji'); return; }
-      const ok = window.confirm(`Zaimportować ${r.operations.length} operacji z arkusza? Obecne operacje w bazie zostaną ZASTĄPIONE.` + (r.warnings.length ? `\n\nOstrzeżeń: ${r.warnings.length}\n` + r.warnings.slice(0, 5).join('\n') : ''));
-      if (!ok) return;
-      const x = await importOps(r.operations);
-      toast(`Zaimportowano ${x.operations} operacji`);
-    } catch (e) { toast('Błąd importu: ' + (e.code || e.message)); }
-  };
-
   // ---------- filtry / kolumny ----------
   const sortLabel = (key) => { const i = st.sorts.findIndex((s) => s.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
   function openFilter(c) {
@@ -436,7 +422,7 @@ export function mountHarmLive(el) {
     const colW = (c) => Math.round((c.isDate ? st.layout.dateW : c.w) * sc);
     const LEFT = cols.reduce((a, c) => a + colW(c), 0) + Math.round(34 * sc);
     const now = H.localNow();
-    if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
+    if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
     // suboperacje pod operacją główną; zwinięte pomijane; paski podsumowania komisów na górze (albo przy pierwszym wystąpieniu komisu)
     const rows = withKomisRows(arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels), komisSummaryList(), st.collapsed, { inline: st.komisOpt.inline });
@@ -655,7 +641,6 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('button', { class: 'btn small primary', title: 'JPG, obraz do schowka, Excel, PDF albo wydruk; wybór kolumn, wierszy, poziomów i zakresu wykresu', onclick: openShare }, 'Udostępnij…'),
     h('span', { class: 'grow' }), info,
-    h('button', { class: 'btn small', title: 'Pobiera dane wpisane ręcznie z arkusza Harmonogramu do bazy', onclick: importSheet }, 'Import z arkusza'),
     h('button', { class: 'btn', onclick: load }, 'Odśwież')), body);
   load();
 }

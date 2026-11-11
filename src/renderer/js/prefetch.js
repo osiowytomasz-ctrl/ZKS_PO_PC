@@ -1,4 +1,4 @@
-// Pobieranie z wyprzedzeniem i odświeżanie w tle: Grafik i Harmonogram mają być gotowe, zanim użytkownik w nie wejdzie.
+// Pobieranie z wyprzedzeniem i odświeżanie w tle: Grafik ma być gotowy, zanim użytkownik w niego wejdzie (Harmonogram jest w Firebase).
 // Najwolniejszy jest serwer (Apps Script), więc ukrywamy jego czas, a nie próbujemy go skracać po stronie aplikacji.
 import { apiCached } from './ui.js';
 import { defaultRange } from './logic/grafik.js';
@@ -9,12 +9,11 @@ const INTERVAL_MS = 90000;            // odświeżanie w tle co 90 s, gdy okno j
 let timer = null;
 let lastRun = 0;
 
-/** Rozgrzewa pamięć podręczną Grafiku (domyślny zakres) i Harmonogramu. Błędy są ciche; wspólne wywołanie w toku nie dubluje zapytań. */
+/** Rozgrzewa pamięć podręczną Grafiku (domyślny zakres). Błędy są ciche; wspólne wywołanie w toku nie dubluje zapytań. */
 export function prefetchHot(canGrafik = true) {
   lastRun = Date.now();
   const quiet = (p) => p.catch(() => {});
   if (canGrafik) { const [s, e] = defaultRange(); quiet(apiCached('getGrData', [s, e], () => {}, { maxAge: GR_MAX_AGE / 2, silent: true })); }
-  quiet(apiCached('getHarmData', [], () => {}, { timeoutMs: 180000, maxAge: HARM_MAX_AGE / 2, silent: true }));
 }
 
 /** Start po zalogowaniu: pierwsze pobranie od razu, potem co 90 s i po powrocie do okna (najwyżej raz na 20 s). */

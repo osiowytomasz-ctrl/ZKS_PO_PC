@@ -34,18 +34,17 @@ export async function mountSettings(el, ctx) {
     await save();
     speed.className = 'muted'; speed.textContent = 'Mierzenie… (kilka sekund)';
     const [s, e] = defaultRange();
-    const tests = [['Puste wywołanie (api_whoami), 1', 'api_whoami', []], ['Puste wywołanie (api_whoami), 2', 'api_whoami', []], ['Grafik (getGrData)', 'getGrData', [s, e, 'fresh']], ['Harmonogram (getHarmData)', 'getHarmData', ['fresh']]];
+    const tests = [['Puste wywołanie (api_whoami), 1', 'api_whoami', []], ['Puste wywołanie (api_whoami), 2', 'api_whoami', []], ['Grafik (getGrData)', 'getGrData', [s, e, 'fresh']]];
     const out = []; const res = {};
     for (const [label, fn, args] of tests) {
       const r = await timed(fn, args); res[label] = r;
       out.push(`${label}: ${r.ok ? fmt(r.ms) + (r.bytes ? `, odpowiedź ${(r.bytes / 1024).toFixed(0)} KB` : '') : 'błąd: ' + r.err}`);
     }
     const floor = Math.min(res['Puste wywołanie (api_whoami), 1'].ms, res['Puste wywołanie (api_whoami), 2'].ms);
-    const gr = res['Grafik (getGrData)'], hm = res['Harmonogram (getHarmData)'];
+    const gr = res['Grafik (getGrData)'];
     out.push('');
     out.push(`Minimalny czas serwera Apps Script (puste wywołanie): ${fmt(floor)}.`);
     if (gr.ok) out.push(`Czas czytania arkusza w Grafiku: ok. ${fmt(Math.max(0, gr.ms - floor))} (reszta to stały narzut serwera).`);
-    if (hm.ok) out.push(`Czas czytania arkusza w Harmonogramie: ok. ${fmt(Math.max(0, hm.ms - floor))}.`);
     speed.textContent = out.join('\n');
   };
   const fbOut = h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } });

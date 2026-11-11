@@ -10,7 +10,6 @@ import { mountZakupy } from './views/zakupy.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
 import { mountToolTrack } from './views/tooltrack.js';
-import { mountHarm } from './views/harm.js';
 import { mountHarmLive } from './views/harmLive.js';
 import { mountPlan } from './views/plan.js';
 import { mountHelp } from './views/help.js';
@@ -25,8 +24,8 @@ export const MODULES = [
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
-  { id: 'harmonogram', title: 'Harmonogram', mount: mountHarm },
-  { id: 'harmonogram-fb', title: 'Harmonogram (Firebase)', mount: mountHarmLive },
+  // Harmonogram z bazy Firebase. Dawny widok z arkusza Google (views/harm.js, getHarmData z karty harm_1) jest wyłączony.
+  { id: 'harmonogram-fb', title: 'Harmonogram', mount: mountHarmLive },
   { id: 'help', title: 'Help', mount: mountHelp },
   { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', inHelp: true, web: 'symulator-num.html' },
