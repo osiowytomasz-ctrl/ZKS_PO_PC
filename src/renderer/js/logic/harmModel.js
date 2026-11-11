@@ -290,7 +290,7 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Poziom IV: pasek podsumowania komisu. Tworzy się sam z operacji, które mają ten komis (także dziedziczony po rodzicu); nie jest zapisywany
+// Podsumowanie komisu (pasek komisu, nie jest poziomem drzewa). Tworzy się sam z operacji, które mają ten komis (także dziedziczony po rodzicu); nie jest zapisywany
 // w bazie, nie ma numeru operacji i nie wpływa na liczenie harmonogramu ani na powiązania. Pokazuje: start pierwszej i koniec ostatniej operacji,
 // odcinki wszystkich operacji-liści w kolorach stanowisk (zakończone na zielono), sumę godzin, postęp (zak.), najbliższą wysyłkę i ostatnią dostawę.
 // ---------------------------------------------------------------------------------------------------------------------
@@ -325,7 +325,7 @@ function komisSummaries(rows, list, kids, result, up, look) {
     const h = Math.round(hours * 100) / 100;
     const status = leaves.length && zak === leaves.length ? 'zak.' : `${zak}/${leaves.length}`;
     out.set(k, {
-      id: KOMIS_PREFIX + k, komisRow: true, komisName: k, sub: false, parent: null, depth: 0, level: 4, subCount: ops.length, opCount: ops.length, leafCount: leaves.length, zakCount: zak,
+      id: KOMIS_PREFIX + k, komisRow: true, komisName: k, sub: false, parent: null, depth: 0, level: 0, subCount: ops.length, opCount: ops.length, leafCount: leaves.length, zakCount: zak,
       hours: '', hoursShown: h > 0 ? `Σ${h}` : '', godziny: h > 0 ? `Σ${h}` : '', sumHours: h, station: '', stanowisko: '', stanowiskoBg: '#cccccc', stanowiskoColor: '#000000',
       client: String(ops.map((o) => up(o.lp, 'client')).find(Boolean) || ''), status, endManual: '', startManual: '', key: '',
       lp: '', z1: '', z2: '', z3: '', z4: '', komis: k, element: `Komis ${k}: operacji ${ops.length}, zakończonych ${zak}/${leaves.length}`,
@@ -333,26 +333,29 @@ function komisSummaries(rows, list, kids, result, up, look) {
       ms: { start, koniec: end, wysylka: wys, dostawa: dost }, segs, zak: status === 'zak.' ? 'zak.' : '', state: 'ok',
     });
   }
-  return out;
+  // kolejność: wg pierwszego wystąpienia komisu w harmonogramie (kolumna S)
+  const first = new Map();
+  rows.forEach((r, i) => { const k = String(r.komis || '').trim(); if (k && !first.has(k)) first.set(k, i); });
+  return new Map([...out].sort((a, b) => (first.get(a[0]) ?? 1e9) - (first.get(b[0]) ?? 1e9)));
 }
 
 /**
- * Wstawia paski komisów (poziom IV) nad pierwszą widoczną operacją każdego komisu. Zwinięty komis (id „K:<komis>” w [collapsed]) chowa swoje operacje;
- * ukryty poziom IV nie chowa niczego poza samymi paskami komisów.
+ * Wstawia paski podsumowania komisów. [summaries] – lista pasków do pokazania (już przefiltrowana i posortowana, gdy tak ustawiono).
+ * Domyślnie wszystkie na samej górze tabeli; z opcją [inline] – nad pierwszą widoczną operacją komisu (pasek komisu bez widocznych operacji zostaje na górze).
+ * Zwinięty komis (id „K:<komis>” w [collapsed]) chowa swoje operacje.
  */
-export function withKomisRows(rows, komisRows, collapsed, hiddenLevels) {
-  if (!komisRows || !komisRows.size) return rows;
-  const show = !(hiddenLevels && hiddenLevels.has(4));
-  const seen = new Set(), out = [];
+export function withKomisRows(rows, summaries, collapsed, { inline = false } = {}) {
+  if (!summaries || !summaries.length) return rows;
+  const byKomis = new Map(summaries.map((s) => [s.komisName, s]));
+  const hidden = (r) => { const k = String(r.komis || '').trim(); return k && byKomis.has(k) && collapsed && collapsed.has(KOMIS_PREFIX + k); };
+  if (!inline) return [...summaries, ...rows.filter((r) => !hidden(r))];
+  const placed = new Set(), body = [];
   for (const r of rows) {
     const k = String(r.komis || '').trim();
-    if (k && komisRows.has(k)) {
-      if (!seen.has(k)) { seen.add(k); if (show) out.push(komisRows.get(k)); }
-      if (show && collapsed && collapsed.has(KOMIS_PREFIX + k)) continue;
-    }
-    out.push(r);
+    if (k && byKomis.has(k) && !placed.has(k)) { placed.add(k); body.push(byKomis.get(k)); }
+    if (!hidden(r)) body.push(r);
   }
-  return out;
+  return [...summaries.filter((s) => !placed.has(s.komisName)), ...body];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

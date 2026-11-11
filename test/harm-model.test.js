@@ -291,7 +291,7 @@ test('zmiana kolejności suboperacji (przeciągnij i upuść): litery zostają w
   assert.match(reorderPlan(c, '100', { 100: ['100b', '100a'] }).error, /cykl/);
 });
 
-test('poziom IV: pasek komisu – podsumowanie z operacji komisu, nie zmienia harmonogramu', () => {
+test('podsumowanie komisu: pasek komisu – podsumowanie z operacji komisu, nie zmienia harmonogramu', () => {
   const D = (d, h) => Date.UTC(2026, 10, d, h);
   const days = {}; for (let i = 0; i < 10; i++) days[`2026-11-${String(2 + i).padStart(2, '0')}`] = { '1Si1': 'a8', '1Si2': 'b8', '2Un1': 'a8', '2Un2': 'b8', '3Co1': 'a8', '3Co2': 'b8' };
   const ops = {
@@ -306,21 +306,32 @@ test('poziom IV: pasek komisu – podsumowanie z operacji komisu, nie zmienia ha
   for (const r of without.rows) assert.equal(d.rows.find((x) => x.id === r.id).koniec, r.koniec);   // komisy nie zmieniają terminów
   assert.equal(d.rows.length, 6);                                                                       // paski komisów nie są wierszami danych
   const k = d.komisRows.get('Z1');
-  assert.equal(k.id, 'K:Z1'); assert.ok(isKomisId(k.id)); assert.equal(k.level, 4); assert.equal(k.lp, '');
+  assert.equal(k.id, 'K:Z1'); assert.ok(isKomisId(k.id)); assert.equal(k.lp, '');
   assert.equal(k.opCount, 4); assert.equal(k.leafCount, 3); assert.equal(k.zakCount, 1); assert.equal(k.status, '1/3');
   assert.equal(k.hoursShown, 'Σ9'); assert.equal(k.client, 'ACME');
   assert.equal(k.ms.start, D(2, 6)); assert.equal(k.ms.koniec, D(4, 9)); assert.equal(k.ms.wysylka, D(3, 12)); assert.equal(k.ms.dostawa, D(1, 8));
   assert.equal(k.late, true);
   assert.deepEqual(k.segs.map((x) => x[2]), ['#93c47d', '#00b0f0', '#ffc000']);                         // zakończona operacja na zielono
   assert.equal(d.komisRows.get('300').opCount, 1); assert.equal(d.komisRows.size, 2);
-  // wstawianie: pasek komisu nad pierwszą operacją komisu; zwinięcie chowa operacje komisu; ukryty poziom IV chowa tylko paski
+  // kolejność pasków: wg pierwszego wystąpienia komisu w harmonogramie
+  const firstIdx = (kk) => d.rows.findIndex((r) => r.komis === kk);
+  assert.deepEqual([...d.komisRows.keys()], ['Z1', '300'].sort((a, b) => firstIdx(a) - firstIdx(b)));
   const rows = arrangeRows(d.rows, new Set(), new Set());
-  const ins = withKomisRows(rows, d.komisRows, new Set(), new Set());
-  assert.equal(ins.length, rows.length + 2);
+  const sums = [...d.komisRows.values()];
+  // domyślnie: wszystkie paski na samej górze
+  const top = withKomisRows(rows, sums, new Set());
+  assert.equal(top.length, rows.length + 2);
+  assert.deepEqual(top.slice(0, 2).map((r) => r.id), sums.map((r) => r.id));
+  // opcja: przy pierwszym wystąpieniu komisu
+  const ins = withKomisRows(rows, sums, new Set(), { inline: true });
   const iK = ins.findIndex((r) => r.id === 'K:Z1');
-  assert.ok(iK < ins.findIndex((r) => r.id === '100') && iK < ins.findIndex((r) => r.id === '300'));
-  const col = withKomisRows(rows, d.komisRows, new Set(['K:Z1']), new Set());
+  assert.equal(ins[iK + 1].komis, 'Z1'); assert.ok(iK < ins.findIndex((r) => r.id === '300'));
+  // pasek bez widocznych operacji (np. po filtrze) zostaje na górze
+  const only = withKomisRows(rows.filter((r) => r.komis !== '300'), sums, new Set(), { inline: true });
+  assert.equal(only[0].id, 'K:300');
+  // zwinięcie chowa operacje komisu; brak pasków = nic się nie zmienia
+  const col = withKomisRows(rows, sums, new Set(['K:Z1']));
   assert.deepEqual(col.filter((r) => String(r.komis) === 'Z1').map((r) => r.id), ['K:Z1']);
-  const hid = withKomisRows(rows, d.komisRows, new Set(['K:Z1']), new Set([4]));
-  assert.equal(hid.length, rows.length);
+  assert.equal(withKomisRows(rows, [], new Set(['K:Z1'])).length, rows.length);
+  assert.equal(k.level, 0);
 });

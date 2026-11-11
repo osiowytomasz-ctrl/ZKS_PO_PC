@@ -15,7 +15,7 @@ import { shareDialog } from './harmShare.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const LS = { komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
 const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
 const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -26,6 +26,8 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
+    // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
+    komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
@@ -34,6 +36,13 @@ export function mountHarmLive(el) {
   const val = (row, col) => (col.isDate ? noMin(row[col.key]) : col.key === 'hours' ? String(row.hoursShown ?? '') : String(row[col.key] ?? ''));
   let measureCtx = null;
   const textW = (text, font, bold) => { try { measureCtx = measureCtx || document.createElement('canvas').getContext('2d'); measureCtx.font = `${bold ? 'bold ' : ''}${font}px ${getComputedStyle(document.body).fontFamily}`; return measureCtx.measureText(text).width; } catch { return text.length * font * 0.6; } };
+  // paski podsumowania komisów do pokazania: bez filtrów i sortowania, chyba że w ustawieniach zaznaczono „filtrowanie i sortowanie”
+  const komisSummaryList = () => {
+    if (!st.komisOpt.show || !st.data || !st.data.komisRows) return [];
+    let list = [...st.data.komisRows.values()];
+    if (st.komisOpt.filter) { list = visibleRows(list, COLS, st.filters, val); if (st.sorts.length) list = sortRows(list, COLS, st.sorts, val); }
+    return list;
+  };
   const shownCols = () => COLS.filter((c) => !(st.compact && st.hideSet.has(c.key)));
 
   // ---------- dane: baza + grafik z arkusza ----------
@@ -86,7 +95,7 @@ export function mountHarmLive(el) {
   function openFilter(c) {
     const cur = st.sorts.find((s) => s.key === c.key);
     columnFilterDialog({
-      title: c.title, options: filterOptions(st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
+      title: c.title, options: filterOptions(st.komisOpt.show && st.komisOpt.filter ? [...st.data.rows, ...st.data.komisRows.values()] : st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
       onApply: (filter, sort) => {
         if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
         st.sorts = st.sorts.filter((s) => s.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
@@ -199,11 +208,11 @@ export function mountHarmLive(el) {
     const all = st.data.rows;
     const maxEnd = Math.max(Date.now(), ...all.map((r) => res.get(r.id)?.end || 0));
     shareDialog({
-      cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), st.data.komisRows, new Set(), new Set()), selectedId: st.selected,
+      cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), komisSummaryList(), new Set(), { inline: st.komisOpt.inline }), komisShown: st.komisOpt.show, selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
       axisStart: axisStartMs(H.localNow().getTime(), st.shift), maxEnd, nowMs: H.localNow().getTime(),
       cellOf: (r, c) => {
-        const text = c.key === 'lp' ? (r.komisRow ? r.komisName : '\u00a0\u00a0'.repeat(r.depth || 0) + (r.lp || '')) : val(r, c);
+        const text = c.key === 'lp' ? (r.komisRow ? '' : '\u00a0\u00a0'.repeat(r.depth || 0) + (r.lp || '')) : val(r, c);
         if (r.komisRow && c.key === 'koniec' && r.late) return { text, date: r.ms.koniec, bg: '#ff0000', color: '#ffffff', bold: true };
         if (r.komisRow && c.key === 'hours') return r.sumHours > 0 ? { text, value: r.sumHours, bold: true } : { text, bold: true };
         if (c.key === 'station' && r.station) return { text, bg: stationBg(r), color: parseSheetColor(r.stanowiskoColor, '#000000'), bold: true, italic: true };
@@ -252,7 +261,7 @@ export function mountHarmLive(el) {
     const perStation = new Map();
     for (const x of ops) if (!x.subCount && x.stanowisko) perStation.set(x.stanowisko, (perStation.get(x.stanowisko) || 0) + (Number(x.hours) || 0));
     const m = modal(`Komis ${r.komisName}`, h('div', {},
-      h('div', { class: 'muted', style: { marginBottom: '6px' } }, 'Pasek informacyjny (poziom IV): liczony z operacji komisu, nie zapisuje się w bazie i nie wpływa na harmonogram.'),
+      h('div', { class: 'muted', style: { marginBottom: '6px' } }, 'Pasek podsumowania: liczony z operacji komisu, nie zapisuje się w bazie i nie wpływa na harmonogram.'),
       line('Klient', r.client), line('Start pierwszej operacji', r.start), line('Koniec ostatniej operacji', r.koniec),
       line('Najbliższa wysyłka', r.wysylka), r.late ? h('div', { class: 'err' }, 'Koniec ostatniej operacji jest po wysyłce.') : null, line('Ostatnia dostawa', r.dostawa),
       line('Godziny (suma)', r.hoursShown), line('Operacji', `${r.opCount} (wykonywanych na stanowiskach: ${r.leafCount}, zakończonych: ${r.zakCount})`),
@@ -314,6 +323,8 @@ export function mountHarmLive(el) {
     // wygląd tabeli (zapamiętywany na tym komputerze)
     const num = (value, min, max) => h('input', { type: 'number', value: String(value), min: String(min), max: String(max), style: { width: '80px', padding: '4px' } });
     const rowHI = num(st.layout.rowH, 16, 80), dateWI = num(st.layout.dateW, 60, 220);
+    const kOpt = { ...st.komisOpt };
+    const kCheck = (key, label, tip) => h('label', { style: { display: 'block', margin: '3px 0' }, title: tip || '' }, h('input', { type: 'checkbox', checked: !!kOpt[key], onchange: (e) => { kOpt[key] = e.target.checked; } }), ' ' + label);
     // święta: tabela dat (dd.mm.rrrr) z opisem; w nagłówku osi są bordowe z białą pogrubioną czcionką
     const fmtDay = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso; };
     const hRows = [...holidayMap(st.m && st.m.cfg && st.m.cfg.holidays)].sort((a, b) => a[0].localeCompare(b[0])).map(([date, name]) => ({ text: fmtDay(date), name }));
@@ -358,6 +369,7 @@ export function mountHarmLive(el) {
       try {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
+        st.komisOpt = kOpt; lsSet(LS.komis, kOpt);
         await saveSettings(list, komisList, holidays); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
@@ -365,6 +377,11 @@ export function mountHarmLive(el) {
       h('h3', { style: { margin: '4px 0' } }, 'Wygląd tabeli'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
+      h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
+      kCheck('show', 'Pokazuj paski podsumowania komisów'),
+      kCheck('inline', 'Przypasuj pasek do pierwszego wystąpienia komisu (zamiast wszystkich na górze tabeli)'),
+      kCheck('filter', 'Filtruj i sortuj także paski podsumowania (wg filtrów i sortowania kolumn)', 'Bez zaznaczenia paski są zawsze widoczne i ułożone wg pierwszego wystąpienia komisu'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
       h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
       box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
@@ -386,8 +403,8 @@ export function mountHarmLive(el) {
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
-    // suboperacje pod operacją główną; zwinięte pomijane; nad pierwszą operacją komisu jego pasek podsumowania (poziom IV)
-    const rows = withKomisRows(arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels), st.data.komisRows, st.collapsed, st.hiddenLevels);
+    // suboperacje pod operacją główną; zwinięte pomijane; paski podsumowania komisów na górze (albo przy pierwszym wystąpieniu komisu)
+    const rows = withKomisRows(arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels), komisSummaryList(), st.collapsed, { inline: st.komisOpt.inline });
     const startMs = axisStartMs(now.getTime(), st.shift);
     const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now, { keepAll: true, axisStartMs: startMs });
     const maxEnd = Math.max(startMs, ...chart.items.filter((it) => it.end).map((it) => it.end.getTime()));
@@ -397,6 +414,7 @@ export function mountHarmLive(el) {
     const nOps = rows.filter((r) => !r.komisRow).length;
     info.textContent = `Operacji: ${nOps}` + (nOps !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
     scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
+    komisBtn.classList.toggle('primary', st.komisOpt.show);
     for (const [lvl, b] of levelBtns) { const on = !st.hiddenLevels.has(lvl); b.classList.toggle('primary', on); b.style.textDecoration = on ? 'none' : 'line-through'; }
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
@@ -450,14 +468,14 @@ export function mountHarmLive(el) {
     const top = Math.max(0, body.scrollTop - HEAD - ROW * 3), vh = body.clientHeight || 700;
     const from = Math.max(0, Math.floor(top / ROW)), to = Math.min(n, Math.ceil((top + vh + 6 * ROW) / ROW));
     clear(g.leftRows); clear(g.dyn); g.rowEls = new Map();
-    // pasek komisu (poziom IV): tylko informacja – bez edycji i usuwania; strzałka zwija operacje komisu, prawy przycisk pokazuje podsumowanie
+    // pasek podsumowania komisu: tylko informacja – bez edycji i usuwania; strzałka zwija operacje komisu, prawy przycisk pokazuje podsumowanie
     const paintKomis = (i, r) => {
       const kc = komisColor(r.komis);
       const bgRow = kc ? parseSheetColor(kc.bg, '#fff2cc') : '#fff2cc';
-      const line = h('div', { title: 'Podsumowanie komisu (poziom IV) – nie wpływa na harmonogram. Prawy przycisk: szczegóły',
+      const line = h('div', { title: 'Podsumowanie komisu – nie wpływa na harmonogram. Prawy przycisk: szczegóły',
         style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: bgRow, color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: 700, borderTop: '2px solid #000', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
       for (const col of cols) {
-        let text = col.key === 'lp' ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') + r.komisName : col.key === 'station' ? '' : val(r, col);
+        let text = col.key === 'lp' ? (st.collapsed.has(r.id) ? '▸' : '▾') : col.key === 'station' ? '' : val(r, col);   // kolumna lp. pusta (tylko strzałka zwijania), komis w kolumnie Komis
         const late = col.key === 'koniec' && r.late;
         const cell = h('div', { title: late ? 'Koniec ostatniej operacji jest po najbliższej wysyłce komisu' : col.key === 'lp' ? 'Kliknij strzałkę, aby zwinąć lub rozwinąć operacje komisu' : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW - 2 + 'px', lineHeight: ROW - 3 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c', cursor: col.key === 'lp' ? 'pointer' : 'default', ...(late ? { background: '#ff0000', color: '#fff' } : {}) } }, text);
@@ -581,9 +599,11 @@ export function mountHarmLive(el) {
     ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
   // poziomy III, II, I: przycisk wciśnięty = poziom widoczny; kliknięcie chowa albo pokazuje wszystkie wiersze tego poziomu
-  const LEVEL_TIPS = { 4: 'IV – paski komisów: podsumowanie wszystkich operacji komisu (tylko informacja, nie wpływa na harmonogram)', 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
-  const levelBtns = new Map([4, 3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
-    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III', 'IV'][lvl])]));
+  const LEVEL_TIPS = { 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
+  const levelBtns = new Map([3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
+    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
+  const komisBtn = h('button', { class: 'btn small primary', title: 'Paski podsumowania komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia…',
+    onclick: () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); } }, 'Podsumowanie komisów');
   const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap' } },
@@ -593,7 +613,7 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    h('span', { class: 'muted' }, 'Poziomy:'), ...levelBtns.values(),
+    h('span', { class: 'muted' }, 'Poziomy:'), ...levelBtns.values(), komisBtn,
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('button', { class: 'btn small primary', title: 'JPG, obraz do schowka, Excel, PDF albo wydruk; wybór kolumn, wierszy, poziomów i zakresu wykresu', onclick: openShare }, 'Udostępnij…'),

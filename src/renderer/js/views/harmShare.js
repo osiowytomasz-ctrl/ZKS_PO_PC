@@ -34,7 +34,7 @@ export async function svgToImage(svg, width, height, { scale = 2, type = 'image/
 export function shareDialog(ctx) {
   const saved = lsGet();
   const st = {
-    format: saved.format || 'jpg', rows: 'screen', levels: new Set([1, 2, 3, 4].filter((l) => !ctx.levelsHidden.has(l))),
+    format: saved.format || 'jpg', rows: 'screen', komis: ctx.komisShown !== false, levels: new Set([1, 2, 3].filter((l) => !ctx.levelsHidden.has(l))),
     cols: new Set(ctx.shownKeys), chart: saved.chart !== false, interval: ctx.interval, title: saved.title || 'Harmonogram',
     pageSize: saved.pageSize || 'A4', landscape: saved.landscape !== false, scale: saved.scale || 2,
   };
@@ -51,7 +51,7 @@ export function shareDialog(ctx) {
     const sel = ctx.selectedId, komisSel = sel && sel.startsWith('K:') ? sel.slice(2) : null;   // zaznaczony pasek komisu: cały komis
     const inBranch = (r) => r.id === sel || (komisSel != null ? String(r.komis || '').trim() === komisSel : descendantsOf(sel).includes(r));
     let rows = st.rows === 'all' ? ctx.rowsAll : st.rows === 'branch' && sel ? ctx.rowsAll.filter(inBranch) : ctx.rowsScreen;
-    return rows.filter((r) => st.levels.has(r.level || 1));
+    return rows.filter((r) => (r.komisRow ? st.komis : st.levels.has(r.level || 1)));
   }
   function buildModel() {
     const cols = ctx.cols.filter((c) => st.cols.has(c.key));
@@ -65,7 +65,7 @@ export function shareDialog(ctx) {
       chart = { cells, cellW: 18, nominalHours: iv.hours, nowMs: ctx.nowMs };
     }
     const sub = [`Wygenerowano: ${fmtDt(Date.now() - new Date().getTimezoneOffset() * 60000)}`, `wierszy: ${rows.length}`,
-      st.chart ? `oś: ${fromI.value} – ${toI.value}, interwał ${intervalOf(st.interval).label}` : '', `poziomy: ${[4, 3, 2, 1].filter((l) => st.levels.has(l)).map((l) => ['', 'I', 'II', 'III', 'IV'][l]).join(', ')}`].filter(Boolean).join('   ·   ');
+      st.chart ? `oś: ${fromI.value} – ${toI.value}, interwał ${intervalOf(st.interval).label}` : '', `poziomy: ${[3, 2, 1].filter((l) => st.levels.has(l)).map((l) => ['', 'I', 'II', 'III'][l]).join(', ')}`, st.komis ? 'z podsumowaniem komisów' : ''].filter(Boolean).join('   ·   ');
     return {
       title: st.title.trim(), subtitle: sub, font: 11, rowH: 22, chart,
       columns: cols.map((c) => ({ key: c.key, title: c.title, w: c.isDate ? 104 : c.key === 'element' ? 260 : Math.max(c.w, 34), vertical: !!c.vertical })),
@@ -100,8 +100,9 @@ export function shareDialog(ctx) {
     rowBox.append(radio('rows', 'screen', 'Jak na ekranie (filtry, zwinięte)', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'all', 'Wszystkie operacje', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'branch', ctx.selectedId ? (ctx.selectedId.startsWith('K:') ? `Zaznaczony komis ${ctx.selectedId.slice(2)} (wszystkie jego operacje)` : `Zaznaczona operacja ${ctx.selectedId} z gałęzią`) : 'Zaznaczona operacja z gałęzią (zaznacz linię)', st.rows, (x) => { st.rows = x; }, !ctx.selectedId));
-    lvlBox.append(...[[4, 'IV (komisy)'], [3, 'III'], [2, 'II'], [1, 'I']].map(([l, name]) => h('label', { style: { marginRight: '12px' } },
+    lvlBox.append(...[[3, 'III'], [2, 'II'], [1, 'I']].map(([l, name]) => h('label', { style: { marginRight: '12px' } },
       h('input', { type: 'checkbox', checked: st.levels.has(l), onchange: (e) => { if (e.target.checked) st.levels.add(l); else st.levels.delete(l); refreshInfo(); } }), ' ' + name)));
+    lvlBox.append(h('label', { style: { marginLeft: '12px' } }, h('input', { type: 'checkbox', checked: st.komis, onchange: (e) => { st.komis = e.target.checked; refreshInfo(); } }), ' Podsumowanie komisów'));
     for (const c of ctx.cols) colBox.append(h('label', {}, h('input', { type: 'checkbox', checked: st.cols.has(c.key), onchange: (e) => { if (e.target.checked) st.cols.add(c.key); else st.cols.delete(c.key); refreshInfo(); } }), ` ${c.title} (${c.letter})`));
     const paged = st.format === 'pdf' || st.format === 'print';
     pageBox.style.display = paged ? '' : 'none';
