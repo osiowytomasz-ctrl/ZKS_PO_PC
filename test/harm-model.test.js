@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
-import { idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -219,12 +219,47 @@ test('zmiana numeru: operacja główna → suboperacja istniejącej operacji i s
   assert.deepEqual(p.moves[0].op.preds, ['700']);
   assert.match(renamePlan(ops, '805', '850a').error, /wymaga istniejącej operacji głównej 850/);       // nie ma operacji 850
   assert.match(renamePlan(ops, '800', '800a').error, /wymaga istniejącej operacji głównej 800/);       // 800 nie może zostać własną suboperacją
-  assert.match(renamePlan(ops, '900', '800a').error, /ma suboperacje/);                               // operacja z suboperacjami nie może zostać suboperacją
+  const r9 = renamePlan(ops, '900', '800a');                                                          // operacja z suboperacjami → suboperacja: jej suboperacje stają się subsuboperacjami
+  assert.equal(r9.error, null); assert.deepEqual(r9.moves.map((m) => [m.oldId, m.newId]), [['900', '800a'], ['900a', '800aa']]);
   // powiązanie z przyszłą operacją główną blokuje zmianę (cykl)
-  assert.match(renamePlan({ ...ops, 805: { preds: ['800'] } }, '805', '800a').error, /byłaby jej operacją główną/);
+  assert.match(renamePlan({ ...ops, 805: { preds: ['800'] } }, '805', '800a').error, /byłby jej rodzicem/);
   assert.match(renamePlan({ ...ops, 800: { preds: ['805'] } }, '805', '800a').error, /cykl/);         // 800 zależałaby od własnej suboperacji
   // suboperacja → operacja: tylko na wolny numer
   const q = renamePlan(ops, '900a', '761');
   assert.equal(q.error, null); assert.equal(q.newId, '761');
   assert.match(renamePlan(ops, '900a', '760').error, /już istnieje/);
+});
+
+test('trzy poziomy: operacja › suboperacja (detal) › subsuboperacja, kolorowy pasek, zwijanie, ukrywanie operacji głównych', () => {
+  const D = (d, h) => Date.UTC(2026, 10, d, h);
+  const days = {}; for (let i = 0; i < 10; i++) days[`2026-11-${String(2 + i).padStart(2, '0')}`] = { '1Si1': 'a8', '1Si2': 'b8', '2Un1': 'a8', '2Un2': 'b8', '3Co1': 'a8', '3Co2': 'b8' };
+  const ops = {
+    100: { startManual: D(2, 6), komis: 'Z1', element: 'Zespół' },                       // bez stanowiska i bez czasu: przechodzi przez różne stanowiska
+    '100a': { element: 'Detal A' }, '100aa': { hours: 4, station: '1Si' }, '100ab': { hours: 2, station: '2Un' },
+    '100b': { element: 'Detal B' }, '100ba': { hours: 3, station: '3Co', preds: ['200'] },
+    200: { startManual: D(2, 16), hours: 2, station: '1Si' },                                 // 16–18: 100ba czeka na nią → przerwa
+  };
+  const r = computeSchedule(Object.entries(ops).map(([lp, o]) => ({ lp, ...o })), capacityFrom(days, ['1Si', '2Un', '3Co']));
+  assert.equal(r.get('100a').start, D(2, 6)); assert.equal(r.get('100aa').start, D(2, 6)); assert.equal(r.get('100aa').end, D(2, 10));
+  assert.equal(r.get('100ab').start, D(2, 10)); assert.equal(r.get('100ab').end, D(2, 12)); assert.equal(r.get('100a').end, D(2, 12));
+  assert.equal(r.get('100b').start, D(2, 12)); assert.equal(r.get('100ba').start, D(2, 18)); assert.equal(r.get('100ba').end, D(2, 21));
+  assert.equal(r.get('100').end, D(2, 21));
+  const d = buildHarmData(ops, days, null, D(2, 6));
+  const row = (id) => d.rows.find((x) => x.id === id);
+  assert.equal(row('100').hoursShown, 'Σ9'); assert.equal(row('100a').hoursShown, 'Σ6'); assert.equal(row('100').station, '');
+  assert.equal(row('100aa').depth, 2); assert.equal(row('100aa').parent, '100a'); assert.equal(row('100aa').komis, 'Z1');
+  // pasek operacji: odcinki wszystkich subsuboperacji w kolorach ich stanowisk
+  assert.deepEqual(row('100').segs.map((x) => x[2]), ['#0070c0', '#00b0f0', '#ffc000']);
+  assert.deepEqual(row('100a').segs.map((x) => [x[0], x[1]]), [[D(2, 6), D(2, 10)], [D(2, 10), D(2, 12)]]);
+  // zwijanie operacji chowa wszystkie poziomy; zwinięcie suboperacji chowa tylko jej subsuboperacje
+  assert.deepEqual(arrangeRows(d.rows, new Set(['100'])).map((x) => x.id).sort(), ['100', '200']);
+  assert.deepEqual(arrangeRows(d.rows, new Set(['100a'])).map((x) => x.id).sort(), ['100', '100a', '100b', '100ba', '200']);
+  assert.deepEqual(arrangeRows(d.rows, new Set(), true).map((x) => x.id).sort(), ['100a', '100aa', '100ab', '100b', '100ba', '200']);   // ukryte operacje główne z suboperacjami
+  // numery i powiązania
+  assert.equal(idError('100ac', ops), null); assert.match(idError('100ca', ops), /wymaga istniejącej suboperacji 100c/); assert.match(idError('100aaa', ops), /dwie litery/);
+  assert.match(predError(ops, '100aa', 0, '100'), /operacją główną/); assert.match(predError(ops, '100aa', 0, '100a'), /cykl/); assert.match(predError(ops, '100', 0, '100ab'), /subsuboperacją/);
+  assert.equal(predError(ops, '200', 0, '100ab'), null);
+  const mv = renamePlan(ops, '100a', '300');                                                         // detal staje się operacją, jego subsuboperacje suboperacjami
+  assert.equal(mv.error, null); assert.deepEqual(mv.moves.map((m) => [m.oldId, m.newId]), [['100a', '300'], ['100aa', '300a'], ['100ab', '300b']]);
+  assert.match(renamePlan(ops, '100', '200a').error, /trzy poziomy/);                                  // 100aa → 200aaa
 });

@@ -3,22 +3,27 @@
 //    (operacje pogrupowane po 50 numerów, więc odczyt całości to kilkadziesiąt dokumentów, a zmiana to jedno pole)
 //  - Grafik NIE jest w bazie: program pobiera go z arkusza (karta graf_norm, API getGrafNorm) i liczy z niego godziny stanowisk.
 //  - config/main: { stations: [{name, bg, color}] } – tylko zmiany użytkownika (kolory stanowisk i dodane stanowiska); domyślne są w kodzie.
-import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, subParent, DAY_MS } from './schedule.js';
+import { stationHours, slotNumber, buildCapacity, computeSchedule, sortKey, compareKeys, toSerial, subParent, depthOf, DAY_MS } from './schedule.js';
 
 export const HORIZON_DAYS = 417;   // komórka S12 arkusza: operacje startujące dalej niż tyle dni od dziś trafiają za stanowiska
 
 export const CHUNK = 50;
 /**
- * Numer operacji: liczba = operacja główna (np. 3000); liczba + litery = suboperacja tej operacji (np. 3000a, 3000b).
- * Numery „s<cyfry>” są techniczne (operacje bez numeru w arkuszu) i nie można ich wpisać ręcznie.
+ * Numer operacji: liczba = operacja (np. 100); liczba + litera = suboperacja (np. 100a, detal), liczba + dwie litery = subsuboperacja
+ * (np. 100aa, operacja na detalu). Numery „s<cyfry>” są techniczne (operacje bez numeru w arkuszu) i nie można ich wpisać ręcznie.
  */
-export const ID_PATTERN = /^\d{1,15}\p{L}{0,3}$/u;
+export const MAX_DEPTH = 2;
+export const ID_PATTERN = /^\d{1,15}\p{L}{0,2}$/u;
 export const isSyntheticId = (id) => /^s\d+$/.test(String(id));
-export { subParent };
-/** Czy numer ma postać suboperacji (liczba + litery), niezależnie od tego, czy operacja główna istnieje. */
+export { subParent, depthOf };
+/** Czy numer ma postać suboperacji albo subsuboperacji (liczba + litery), niezależnie od tego, czy rodzic istnieje. */
 export const isSubId = (id) => subParent(id) != null;
+/** Nazwa poziomu numeru (do komunikatów). */
+export const levelName = (id) => ['operacja', 'suboperacja', 'subsuboperacja'][depthOf(id)] || 'operacja';
+const levelGen = (id) => ['operacji', 'suboperacji', 'subsuboperacji'][depthOf(id)] || 'operacji';   // „tej suboperacji”
+const levelIns = (id) => ['operacją', 'suboperacją', 'subsuboperacją'][depthOf(id)] || 'operacją';     // „jest suboperacją”
 
-/** Porządek numerów: liczba rosnąco, przy tej samej liczbie najpierw operacja główna, potem suboperacje (a, b, …); techniczne „s…” na końcu. */
+/** Porządek numerów: liczba rosnąco, przy tej samej liczbie najpierw operacja, potem jej suboperacje i subsuboperacje (a, aa, ab, b, …); techniczne „s…” na końcu. */
 export function lpCompare(a, b) {
   a = String(a); b = String(b);
   const parse = (x) => { const m = /^(\d+)(\p{L}*)$/u.exec(x); return m ? { n: BigInt(m[1]), suf: m[2] } : null; };
@@ -31,27 +36,41 @@ export function lpCompare(a, b) {
 
 /**
  * Powód, dla którego [id] nie nadaje się na nowy numer operacji (null = można). [existing] to obiekt operacji (klucze = numery),
- * [pending] – numery operacji głównych dodawanych jednocześnie (np. w tej samej tabeli). Suboperacja wymaga istniejącej operacji głównej.
+ * [pending] – numery dodawane jednocześnie (np. w tej samej tabeli). Suboperacja wymaga istniejącej operacji, subsuboperacja – istniejącej suboperacji.
  */
 export function idError(id, existing, { ignore, pending } = {}) {
   const t = String(id ?? '').trim();
   if (!t) return 'Numer operacji nie może być pusty';
   if (isSyntheticId(t)) return 'Numery „s” + cyfry są zarezerwowane dla operacji bez numeru';
-  if (!ID_PATTERN.test(t)) return 'Numer operacji: liczba (operacja główna, np. 3000) albo liczba + litera (suboperacja, np. 3000a)';
+  if (!ID_PATTERN.test(t)) return 'Numer operacji: liczba (operacja, np. 100), liczba + litera (suboperacja, np. 100a) albo liczba + dwie litery (subsuboperacja, np. 100aa)';
   if (t !== ignore && existing[t]) return `Operacja o numerze ${t} już istnieje`;
   const parent = subParent(t);
-  if (parent && !(existing[parent] && parent !== ignore) && !(pending && pending.has(parent))) return `Suboperacja ${t} wymaga istniejącej operacji głównej ${parent}`;
+  if (parent && !(existing[parent] && parent !== ignore) && !(pending && pending.has(parent))) {
+    return depthOf(t) === 1 ? `Suboperacja ${t} wymaga istniejącej operacji głównej ${parent}` : `Subsuboperacja ${t} wymaga istniejącej suboperacji ${parent}`;
+  }
   return null;
 }
 
-/** Suboperacje operacji głównej [id] (numery), w kolejności a, b, … */
+/** Bezpośrednie dzieci węzła [id] (numery dłuższe o jedną literę), w kolejności a, b, … */
 export function subOps(opsByLp, id) {
   return Object.keys(opsByLp).filter((lp) => subParent(lp) === String(id)).sort(lpCompare);
+}
+/** Wszystkie potomki węzła [id] (dzieci, wnuki), w kolejności numerów. */
+export function descendants(opsByLp, id) {
+  const out = [];
+  for (const c of subOps(opsByLp, id)) out.push(c, ...descendants(opsByLp, c));
+  return out;
+}
+/** Czy [a] jest przodkiem [b] (rodzicem, dziadkiem). */
+export function isAncestor(a, b) {
+  for (let p = subParent(b); p != null; p = subParent(p)) if (p === String(a)) return true;
+  return false;
 }
 
 /**
  * Zmiana numeru: nowy klucz, usunięcie starego i poprawienie poprzedników we wszystkich operacjach, które się do niego odwołują.
- * Zmiana numeru operacji głównej przenosi razem z nią jej suboperacje (3000a → 3001a). Wynik: {moves: [{oldId, newId, op}], referrers: [[lp, preds]]}.
+ * Węzeł zabiera ze sobą wszystkie potomki (100 → 105: 100a → 105a, 100aa → 105aa; 100a → 760: 100aa → 760a), o ile nie przekroczą trzech poziomów
+ * i nowe numery są wolne. Wynik: {moves: [{oldId, newId, op}], referrers: [[lp, preds]]}.
  */
 export function renamePlan(opsByLp, oldId, newId) {
   const neu = String(newId ?? '').trim();
@@ -59,45 +78,42 @@ export function renamePlan(opsByLp, oldId, newId) {
   const err = idError(neu, opsByLp, { ignore: oldId });
   if (err) return { error: err };
   if (neu === oldId) return { error: null, same: true };
+  if (isAncestor(oldId, neu)) return { error: `Operacja ${oldId} nie może zostać swoją własną suboperacją` };
   const idMap = new Map([[oldId, neu]]);
-  if (/^\d+$/.test(oldId)) {
-    const subs = subOps(opsByLp, oldId);
-    if (/^\d+$/.test(neu)) {
-      for (const sub of subs) {                                  // operacja główna zabiera swoje suboperacje pod nowy numer
-        const target = neu + sub.slice(oldId.length);
-        if (opsByLp[target]) return { error: `Nie można przenieść suboperacji ${sub}: numer ${target} już istnieje` };
-        idMap.set(sub, target);
-      }
-    } else if (subs.length) {                                    // operacja główna → suboperacja innej operacji: tylko gdy sama nie ma suboperacji
-      return { error: `Operacja ${oldId} ma suboperacje (${subs.join(', ')}); najpierw zmień ich numery albo je usuń` };
-    }
+  for (const d of descendants(opsByLp, oldId)) {                 // potomki idą razem z węzłem
+    const target = neu + d.slice(oldId.length);
+    if (!ID_PATTERN.test(target)) return { error: `Nie można przenieść ${d}: numer ${target} przekroczyłby trzy poziomy (operacja › suboperacja › subsuboperacja)` };
+    if (opsByLp[target] && !idMap.has(target)) return { error: `Nie można przenieść ${d}: numer ${target} już istnieje` };
+    idMap.set(d, target);
   }
   const fix = (preds) => (preds || []).map((p) => idMap.get(p) ?? p);
   const moves = [...idMap].map(([from, to]) => ({ oldId: from, newId: to, op: { ...opsByLp[from], preds: fix(opsByLp[from].preds) } }));
   const referrers = [];
   for (const [lp, op] of Object.entries(opsByLp)) if (!idMap.has(lp) && (op.preds || []).some((p) => idMap.has(p))) referrers.push([lp, fix(op.preds)]);
-  // Po zmianie numeru operacja może trafić pod inną operację główną (albo spod niej wyjść), więc sprawdzamy, czy powiązania nie utworzą cyklu.
-  const newParent = subParent(neu);
-  if (newParent && (opsByLp[oldId].preds || []).includes(newParent)) return { error: `Operacja ${oldId} zależy od ${newParent}, która byłaby jej operacją główną; usuń najpierw to powiązanie` };
+  // Po zmianie numeru operacja może trafić pod inny węzeł (albo spod niego wyjść), więc sprawdzamy, czy powiązania nie utworzą cyklu.
+  for (let p = subParent(neu); p != null; p = subParent(p)) {
+    if ((opsByLp[oldId].preds || []).includes(p)) return { error: `Operacja ${oldId} zależy od ${p}, który byłby jej rodzicem; usuń najpierw to powiązanie` };
+  }
   const sim = { ...opsByLp };
   for (const m of moves) delete sim[m.oldId];
   for (const m of moves) sim[m.newId] = m.op;
   for (const [lp, preds] of referrers) sim[lp] = { ...sim[lp], preds };
   const cyclesOf = (ops) => new Set([...computeSchedule(Object.entries(ops).map(([lp, o]) => ({ lp, ...o })), {})].filter(([, r]) => r.state === 'cycle').map(([lp]) => lp));
   const before = cyclesOf(opsByLp), after = cyclesOf(sim);
-  const fresh = [...after].filter((lp) => !before.has([...idMap].find(([, to]) => to === lp)?.[0] ?? lp));
+  const back = new Map([...idMap].map(([from, to]) => [to, from]));
+  const fresh = [...after].filter((lp) => !before.has(back.get(lp) ?? lp));
   if (fresh.length) return { error: `Zmiana numeru utworzyłaby cykl zależności (operacje: ${fresh.slice(0, 5).join(', ')}); popraw najpierw powiązania` };
   return { error: null, oldId, newId: neu, op: moves[0].op, moves, referrers };
 }
 
 const hashLp = (t) => { let h = 7; for (const ch of t) h = (h * 31 + ch.codePointAt(0)) % 1000003; return h; };
 
-/** Dokument z operacjami: numery po 50 (c0000…), suboperacje razem z operacją główną, techniczne „s…” osobno, pozostałe rozproszone po x00…x19. */
+/** Dokument z operacjami: numery po 50 (c0000…), suboperacje i subsuboperacje razem z operacją główną, techniczne „s…” osobno, pozostałe rozproszone po x00…x19. */
 export const chunkId = (lp) => {
   const t = String(lp);
   if (/^\d+$/.test(t)) return 'c' + String(Math.floor(Number(t) / CHUNK)).padStart(4, '0');
-  const sp = subParent(t);
-  if (sp) return 'c' + String(Math.floor(Number(sp) / CHUNK)).padStart(4, '0');
+  const root = /^(\d+)\p{L}+$/u.exec(t);                // suboperacje i subsuboperacje razem z operacją główną
+  if (root) return 'c' + String(Math.floor(Number(root[1]) / CHUNK)).padStart(4, '0');
   const m = /^s(\d+)$/.exec(t);
   if (m) return 's' + String(Math.floor(Number(m[1]) / CHUNK)).padStart(4, '0');
   return 'x' + String(hashLp(t) % 20).padStart(2, '0');
@@ -166,16 +182,13 @@ export function statKey(o, r, key) {
  * Z operacji (mapa lp → operacja), dni grafiku i konfiguracji robi dane dla widoku Harmonogramu (ten sam kształt co z arkusza).
  * Zwraca też `result` (Map lp → {start, end, state}) do dalszych obliczeń.
  */
-/** Wiersze po filtrach i sortowaniu: suboperacje układają się chronologicznie razem z pozostałymi; znikają tylko wtedy, gdy ich operacja główna jest zwinięta. */
-export function arrangeRows(rows, collapsed) {
-  if (!collapsed || !collapsed.size) return rows;
-  return rows.filter((r) => !(r.sub && collapsed.has(r.parent)));
-}
-
-/** Odcinki paska operacji głównej złożonej z suboperacji (bez własnego czasu): [[start, koniec], …] w ms; puste, gdy pasek ma być ciągły. */
-function segsOf(o, kidIds, opsByLp, result) {
-  if (!kidIds.length || o.hours > 0) return [];
-  return kidIds.map((k) => result.get(k)).filter((r) => r && r.start != null && r.end != null).map((r) => [r.start, r.end]).sort((a, b) => a[0] - b[0]);
+/**
+ * Wiersze po filtrach i sortowaniu: suboperacje układają się chronologicznie razem z pozostałymi; znikają, gdy któryś ich przodek jest zwinięty.
+ * [hideParents] chowa operacje główne, które mają suboperacje (widać wtedy same suboperacje i subsuboperacje).
+ */
+export function arrangeRows(rows, collapsed, hideParents = false) {
+  const hiddenByCollapse = (r) => { if (!collapsed || !collapsed.size) return false; for (let p = r.parent; p != null; p = subParent(p)) if (collapsed.has(p)) return true; return false; };
+  return rows.filter((r) => !hiddenByCollapse(r) && !(hideParents && r.depth === 0 && r.subCount > 0));
 }
 
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
@@ -189,27 +202,39 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const kids = new Map();
   for (const lp of Object.keys(opsByLp)) { const p = parentOf(lp); if (p) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
   for (const l of kids.values()) l.sort(lpCompare);
+  // stanowisko, komis i klient: puste dziedziczą po rodzicu (w górę); do sortowania węzeł bez stanowiska bierze stanowisko pierwszego dziecka
+  const up = (lp, key) => { const o = opsByLp[lp]; if (o[key]) return o[key]; const p = parentOf(lp); return p ? up(p, key) : ''; };
+  const sortStation = (lp) => up(lp, 'station') || (kids.has(lp) ? sortStation(kids.get(lp)[0]) : '');
+  const chopped = (lp) => kids.has(lp) && !(opsByLp[lp].hours > 0);
+  // czas węzła złożonego = suma czasów dzieci (dziecko złożone liczy swoją sumę)
+  const effHours = (lp) => (chopped(lp) ? kids.get(lp).reduce((t, c) => t + (effHours(c) || 0), 0) : (opsByLp[lp].hours > 0 ? opsByLp[lp].hours : 0));
+  // odcinki paska węzła złożonego: liście poddrzewa, każdy w kolorze swojego stanowiska (pasek pokazuje plan i kolejność stanowisk)
+  const leafSegs = (lp) => {
+    if (chopped(lp)) return kids.get(lp).flatMap(leafSegs);
+    const r = result.get(lp), sl = look[up(lp, 'station')] || {};
+    return r && r.start != null && r.end != null ? [[r.start, r.end, sl.bg || '#cccccc']] : [];
+  };
   const keyed = list.map((o) => {
     const r = result.get(o.lp) || {};
     const zak = String(o.status || '').trim().toLowerCase() === 'zak.' ? 'zak.' : String(o.status || '');
-    const po = parentOf(o.lp) ? opsByLp[parentOf(o.lp)] : null;
-    return { o, r, zak, key: sortKey({ station: o.station || (po && po.station) || '', element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };   // suboperacja sortuje się po stanowisku (własnym albo operacji głównej) i starcie, jak każda inna
+    return { o, r, zak, key: sortKey({ station: sortStation(o.lp), element: o.element, zak }, r.start, HORIZON_DAYS, nowMs) };
   });
   const ordered = keyed.slice().sort((a, b) => compareKeys(a.key, b.key));
   const rows = [];
   for (const { o, r, zak, key } of ordered) {
-    const par = parentOf(o.lp), po = par ? opsByLp[par] : null;
-    const sl = look[o.station || (po && po.station)] || {};
+    const par = parentOf(o.lp);
+    const station = up(o.lp, 'station');
+    const sl = look[station] || {};
     const myKids = kids.get(o.lp) || [];
-    const sum = myKids.reduce((t, c) => t + (opsByLp[c].hours > 0 ? opsByLp[c].hours : 0), 0);
+    const sum = myKids.length ? effHours(o.lp) : 0;
     const hoursShown = o.hours > 0 ? String(o.hours) : (myKids.length && sum > 0 ? `Σ${sum}` : (o.hours == null ? '' : String(o.hours)));
     rows.push({
-      id: o.lp, sub: !!par, parent: par, subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
-      station: o.station || (po && po.station) || '', client: o.client || (po && po.client) || '', status: o.status || '', endManual: fmtDt(o.endManual), key: statKey(o, r, key),
+      id: o.lp, sub: !!par, parent: par, depth: par ? depthOf(o.lp) : 0, subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
+      station, client: up(o.lp, 'client'), status: o.status || '', endManual: fmtDt(o.endManual), key: statKey({ ...o, station: sortStation(o.lp) }, r, key),
       lp: isSyntheticId(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
-      komis: o.komis || (po && po.komis) || '', element: o.element || '', stanowisko: o.station || (po && po.station) || '', godziny: hoursShown,
+      komis: up(o.lp, 'komis'), element: o.element || '', stanowisko: station, godziny: hoursShown,
       start: fmtDt(r.start), koniec: fmtDt(r.end), startManual: fmtDt(o.startManual), dostawa: fmtDt(o.dostawa), wysylka: fmtDt(o.wysylka),
-      segs: segsOf(o, myKids, opsByLp, result), zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
+      segs: chopped(o.lp) ? leafSegs(o.lp).sort((a, b) => a[0] - b[0]) : [], zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
   }
   return { rows, holidays: [], rapData: {}, result };
@@ -228,7 +253,17 @@ export function blockedPredecessors(opsByLp, id) {
   const kids = new Map();
   for (const lp of Object.keys(opsByLp)) { const p = subParent(lp); if (p && opsByLp[p]) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
   for (const l of kids.values()) l.sort(lpCompare);
-  const own = (o) => o.startManual != null || (o.preds || []).length > 0;
+  // własny start jak w silniku: ręczny, z poprzedników albo z kolejności rodzeństwa (od rodzica z własnym startem albo po poprzednim dziecku)
+  const ownMemo = new Map();
+  const own = (lp) => {
+    if (ownMemo.has(lp)) return ownMemo.get(lp);
+    ownMemo.set(lp, false);
+    const o = opsByLp[lp], par = subParent(lp);
+    let v = o.startManual != null || (o.preds || []).length > 0;
+    if (!v && par && opsByLp[par]) v = kids.get(par).indexOf(lp) > 0 || own(par);
+    ownMemo.set(lp, v);
+    return v;
+  };
   const deps = new Map();                         // węzeł → węzły, od których zależy
   const add = (n, d) => { if (!deps.has(n)) deps.set(n, []); deps.get(n).push(d); };
   for (const [lp, op] of Object.entries(opsByLp)) {
@@ -237,9 +272,9 @@ export function blockedPredecessors(opsByLp, id) {
     if (par && opsByLp[par]) {
       const sibs = kids.get(par), i = sibs.indexOf(lp);
       if (i > 0) add('s:' + lp, 'e:' + sibs[i - 1]);
-      else if (own(opsByLp[par])) add('s:' + lp, 's:' + par);             // pierwsza suboperacja startuje z operacją główną, o ile ta ma własny start
+      else if (own(par)) add('s:' + lp, 's:' + par);                       // pierwsze dziecko startuje z rodzicem, o ile ten ma własny start
     }
-    if (kids.has(lp) && !own(op)) add('s:' + lp, 's:' + kids.get(lp)[0]);   // operacja główna bez własnego startu dziedziczy start po pierwszej suboperacji
+    if (kids.has(lp) && !own(lp)) add('s:' + lp, 's:' + kids.get(lp)[0]);   // węzeł bez własnego startu dziedziczy start po pierwszym dziecku
     add('e:' + lp, 's:' + lp);
     if (kids.has(lp) && !(op.hours > 0)) for (const k of kids.get(lp)) add('e:' + lp, 'e:' + k);
   }
@@ -259,8 +294,8 @@ export function predError(opsByLp, id, slot, pred) {
   if (!p) return null;                                                   // puste = brak powiązania
   if (!opsByLp[p]) return `Operacja ${p} nie istnieje`;
   if (p === String(id)) return 'Operacja nie może być swoim poprzednikiem';
-  if (subParent(id) === p) return `Operacja ${p} jest operacją główną tej suboperacji; powiązanie jest zbędne i tworzy cykl`;
-  if (subParent(p) === String(id)) return `Operacja ${p} jest suboperacją tej operacji; powiązanie tworzy cykl`;
+  if (isAncestor(p, id)) return `Operacja ${p} jest ${depthOf(p) === 0 ? 'operacją główną' : 'suboperacją nadrzędną'} tej ${levelGen(id)}; powiązanie jest zbędne i tworzy cykl`;
+  if (isAncestor(id, p)) return `Operacja ${p} jest ${levelIns(p)} tej ${levelGen(id)}; powiązanie tworzy cykl`;
   if (blockedPredecessors(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
   const others = (opsByLp[id]?.preds || []).filter((_, i) => i !== slot);
   if (others.includes(p)) return `Operacja ${p} jest już wpisana jako inny poprzednik`;
@@ -271,7 +306,7 @@ export function predError(opsByLp, id, slot, pred) {
 export function predecessorChoices(opsByLp, id, slot) {
   const blocked = blockedPredecessors(opsByLp, id);
   const others = new Set((opsByLp[id]?.preds || []).filter((_, i) => i !== slot));
-  return Object.keys(opsByLp).filter((lp) => lp !== String(id) && !blocked.has(lp) && !others.has(lp) && subParent(id) !== lp && subParent(lp) !== String(id)).sort(lpCompare);
+  return Object.keys(opsByLp).filter((lp) => lp !== String(id) && !blocked.has(lp) && !others.has(lp) && !isAncestor(lp, id) && !isAncestor(id, lp)).sort(lpCompare);
 }
 
 /**
@@ -281,7 +316,7 @@ export function predecessorChoices(opsByLp, id, slot) {
  */
 export function validateNewOps(rows, existing, parseDate, parseNum) {
   const ops = [], errors = [], seen = new Set();
-  const pending = new Set(rows.map((r) => String(r.lp ?? '').trim()).filter((x) => /^\d+$/.test(x)));
+  const pending = new Set(rows.map((r) => String(r.lp ?? '').trim()).filter((x) => ID_PATTERN.test(x)));
   rows.forEach((r, i) => {
     const v = (k) => String(r[k] ?? '').trim();
     const filled = ['client', 'komis', 'element', 'station', 'hours', 'wysylka', 'dostawa'].some((k) => v(k));

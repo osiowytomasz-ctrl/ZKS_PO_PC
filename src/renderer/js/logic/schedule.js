@@ -99,21 +99,40 @@ export function computeEnd(startMs, hours, cap) {
  *  - Koniec poprzednika (także ręczny) jest startem następnika. Przy powtórzonym numerze lp liczy się pierwsza operacja.
  * capacity: { [stanowisko]: buildCapacity(...) }. Zwraca Map lp → { start, end, state } (state: ok | no-start | no-end | cycle).
  */
+/**
+ * Hierarchia numerów (do trzech poziomów): 100 = operacja, 100a = suboperacja (np. detal), 100aa = subsuboperacja (operacja na detalu w gnieździe).
+ * Dziećmi węzła są numery dłuższe o jedną literę. Reguły (jednakowe na każdym poziomie):
+ *  - dzieci wykonują się po kolei (a, b, …): pierwsze od startu rodzica (o ile rodzic ma własny start), kolejne po końcu poprzedniego,
+ *    i nie wcześniej niż koniec ich własnych poprzedników;
+ *  - rodzic bez własnego startu (ręcznego, z poprzedników albo z kolejności wśród rodzeństwa) dziedziczy start po PIERWSZYM dziecku;
+ *  - rodzic bez własnego czasu trwa do końca ostatniego dziecka (czas = suma czasów dzieci, możliwe przerwy);
+ *  - puste stanowisko dziedziczy się po rodzicu.
+ */
 export function computeSchedule(ops, capacity) {
   const byLp = new Map();
   for (const op of ops) if (!byLp.has(String(op.lp))) byLp.set(String(op.lp), op);
 
-  // Suboperacje: numer główny + litery (np. 3000a). Wykonują się po kolei (a, b, …) od startu operacji głównej (albo później, jeśli czekają na swoje
-  // poprzedniki), mają własny czas. Operacja główna bez własnego czasu trwa od swojego startu do końca ostatniej suboperacji (czas = suma, możliwe przerwy).
   const isSub = (lp) => { const p = subParent(lp); return p != null && byLp.has(p); };
   const children = new Map();
   for (const op of byLp.values()) if (isSub(op.lp)) { const p = subParent(op.lp); if (!children.has(p)) children.set(p, []); children.get(p).push(op); }
   for (const list of children.values()) list.sort((x, y) => String(x.lp).localeCompare(String(y.lp), 'pl', { numeric: true, sensitivity: 'base' }));
-  // własne źródło startu: ręczny start albo poprzednicy; operacja główna bez niego dziedziczy start po PIERWSZEJ suboperacji (jej zależności)
-  const ownStart = (op) => op.startManual != null || (op.preds || []).some((x) => String(x ?? '').trim());
-  const chopped = (op) => children.has(String(op.lp)) && !(op.hours > 0);     // operacja główna złożona z suboperacji (bez własnego czasu)
+  const kidsOf = (op) => children.get(String(op.lp));
+  const hasPreds = (op) => (op.preds || []).some((x) => String(x ?? '').trim());
+  // własne źródło startu: ręczny start, poprzednicy albo miejsce w kolejności rodzeństwa (start od rodzica z własnym startem albo po poprzednim)
+  const ownMemo = new Map();
+  const hasOwnStart = (op) => {
+    const key = String(op.lp);
+    if (ownMemo.has(key)) return ownMemo.get(key);
+    ownMemo.set(key, false);
+    let v = op.startManual != null || hasPreds(op);
+    if (!v && isSub(key)) { const par = byLp.get(subParent(key)); v = kidsOf(par).indexOf(op) > 0 || hasOwnStart(par); }
+    ownMemo.set(key, v);
+    return v;
+  };
+  const chopped = (op) => !!kidsOf(op) && !(op.hours > 0);     // węzeł złożony z dzieci (bez własnego czasu)
+  const stationOf = (op) => op.station || (isSub(op.lp) ? stationOf(byLp.get(subParent(op.lp))) : '');
 
-  // Start (S) i koniec (E) liczone osobno, żeby suboperacje mogły czekać na start operacji głównej, a jej koniec zależał od suboperacji.
+  // Start (S) i koniec (E) liczone osobno: dzieci czekają na start rodzica, a koniec rodzica zależy od dzieci.
   const sMemo = new Map(), eMemo = new Map(), visiting = new Set();
   const CYC = { v: null, cyc: true };
   const memo = (map, key, fn) => {
@@ -127,14 +146,13 @@ export function computeSchedule(ops, capacity) {
   };
   const S = (op) => memo(sMemo, 's:' + op.lp, () => {
     if (op.startManual != null) return { v: op.startManual, cyc: false };
+    if (!hasOwnStart(op) && kidsOf(op)) return S(kidsOf(op)[0]);          // dziedziczy start po pierwszym dziecku
     const ends = []; let all = true, cyc = false;
     const take = (r) => { if (r.cyc) cyc = true; if (r.v == null) all = false; else ends.push(r.v); };
     if (isSub(op.lp)) {
-      const parent = byLp.get(subParent(op.lp)), sibs = children.get(parent.lp), idx = sibs.indexOf(op);
+      const par = byLp.get(subParent(op.lp)), sibs = kidsOf(par), idx = sibs.indexOf(op);
       if (idx > 0) take(E(sibs[idx - 1]));
-      else if (ownStart(parent)) take(S(parent));        // pierwsza suboperacja startuje z operacją główną, o ile ta ma własny start; inaczej to ona dziedziczy po pierwszej
-    } else if (!ownStart(op) && children.has(String(op.lp))) {
-      return S(children.get(String(op.lp))[0]);          // operacja główna bez zależności dziedziczy start po pierwszej suboperacji
+      else if (hasOwnStart(par)) take(S(par));
     }
     for (const p of (op.preds || []).map((x) => String(x ?? '').trim()).filter(Boolean)) {
       const po = byLp.get(p);
@@ -150,14 +168,12 @@ export function computeSchedule(ops, capacity) {
     if (s.cyc) return CYC;
     if (chopped(op)) {
       let all = true, cyc = false, max = null;
-      for (const k of children.get(String(op.lp))) { const r = E(k); if (r.cyc) cyc = true; if (r.v == null) all = false; else max = max == null ? r.v : Math.max(max, r.v); }
+      for (const k of kidsOf(op)) { const r = E(k); if (r.cyc) cyc = true; if (r.v == null) all = false; else max = max == null ? r.v : Math.max(max, r.v); }
       if (cyc) return CYC;
       return { v: all ? max : null, cyc: false };
     }
-    const sub = isSub(op.lp);
-    const station = sub ? (op.station || byLp.get(subParent(op.lp)).station) : op.station;
     if (s.v == null || op.hours == null) return { v: null, cyc: false };
-    return { v: computeEnd(s.v, op.hours, capacity && capacity[station]), cyc: false };
+    return { v: computeEnd(s.v, op.hours, capacity && capacity[stationOf(op)]), cyc: false };
   });
 
   const result = new Map();
@@ -169,11 +185,14 @@ export function computeSchedule(ops, capacity) {
   return result;
 }
 
-/** Numer operacji głównej dla suboperacji („3000a” → „3000”); null, gdy to nie jest numer suboperacji. */
+/** Numer rodzica: numer bez ostatniej litery („100aa” → „100a”, „100a” → „100”); null dla operacji głównej (sama liczba). */
 export function subParent(lp) {
-  const m = /^(\d+)\p{L}+$/u.exec(String(lp));
+  const m = /^(\d+\p{L}*)\p{L}$/u.exec(String(lp));
   return m ? m[1] : null;
 }
+
+/** Poziom numeru: 0 = operacja, 1 = suboperacja, 2 = subsuboperacja (liczba liter po numerze). */
+export const depthOf = (lp) => { const m = /^\d+(\p{L}*)$/u.exec(String(lp)); return m ? [...m[1]].length : 0; };
 
 // ---------------------------------------------------------------------------
 // Klucz sortowania „Stat.” (kolumna z AB i I) oraz numer seryjny daty jak w Arkuszach

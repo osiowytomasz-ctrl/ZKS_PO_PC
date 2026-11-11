@@ -25,7 +25,7 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    collapsed: new Set(), collapsedInit: false, selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(), collapsedInit: false, hideParents: false, selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
@@ -132,8 +132,8 @@ export function mountHarmLive(el) {
       line('Start', r.start), line('Koniec', r.koniec), line('Godziny', r.hoursShown || r.godziny), line('Dostawa', r.dostawa), line('Wysyłka', r.wysylka),
       line('Start ręczny', r.startManual), line('Koniec ręczny', r.endManual), line('Status', r.status),
       line('Lp / poprzedzające', [r.lp, r.z1, r.z2, r.z3, r.z4].filter(Boolean).join(' / ')),
-      r.sub ? line('Operacja główna', r.parent) : null,
-      subs.length ? h('div', { style: { marginTop: '6px' } }, h('b', {}, `Suboperacje (${subs.length}):`), ...subs.map((x) => h('div', { style: { margin: '2px 0 2px 12px' } }, `${x.lp}  ·  ${x.start || '—'} → ${x.koniec || '—'}  ·  ${x.hours ? x.hours + ' h' : ''}${x.element ? '  ·  ' + x.element : ''}`))) : null,
+      r.sub ? line(r.depth === 2 ? 'Suboperacja (detal)' : 'Operacja główna', r.parent) : null,
+      subs.length ? h('div', { style: { marginTop: '6px' } }, h('b', {}, `${r.depth === 1 ? 'Subsuboperacje' : 'Suboperacje'} (${subs.length}):`), ...subs.map((x) => h('div', { style: { margin: '2px 0 2px 12px' } }, `${x.lp}  ·  ${x.start || '—'} → ${x.koniec || '—'}  ·  ${x.hours ? x.hours + ' h' : ''}${x.element ? '  ·  ' + x.element : ''}`))) : null,
     ].filter(Boolean);
     const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
   }
@@ -265,7 +265,7 @@ export function mountHarmLive(el) {
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
-    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed);   // suboperacje pod operacją główną; zwinięte pomijane
+    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hideParents);   // suboperacje pod operacją główną; zwinięte pomijane
     const startMs = axisStartMs(now.getTime(), st.shift);
     const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now, { keepAll: true, axisStartMs: startMs });
     const maxEnd = Math.max(startMs, ...chart.items.filter((it) => it.end).map((it) => it.end.getTime()));
@@ -275,6 +275,8 @@ export function mountHarmLive(el) {
     info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
     scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
     collapseBtn.textContent = st.collapsed.size ? 'Rozwiń suboperacje' : 'Zwiń suboperacje';
+    parentsBtn.textContent = st.hideParents ? 'Pokaż operacje główne' : 'Ukryj operacje główne';
+    parentsBtn.classList.toggle('primary', st.hideParents);
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
     // nagłówek
@@ -334,7 +336,7 @@ export function mountHarmLive(el) {
       const line = h('div', { style: { position: 'absolute', top: i * ROW + 'px', left: 0, display: 'flex', height: ROW + 'px', width: LEFT + 'px', background: kc ? parseSheetColor(kc.bg, '#ffffff') : done ? '#e6f2e0' : i % 2 ? '#fafafa' : '#fff', color: kc ? parseSheetColor(kc.color, '#000000') : '#000', fontWeight: kc && kc.bold ? 700 : 400, fontStyle: (kc && kc.italic) || (r.sub && !kc) ? 'italic' : 'normal', textDecoration: kc && kc.underline ? 'underline' : 'none', borderBottom: '1px solid #8c8c8c', boxSizing: 'border-box' } });
       for (const col of cols) {
         let text = val(r, col);
-        if (col.key === 'lp') text = (r.sub ? '    ↳ ' : r.subCount ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') : '    ') + text;
+        if (col.key === 'lp') text = '\u00a0\u00a0\u00a0\u00a0'.repeat(r.depth || 0) + (r.subCount ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') : r.sub ? '↳ ' : '\u00a0\u00a0\u00a0') + text;   // wcięcie wg poziomu: operacja › suboperacja › subsuboperacja
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
         const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
@@ -342,7 +344,7 @@ export function mountHarmLive(el) {
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
         if (col.key === 'lp' && r.subCount) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje; resztę komórki, aby zmienić numer';
         if (!col.ro) cell.addEventListener('click', (ev) => {
-          if (col.key === 'lp' && r.subCount && ev.offsetX < 20 * st.scale) { toggleCollapse(r.id); return; }
+          if (col.key === 'lp' && r.subCount && ev.offsetX < (20 + 26 * (r.depth || 0)) * st.scale) { toggleCollapse(r.id); return; }
           if (col.pred !== undefined) {
             predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp));
             return;
@@ -363,21 +365,19 @@ export function mountHarmLive(el) {
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
       const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
       const hoursAt = (ms) => (ms - chart.axisStart.getTime()) / 3600000;
-      // suboperacja: czarna ramka, w środku tylko 2-pikselowa ramka w kolorze stanowiska (bez wypełnienia); operacja główna: pełny pasek
-      // operacja główna złożona z suboperacji: pasek poszatkowany na odcinki suboperacji, przerwy między nimi to przesunięcia suboperacji
+      // każdy pasek wypełniony kolorem stanowiska z czarną ramką; węzeł złożony z dzieci (operacja albo detal) ma jedną czarną ramkę od pierwszego
+      // do ostatniego odcinka, a w środku odcinki wszystkich subsuboperacji w kolorach ich stanowisk, oddzielone białymi przerwami (plan i kolejność stanowisk)
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', ...(r.sub ? {} : { background: bg }) } });
-        if (r.sub) box.append(h('div', { style: { position: 'absolute', inset: 0, border: '2px solid ' + bg, boxSizing: 'border-box', pointerEvents: 'none' } }));
+        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
         if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
         g.dyn.append(box);
       };
       if (r.segs && r.segs.length) {
-        // jedna czarna ramka od początku pierwszej do końca ostatniej suboperacji; w środku kolor stanowiska tylko w miejscach suboperacji, przerwy puste
         const lefts = r.segs.map(([s0]) => Math.max(0, hoursAt(s0)) * HOUR), rights = r.segs.map(([, e0]) => Math.max(0, hoursAt(e0)) * HOUR);
         const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
         if (Math.max(...rights) > 0) {
-          const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
-          r.segs.forEach((_, k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: bg, pointerEvents: 'none' } })); });
+          const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', background: '#fff', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+          r.segs.forEach(([, , color], k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: done ? ZAK_BAR : color, borderRight: '1px solid #fff', boxSizing: 'border-box', pointerEvents: 'none' } })); });
           if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
           g.dyn.append(box);
         }
@@ -428,6 +428,7 @@ export function mountHarmLive(el) {
   const intervalSel = h('select', { title: 'Interwał osi czasu: długość jednej kolumny', onchange: () => { st.interval = intervalOf(intervalSel.value).id; lsSet(LS.interval, st.interval); if (st.data) draw(); } },
     ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
+  const parentsBtn = h('button', { class: 'btn small', title: 'Chowa operacje główne, które mają suboperacje: zostają same suboperacje i subsuboperacje', onclick: () => { st.hideParents = !st.hideParents; if (st.data) draw(); } }, 'Ukryj operacje główne');
   const collapseBtn = h('button', { class: 'btn small', title: 'Zwija albo rozwija suboperacje (np. 3000a, 3000b) wszystkich operacji', onclick: toggleAllCollapsed }, 'Rozwiń suboperacje');
   const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
@@ -438,7 +439,7 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    collapseBtn,
+    collapseBtn, parentsBtn,
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,

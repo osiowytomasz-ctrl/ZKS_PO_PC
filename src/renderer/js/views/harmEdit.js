@@ -7,7 +7,7 @@ import { predError, predecessorChoices, validateNewOps, renamePlan, isSyntheticI
 
 // group: 'z' = zależności (ukrywane razem); calc = liczone przez program; letter = kolumna w pliku
 export const COLS = [
-  { key: 'lp', letter: 'A', title: 'lp.', w: 76, text: true, isNumberAware: true },
+  { key: 'lp', letter: 'A', title: 'lp.', w: 100, text: true, isNumberAware: true },
   { key: 'z1', letter: 'B', title: 'Z1', w: 48, group: 'z', pred: 0 }, { key: 'z2', letter: 'C', title: 'Z2', w: 48, group: 'z', pred: 1 },
   { key: 'z3', letter: 'D', title: 'Z3', w: 48, group: 'z', pred: 2 }, { key: 'z4', letter: 'E', title: 'Z4', w: 48, group: 'z', pred: 3 },
   { key: 'client', letter: 'F', title: 'Klient', w: 130, text: true },
@@ -128,7 +128,7 @@ export function addDialog(opsByLp, stations, onSaved) {
   })));
   const errBox = h('div', { class: 'err', style: { whiteSpace: 'pre-wrap', marginTop: '6px', fontSize: '12px' } });
   const m = modal('Nowe operacje', h('div', {},
-    h('p', { class: 'muted' }, `Wpisz do ${ADD_ROWS} operacji. Puste wiersze są pomijane. Numer: liczba (operacja główna) albo liczba + litera (suboperacja, np. 3000a, wymaga istniejącej operacji głównej). Poprzedników, start i koniec ręczny ustawisz potem w tabeli. Daty np. 14.11.2026 14:00.`),
+    h('p', { class: 'muted' }, `Wpisz do ${ADD_ROWS} operacji. Puste wiersze są pomijane. Numer: liczba (operacja, np. 100), liczba + litera (suboperacja/detal, np. 100a) albo liczba + dwie litery (subsuboperacja, np. 100aa); rodzic musi istnieć albo być w tej samej tabeli. Poprzedników, start i koniec ręczny ustawisz potem w tabeli. Daty np. 14.11.2026 14:00.`),
     h('div', { style: { overflow: 'auto', maxHeight: '60vh' } }, h('table', { style: { borderCollapse: 'collapse' } }, h('thead', {}, head), h('tbody', {}, ...body))),
     errBox,
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {

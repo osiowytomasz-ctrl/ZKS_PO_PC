@@ -31,5 +31,7 @@ test('kolumny godzinowe, tygodniowe i miesięczne', () => {
   const m = buildCells(D(2026, 11, 10, 14), D(2027, 2, 1), 'm', new Map());
   assert.equal(m[1].start, D(2026, 12, 1)); assert.equal(m[1].hours, 31 * 24); assert.equal(m[1].label, '12.2026'); assert.equal(m[3].hours, 28 * 24);   // luty 2027
   assert.equal(buildCells(D(2026, 1, 1), D(2030, 1, 1), '1h', new Map(), 500).length, 500);       // ograniczenie liczby kolumn
-  assert.equal(intervalOf('nieznany').id, 'd'); assert.equal(INTERVALS.length, 8);
+  assert.equal(intervalOf('nieznany').id, 'd'); assert.equal(INTERVALS.length, 13);
+  const d3 = buildCells(D(2026, 11, 10, 14), D(2026, 11, 25), '3d', new Map());
+  assert.ok(d3.slice(1).every((c) => c.hours === 72)); assert.equal(d3[1].kind, 'span'); assert.equal((d3[1].start / 86400000) % 3, 0);
 });
