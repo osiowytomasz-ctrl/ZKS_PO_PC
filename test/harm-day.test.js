@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dayOf, describeCode, daySlots, grafikPeople, assignPeople, dayTasks } from '../src/renderer/js/logic/harmDay.js';
+import { dayOf, describeCode, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../src/renderer/js/logic/harmDay.js';
 
 const D = (d, h = 0) => Date.UTC(2026, 10, d, h);
 
@@ -29,9 +29,15 @@ test('pracownicy z Grafiku i przypisanie do maszyn', () => {
     extraValues: [['12.11.2026'], ['1Si1 a8'], [''], ['5Śl'], ['UT'], ['']], extraBackgrounds: [[''], ['#ffff00'], [''], ['#00ff00'], ['#cccccc'], ['']], extraFontColors: [[''], ['#000000'], [''], [''], [''], ['']] };
   const p = grafikPeople(gr);
   assert.deepEqual(p.map((x) => [x.name, x.text, x.bg]), [['Kowalski Jan', '1Si1 a8', '#ffff00'], ['Nowak Ada', '5Śl', '#00ff00'], ['Lis Ewa', 'UT', '#cccccc']]);
-  const a = assignPeople(p, ['1Si1', '1Si2', '1Si11'], ['1Si', '5Śl']);
-  assert.deepEqual(a.bySlot.get('1Si1').map((x) => x.name), ['Kowalski Jan']); assert.equal(a.bySlot.has('1Si11'), false);
-  assert.deepEqual(a.byStation.get('5Śl').map((x) => x.name), ['Nowak Ada']); assert.deepEqual(a.rest.map((x) => x.name), ['Lis Ewa']);
+  // ta sama liczba wpisów i miejsc: po kolei (kod z Grafiku porównany z graf_norm)
+  const slots = [{ slot: '1Si1', code: '1Si1 a8' }, { slot: '5Śl1', code: '5Śl' }, { slot: '1Si3', code: 'L4' }];
+  const a = matchOperators(p, slots);
+  assert.deepEqual([...a.bySlot].map(([k, v]) => [k, v.person.name, v.same]), [['1Si1', 'Kowalski Jan', true], ['5Śl1', 'Nowak Ada', true], ['1Si3', 'Lis Ewa', false]]);
+  // różna liczba: dopasowanie po kolei z tym samym kodem
+  const ppl = ['b8', 'a8', 'c8', 'a8', 'UT'].map((t, i) => ({ name: 'P' + i, text: t }));
+  const b = matchOperators(ppl, [{ slot: 'S1', code: 'b8' }, { slot: 'S2', code: 'a8' }, { slot: 'S3', code: 'c8' }, { slot: 'S4', code: 'a8' }]);
+  assert.deepEqual([...b.bySlot].map(([k, v]) => [k, v.person.name]), [['S1', 'P0'], ['S2', 'P1'], ['S3', 'P2'], ['S4', 'P3']]);
+  assert.deepEqual(b.rest.map((x) => x.name), ['P4']);
 });
 
 test('zadania w dobie: tylko operacje-liście, które wtedy trwają', () => {
@@ -44,4 +50,20 @@ test('zadania w dobie: tylko operacje-liście, które wtedy trwają', () => {
   assert.deepEqual(t.tasks.map((x) => x.row.id), ['100a', '200']);
   assert.deepEqual([...t.byStation.keys()], ['1Si']);
   assert.deepEqual(t.komis.map((k) => [k.komis, k.tasks, k.hours]), [['K1', 1, 8], ['K2', 1, 2]]);
+});
+
+test('okna zmian operatora i jego odcinki zadań', () => {
+  const w = shiftWindows('a5b3', D(12, 6));
+  assert.deepEqual(w.map((x) => [x.shift, x.from, x.to]), [['a', D(12, 6), D(12, 11)], ['b', D(12, 14), D(12, 17)]]);
+  assert.deepEqual(shiftWindows('c8', D(12, 6)).map((x) => [x.from, x.to]), [[D(12, 22), D(13, 6)]]);
+  const t = [{ id: 1, from: D(12, 6), to: D(12, 15) }];
+  assert.deepEqual(operatorSegments(t, w, D(12, 6), D(13, 6)).map((x) => [x.from, x.to]), [[D(12, 6), D(12, 11)], [D(12, 14), D(12, 15)]]);
+  assert.deepEqual(operatorSegments(t, [], D(12, 6), D(13, 6)).map((x) => [x.from, x.to]), [[D(12, 6), D(12, 15)]]);
+});
+
+test('zadania poza zmianami operatorów', () => {
+  const t = [{ from: D(12, 6), to: D(13, 6) }];
+  const u = uncoveredSegments(t, [...shiftWindows('a8', D(12, 6)), ...shiftWindows('b6', D(12, 6))]);
+  assert.deepEqual(u.map((x) => [x.from, x.to]), [[D(12, 20), D(13, 6)]]);
+  assert.equal(uncoveredSegments([{ from: D(12, 7), to: D(12, 9) }], shiftWindows('a8', D(12, 6))).length, 0);
 });

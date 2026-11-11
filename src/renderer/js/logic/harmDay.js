@@ -62,20 +62,55 @@ export function grafikPeople(gr) {
   return out;
 }
 
-/** Przypisanie pracowników do miejsc pracy: miejsce (np. „1Si1”) albo stanowisko (np. „1Si”) wpisane w komórce Grafiku. */
-export function assignPeople(people, slotNames, stationNames) {
-  const bySlot = new Map(), byStation = new Map(), rest = [];
-  const norm = (t) => String(t).toLocaleLowerCase('pl');
-  const has = (text, code) => new RegExp(`(^|[^\\p{L}\\d])${norm(code).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\d])`, 'u').test(norm(text));
-  const slots = [...slotNames].sort((a, b) => b.length - a.length), sts = [...stationNames].sort((a, b) => b.length - a.length);
-  for (const p of people) {
-    const s = slots.find((x) => has(p.text, x));
-    if (s) { if (!bySlot.has(s)) bySlot.set(s, []); bySlot.get(s).push(p); continue; }
-    const st = sts.find((x) => has(p.text, x));
-    if (st) { if (!byStation.has(st)) byStation.set(st, []); byStation.get(st).push(p); continue; }
-    rest.push(p);
+const normCode = (t) => String(t ?? '').trim().toLowerCase();
+
+/**
+ * Operatorzy na miejscach pracy. Karta graf_norm powstaje z Grafiku: wypełnione miejsca pracy (w kolejności kolumn graf_norm) odpowiadają
+ * kolejnym pracownikom z wpisem w Grafiku (w kolejności wierszy). Przy tej samej liczbie – po kolei; przy różnej – dopasowanie po kolei
+ * z tym samym kodem zmiany (najdłuższy wspólny podciąg), reszta pracowników zostaje bez przypisania.
+ * [slots] = [{slot, code}] w kolejności graf_norm; wynik: {bySlot: Map slot → {person, same}, rest: [person]}; same = kod w Grafiku = kod w graf_norm.
+ */
+export function matchOperators(people, slots) {
+  const bySlot = new Map();
+  if (people.length === slots.length) {
+    slots.forEach((s, i) => bySlot.set(s.slot, { person: people[i], same: normCode(people[i].text) === normCode(s.code) }));
+    return { bySlot, rest: [] };
   }
-  return { bySlot, byStation, rest };
+  const n = people.length, m = slots.length;
+  const L = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = normCode(people[i].text) === normCode(slots[j].code) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const used = new Set();
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (normCode(people[i].text) === normCode(slots[j].code)) { bySlot.set(slots[j].slot, { person: people[i], same: true }); used.add(i); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
+  }
+  return { bySlot, rest: people.filter((_, i) => !used.has(i)) };
+}
+
+/** Okna zmian w dobie: a od 6:00, b od 14:00, c od 22:00, każda na tyle godzin, ile w kodzie (np. „a5b3” → 6–11 i 14–17). */
+export function shiftWindows(code, dayStart) {
+  const h = shiftHours(code);
+  return [['a', 0], ['b', 8], ['c', 16]].filter(([l]) => h[l] > 0).map(([l, off]) => ({ shift: l, from: dayStart + off * HOUR, to: dayStart + (off + h[l]) * HOUR }));
+}
+
+/** Odcinki zadań stanowiska w oknach zmian operatora (to, nad czym pracuje w swojej zmianie); bez okien = cała doba. */
+export function operatorSegments(tasks, windows, dayStart, dayEnd) {
+  const wins = windows.length ? windows : [{ from: dayStart, to: dayEnd }];
+  const out = [];
+  for (const t of tasks) for (const w of wins) { const a = Math.max(t.from, w.from), b = Math.min(t.to, w.to); if (b > a) out.push({ task: t, from: a, to: b }); }
+  return out;
+}
+
+/** Odcinki zadań stanowiska poza zmianami wszystkich operatorów (praca bez obsady według grafiku). */
+export function uncoveredSegments(tasks, windows) {
+  const wins = [...windows].sort((p, q) => p.from - q.from);
+  const out = [];
+  for (const t of tasks) {
+    let cur = t.from;
+    for (const w of wins) { if (w.to <= cur) continue; if (w.from >= t.to) break; if (w.from > cur) out.push({ task: t, from: cur, to: Math.min(w.from, t.to) }); cur = Math.max(cur, w.to); if (cur >= t.to) break; }
+    if (cur < t.to) out.push({ task: t, from: cur, to: t.to });
+  }
+  return out;
 }
 
 /**

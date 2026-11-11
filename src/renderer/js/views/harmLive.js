@@ -10,7 +10,7 @@ import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
-import { dayOf, daySlots, grafikPeople, assignPeople, dayTasks } from '../logic/harmDay.js';
+import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../logic/harmDay.js';
 import { shareDialog } from './harmShare.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
@@ -279,87 +279,83 @@ export function mountHarmLive(el) {
     const look = Object.fromEntries(stations.map((x) => [x.name, x]));
     const holiday = holidayMap(st.m.cfg && st.m.cfg.holidays).get(day.iso);
     const slots = daySlots(st.days || {}, day.iso, stations);
+    const order = Object.entries((st.days || {})[day.iso] || {}).map(([slot, code]) => ({ slot, code }));   // miejsca w kolejności kolumn graf_norm
     const work = slots.reduce((t, x) => t + x.hours, 0);
     const tasks = dayTasks(st.data.rows, st.data.result, day.start, day.end);
     const chip = (text, bg, color, extra = {}) => h('span', { style: { display: 'inline-block', padding: '1px 6px', margin: '1px 3px 1px 0', borderRadius: '3px', border: '1px solid rgba(0,0,0,.25)', background: bg || '#fff', color: color || '#000', fontSize: '12px', whiteSpace: 'nowrap', ...extra } }, text);
-    const sheetColor = (v, d) => parseSheetColor(v, d);
-    const td = (content, style = {}) => h('td', { style: { border: '1px solid #bbb', padding: '3px 5px', verticalAlign: 'top', fontSize: '12px', ...style } }, content);
+    const td = (content, style = {}, attrs = {}) => h('td', { ...attrs, style: { border: '1px solid #bbb', padding: '2px 5px', verticalAlign: 'middle', fontSize: '12px', ...style } }, content);
     const th = (t) => h('th', { style: { border: '1px solid #999', padding: '3px 5px', background: '#e4e4e4', fontSize: '12px', textAlign: 'left' } }, t);
     const hhmm = (v) => { const d = new Date(v); return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`; };
-    // pasek zadania na dobie 6:00–6:00 (jak na wykresie harmonogramu)
-    const STRIP = 180;
-    const strip = (t, color) => {
-      const x = (v) => ((v - day.start) / (day.end - day.start)) * STRIP;
-      return h('div', { style: { position: 'relative', width: STRIP + 'px', height: '14px', background: '#f2f2f2', border: '1px solid #ccc' } },
-        ...[6, 12, 18].map((hh) => h('div', { style: { position: 'absolute', left: (hh / 24) * STRIP + 'px', top: 0, bottom: 0, borderLeft: '1px dotted #999' } })),
-        h('div', { style: { position: 'absolute', left: x(t.from) + 'px', width: Math.max(2, x(t.to) - x(t.from)) + 'px', top: '1px', bottom: '1px', background: color, border: '1px solid #000', boxSizing: 'border-box' } }));
-    };
-    const peopleBox = h('div', { class: 'muted' }, 'Wczytywanie pracowników z Grafiku…');
-    const slotPeople = new Map(), stationPeople = new Map();
-    const personChip = (p) => chip(`${p.name}: ${p.text}`, sheetColor(p.bg, '#ffffff'), sheetColor(p.color, '#000000'), { title: p.fullName + (p.value ? ' · ' + p.value : '') });
-
-    // 1. maszyny i obsada (graf_norm) + pracownicy przypisani do miejsca (z Grafiku)
-    const machinesBody = h('tbody', {});
-    const renderMachines = () => {
-      clear(machinesBody);
-      for (const s of slots) {
-        machinesBody.append(h('tr', {},
-          td(h('b', {}, s.station), { background: s.bg, color: s.color, fontStyle: 'italic', whiteSpace: 'nowrap' }),
-          td(s.hours ? `${s.hours} h` : '0 h', { textAlign: 'right', fontWeight: 700 }),
-          td(h('div', {},
-            ...s.slots.map((x) => h('div', { style: { margin: '1px 0' } },
-              chip(x.slot, s.bg, s.color, { fontWeight: 700 }),
-              chip(x.text || '—', x.work ? '#d9ead3' : x.text ? '#f4cccc' : '#fff', '#000', { title: x.shifts }),
-              h('span', { class: 'muted', style: { fontSize: '11px', marginRight: '6px' } }, x.shifts),
-              ...(slotPeople.get(x.slot) || []).map(personChip))),
-            ...(stationPeople.get(s.station) || []).map(personChip))),
-          td(h('div', {}, ...(tasks.byStation.get(s.station) || []).map((t) => h('div', { style: { margin: '1px 0' } }, t.row.lp || t.row.id))))));
-      }
-      if (!slots.length) machinesBody.append(h('tr', {}, td('Brak danych grafiku (graf_norm) dla tego dnia.', { colSpan: 4 })));
-    };
-    renderMachines();
-
-    // 2. zadania na stanowiskach (harmonogram)
-    const taskRows = [];
-    for (const [station, list] of tasks.byStation) {
+    const personChip = (p, same) => chip(p.name, parseSheetColor(p.bg, '#ffffff'), parseSheetColor(p.color, '#000000'),
+      { fontWeight: 700, title: `${p.fullName}: ${p.text}${p.value ? ' · ' + p.value : ''}${same === false ? '\nKod w Grafiku różni się od graf_norm' : ''}`, ...(same === false ? { outline: '2px dashed #c00000' } : {}) });
+    // pozioma linia operatora: doba 6:00–6:00, jego zmiana podświetlona, na niej zadania stanowiska w czasie jego zmiany
+    const STRIP = 360, x = (v) => ((v - day.start) / (day.end - day.start)) * STRIP;
+    const line = (station, code, uncovered) => {
+      const wins = code == null ? [] : shiftWindows(code, day.start);
+      const segs = uncovered || operatorSegments(tasks.byStation.get(station) || [], wins, day.start, day.end);
       const sl = look[station] || { bg: '#cccccc', color: '#000000' };
-      for (const t of list) {
-        const kc = komisColor(t.row.komis), done = String(t.row.status).trim().toLowerCase() === 'zak.';
-        taskRows.push(h('tr', { style: { background: kc ? sheetColor(kc.bg, '#fff') : done ? '#e6f2e0' : '#fff', color: kc ? sheetColor(kc.color, '#000') : '#000' } },
-          td(station, { background: sl.bg, color: sl.color, fontStyle: 'italic', fontWeight: 700 }), td(t.row.lp || ''), td(t.row.komis || '', { fontWeight: 700 }), td(t.row.element || ''),
-          td(`${hhmm(t.start)} → ${hhmm(t.end)}`, { whiteSpace: 'nowrap' }), td(t.row.hoursShown ? t.row.hoursShown + ' h' : '', { textAlign: 'right' }), td(t.row.status || ''),
-          td(strip(t, done ? ZAK_BAR : sl.bg))));
+      const box = h('div', { style: { position: 'relative', width: STRIP + 'px', height: '20px', background: '#f2f2f2', border: '1px solid #ccc' } });
+      for (const w of wins) box.append(h('div', { style: { position: 'absolute', left: x(w.from) + 'px', width: x(w.to) - x(w.from) + 'px', top: 0, bottom: 0, background: '#d9ead3' } }));
+      for (const hh of [8, 16]) box.append(h('div', { style: { position: 'absolute', left: (hh / 24) * STRIP + 'px', top: 0, bottom: 0, borderLeft: '1px dotted #888' } }));
+      for (const sg of segs) {
+        const r = sg.task.row, done = String(r.status).trim().toLowerCase() === 'zak.', kc = komisColor(r.komis);
+        box.append(h('div', { title: `${r.lp} · ${r.komis} · ${r.element}\n${hhmm(sg.task.start)} → ${hhmm(sg.task.end)} · ${r.hoursShown || ''} h${r.status ? ' · ' + r.status : ''}`,
+          style: { position: 'absolute', left: x(sg.from) + 'px', width: Math.max(2, x(sg.to) - x(sg.from)) + 'px', top: '2px', bottom: '2px', background: done ? ZAK_BAR : sl.bg, color: sl.color, border: '1px solid #000', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', fontSize: '11px', fontWeight: 700, lineHeight: '14px', padding: '0 2px' } },
+          h('span', { style: kc ? { background: parseSheetColor(kc.bg, '#fff'), color: parseSheetColor(kc.color, '#000'), padding: '0 2px' } : {} }, `${r.lp} ${r.komis}`)));
       }
-    }
-
-    // 3. zlecenia (komisy) z zadaniami w tym dniu
-    const komisChips = tasks.komis.map((k) => { const kc = komisColor(k.komis); return chip(`${k.komis}${k.client ? ' · ' + k.client : ''} · zadań ${k.tasks} · ${k.stations.join(', ')}`, kc ? sheetColor(kc.bg, '#ffe599') : '#fff2cc', kc ? sheetColor(kc.color, '#000') : '#000', { fontWeight: 700 }); });
-
+      if (code != null && !wins.length) box.append(h('div', { style: { position: 'absolute', inset: 0, background: 'repeating-linear-gradient(45deg,#eee,#eee 4px,#ddd 4px,#ddd 8px)' } }));
+      return box;
+    };
+    const tbody = h('tbody', {}), restBox = h('div', {}), status = h('div', { class: 'muted', style: { margin: '4px 0' } }, 'Wczytywanie operatorów z Grafiku…');
+    let operators = new Map();
+    const render = () => {
+      clear(tbody);
+      const names = new Set(slots.map((s) => s.station));
+      const list = [...slots, ...[...tasks.byStation.keys()].filter((k) => !names.has(k)).map((k) => ({ station: k, bg: (look[k] || {}).bg || '#cccccc', color: (look[k] || {}).color || '#000', slots: [], hours: 0 }))];
+      for (const s of list) {
+        const rowsOf = s.slots.length ? s.slots : [null];
+        // zadania stanowiska poza zmianami operatorów z grafiku
+        const unc = s.slots.length ? uncoveredSegments(tasks.byStation.get(s.station) || [], s.slots.flatMap((x) => shiftWindows(x.code, day.start))) : [];
+        const span = rowsOf.length + (unc.length ? 1 : 0);
+        rowsOf.forEach((x, k) => {
+          const op = x && operators.get(x.slot);
+          tbody.append(h('tr', {},
+            k === 0 ? td(h('b', {}, s.station), { background: s.bg, color: s.color, fontStyle: 'italic', whiteSpace: 'nowrap', verticalAlign: 'top' }, { rowSpan: span }) : null,
+            k === 0 ? td(`${s.hours} h`, { textAlign: 'right', fontWeight: 700, verticalAlign: 'top' }, { rowSpan: span }) : null,
+            td(x ? h('span', {}, chip(x.slot, s.bg, s.color, { fontWeight: 700 }), chip(x.text || '—', x.work ? '#d9ead3' : x.text ? '#f4cccc' : '#fff', '#000', { title: x.shifts })) : h('span', { class: 'muted' }, 'brak w grafiku'), { whiteSpace: 'nowrap' }),
+            td(op ? personChip(op.person, op.same) : h('span', { class: 'muted' }, x ? '—' : ''), { whiteSpace: 'nowrap' }),
+            td(line(s.station, x ? x.code : null))));
+        });
+        if (unc.length) {
+          tbody.append(h('tr', {}, td(h('span', { style: { color: '#c00000', fontWeight: 700 } }, 'bez obsady'), {}, { colSpan: 2, title: 'Zadania w godzinach, w których na stanowisku nie ma nikogo według grafiku' }), td(line(s.station, null, unc))));
+        }
+      }
+      if (!list.length) tbody.append(h('tr', {}, td('Brak danych grafiku (graf_norm) i zadań dla tego dnia.', {}, { colSpan: 5 })));
+    };
+    render();
+    const komisChips = tasks.komis.map((k) => { const kc = komisColor(k.komis); return chip(`${k.komis}${k.client ? ' · ' + k.client : ''} · zadań ${k.tasks} · ${k.stations.join(', ')}`, kc ? parseSheetColor(kc.bg, '#ffe599') : '#fff2cc', kc ? parseSheetColor(kc.color, '#000') : '#000', { fontWeight: 700 }); });
     const m = modal(`Dzień ${day.label} (${day.weekday})`, h('div', {},
-      holiday ? h('div', { style: { background: HOLIDAY_BG, color: '#fff', fontWeight: 700, padding: '3px 8px', marginBottom: '6px', display: 'inline-block' } }, 'Święto' + (holiday ? ': ' + holiday : '')) : null,
-      h('div', { class: 'muted', style: { marginBottom: '6px' } }, `Doba produkcyjna 06:00 – 06:00. Godzin pracy maszyn i stanowisk: ${work} h · zadań: ${tasks.tasks.length} · zleceń: ${tasks.komis.length}`),
-      h('h3', { style: { margin: '6px 0 4px' } }, 'Maszyny i obsada'),
-      h('table', { style: { borderCollapse: 'collapse', width: '100%' } }, h('thead', {}, h('tr', {}, th('Stanowisko'), th('Godziny'), th('Miejsca pracy (grafik) i pracownicy'), th('Zadania (lp.)'))), machinesBody),
-      h('h3', { style: { margin: '12px 0 4px' } }, 'Pracownicy (Grafik)'), peopleBox,
-      h('h3', { style: { margin: '12px 0 4px' } }, 'Zlecenia (komisy)'), komisChips.length ? h('div', {}, ...komisChips) : h('div', { class: 'muted' }, 'Brak zadań w tym dniu.'),
-      h('h3', { style: { margin: '12px 0 4px' } }, 'Zadania na stanowiskach'),
-      taskRows.length ? h('div', { style: { maxHeight: '320px', overflow: 'auto' } }, h('table', { style: { borderCollapse: 'collapse', width: '100%' } },
-        h('thead', {}, h('tr', {}, th('Stan.'), th('lp.'), th('Komis'), th('Opis'), th('Start → koniec'), th('Czas'), th('Status'), th('Doba: 06 · 12 · 18 · 24 · 06'))), h('tbody', {}, ...taskRows))) : h('div', { class: 'muted' }, 'Brak.'),
+      holiday != null ? h('div', { style: { background: HOLIDAY_BG, color: '#fff', fontWeight: 700, padding: '3px 8px', marginBottom: '6px', display: 'inline-block' } }, 'Święto' + (holiday ? ': ' + holiday : '')) : null,
+      h('div', { class: 'muted', style: { marginBottom: '4px' } }, `Doba produkcyjna 06:00 – 06:00. Godzin pracy maszyn i stanowisk: ${work} h · zadań: ${tasks.tasks.length} · zleceń: ${tasks.komis.length}`),
+      komisChips.length ? h('div', { style: { marginBottom: '6px' } }, h('b', { style: { fontSize: '12px', marginRight: '6px' } }, 'Zlecenia:'), ...komisChips) : null,
+      h('div', { style: { overflowX: 'auto' } }, h('table', { style: { borderCollapse: 'collapse' } },
+        h('thead', {}, h('tr', {}, th('Stanowisko'), th('Godziny'), th('Miejsce pracy (grafik)'), th('Operator'), th(h('div', { style: { position: 'relative', width: STRIP + 'px', height: '14px' } },
+          ...[[0, '06'], [8, '14'], [16, '22'], [24, '06']].map(([hh, t]) => h('span', { style: { position: 'absolute', left: Math.min(STRIP - 14, (hh / 24) * STRIP) + 'px', fontSize: '11px' } }, t)))))),
+        tbody)),
+      status, restBox,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+    m.root.style.width = 'min(1000px, 96vw)'; m.root.style.maxWidth = '96vw';
 
-    // pracownicy z karty G (Grafik) – osobne zapytanie; brak uprawnienia albo dnia w grafiku nie blokuje okna
+    // operatorzy z karty G (Grafik): po kolei na wypełnione miejsca pracy; brak uprawnienia albo dnia w grafiku nie blokuje okna
     api('getGrData', [day.iso, day.iso]).then((gr) => {
       const people = grafikPeople(gr);
-      const allSlots = slots.flatMap((s) => s.slots.map((x) => x.slot));
-      const a = assignPeople(people, allSlots, stations.map((x) => x.name));
-      for (const [k, v] of a.bySlot) slotPeople.set(k, v);
-      for (const [k, v] of a.byStation) stationPeople.set(k, v);
-      renderMachines();
-      clear(peopleBox); peopleBox.className = '';
-      if (!people.length) { peopleBox.className = 'muted'; peopleBox.textContent = 'W Grafiku nie ma wpisów na ten dzień.'; return; }
-      peopleBox.append(h('div', { class: 'muted', style: { marginBottom: '3px' } }, `Wpisy w Grafiku: ${people.length}. Kolory jak w Grafiku. Pracownik trafia do maszyny, gdy w jego komórce jest miejsce pracy (np. 1Si1) albo stanowisko.`),
-        h('div', {}, ...people.map(personChip)));
-    }).catch((e) => { peopleBox.className = 'muted'; peopleBox.textContent = 'Nie wczytano Grafiku: ' + (e.message || e); });
+      const res = matchOperators(people, order);
+      operators = res.bySlot; render();
+      const diff = [...res.bySlot.values()].filter((v) => !v.same).length;
+      status.textContent = people.length ? `Operatorzy z Grafiku: ${res.bySlot.size} z ${people.length}. Kolory jak w Grafiku.` + (diff ? ` Kod zmiany różny od graf_norm: ${diff} (czerwona przerywana ramka).` : '') : 'W Grafiku nie ma wpisów na ten dzień.';
+      clear(restBox);
+      if (res.rest.length) restBox.append(h('div', {}, h('b', { style: { fontSize: '12px', marginRight: '6px' } }, 'Bez miejsca pracy:'), ...res.rest.map((p) => chip(`${p.name}: ${p.text}`, parseSheetColor(p.bg, '#fff'), parseSheetColor(p.color, '#000')))));
+    }).catch((e) => { status.textContent = 'Nie wczytano Grafiku: ' + (e.message || e); });
   }
 
   // Zwijanie strzałką ▾/▸ w kolumnie lp. (chowa potomków jednego węzła); całe poziomy chowają przyciski III, II, I.
