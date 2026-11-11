@@ -75,7 +75,7 @@ function delivery(axisStart, row, end) {
 
 /** Składa dane do wykresu; `now` to Date (czas lokalny przekazany jako UTC). */
 export function buildChart(data, filters, sorts, daysBack, now, opts = {}) {
-  const axisStart = new Date(Math.floor(ms(now) / HOUR) * HOUR - Math.max(0, daysBack) * 24 * HOUR);
+  const axisStart = new Date(opts.axisStartMs != null ? opts.axisStartMs : Math.floor(ms(now) / HOUR) * HOUR - Math.max(0, daysBack) * 24 * HOUR);
   const parsed = [];
   for (const row of sortRows(filterRows(data.rows || [], filters), sorts)) {
     const s = parseDate(row.start), e = parseDate(row.koniec);

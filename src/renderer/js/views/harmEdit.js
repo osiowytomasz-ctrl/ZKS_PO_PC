@@ -18,7 +18,7 @@ export const COLS = [
   { key: 'hours', letter: 'K', title: 'Czas [h]', w: 34, num: true, vertical: true },
   { key: 'endManual', letter: 'L', title: 'Koniec ręcznie', w: 116, date: true, isDate: true },
   { key: 'koniec', letter: 'M', title: 'Koniec zlec.', w: 116, ro: true, isDate: true },
-  { key: 'wysylka', letter: 'R', title: 'Zakończenie', w: 116, date: true, isDate: true },
+  { key: 'wysylka', letter: 'R', title: 'Wysyłka', w: 116, date: true, isDate: true },
   { key: 'key', letter: 'S', title: 'Stat. (klucz)', w: 48, ro: true, vertical: true },
   { key: 'status', letter: 'T', title: 'Status', w: 30, text: true, vertical: true },
   { key: 'dostawa', letter: 'X', title: 'Dostawa', w: 116, date: true, isDate: true },
@@ -106,7 +106,7 @@ function stationDropdown(stations, initial, onChange) {
 
 const ADD_COLS = [
   { key: 'lp', title: 'lp.', w: 64 }, { key: 'client', title: 'Klient', w: 130 }, { key: 'komis', title: 'Komis', w: 84 }, { key: 'element', title: 'Opis operacji', w: 300 },
-  { key: 'station', title: 'Stan.', w: 96 }, { key: 'hours', title: 'Czas [h]', w: 64 }, { key: 'wysylka', title: 'Zakończenie', w: 120 }, { key: 'dostawa', title: 'Dostawa', w: 120 },
+  { key: 'station', title: 'Stan.', w: 96 }, { key: 'hours', title: 'Czas [h]', w: 64 }, { key: 'wysylka', title: 'Wysyłka', w: 120 }, { key: 'dostawa', title: 'Dostawa', w: 120 },
 ];
 const ADD_ROWS = 10;
 

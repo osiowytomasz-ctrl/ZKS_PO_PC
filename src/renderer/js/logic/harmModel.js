@@ -281,7 +281,7 @@ export function validateNewOps(rows, existing, parseDate, parseNum) {
     seen.add(lp);
     const op = { preds: [], client: v('client'), komis: v('komis'), element: v('element'), station: v('station') };
     if (v('hours')) { const h = parseNum(v('hours')); if (h == null || h < 0) { errors.push(`Wiersz ${n}: czas to liczba godzin`); return; } op.hours = h; }
-    for (const k of ['wysylka', 'dostawa']) if (v(k)) { const d = parseDate(v(k)); if (d == null) { errors.push(`Wiersz ${n}: nie rozpoznano daty „${v(k)}” (${k === 'wysylka' ? 'zakończenie' : 'dostawa'})`); return; } op[k] = d; }
+    for (const k of ['wysylka', 'dostawa']) if (v(k)) { const d = parseDate(v(k)); if (d == null) { errors.push(`Wiersz ${n}: nie rozpoznano daty „${v(k)}” (${k === 'wysylka' ? 'wysyłka' : 'dostawa'})`); return; } op[k] = d; }
     ops.push([lp, op]);
   });
   if (!ops.length && !errors.length) errors.push('Wpisz przynajmniej jedną operację');

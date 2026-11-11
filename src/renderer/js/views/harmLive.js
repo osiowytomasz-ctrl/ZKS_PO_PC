@@ -8,20 +8,24 @@ import { opsFromSheetRows } from '../logic/harmImport.js';
 import { watchHarm, importOps, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
+import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
+import { parseDateTime } from '../logic/harmImport.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', collapsed: 'zks.harm.collapsed' };
+const LS = { hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
+const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
 
 export function mountHarmLive(el) {
   const st = {
-    m: null, days: null, data: null, filters: {}, sorts: [], daysBack: 3, scale: 1, editing: false, pending: false,
+    m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    collapsed: new Set(lsGet(LS.collapsed, [])), rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(), collapsedInit: false, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
@@ -36,6 +40,7 @@ export function mountHarmLive(el) {
   const recompute = () => {
     if (!st.m) return;
     st.data = buildHarmData(st.m.opsByLp, st.days || {}, st.m.cfg, H.localNow().getTime());
+    if (!st.collapsedInit && st.data.rows.length) { st.collapsedInit = true; st.collapsed = new Set(parentsWithSubs()); }
     if (st.editing) { st.pending = true; return; }
     draw();
   };
@@ -111,7 +116,7 @@ export function mountHarmLive(el) {
     const line = (k, v) => (String(v ?? '').trim() ? h('div', { class: 'row', style: { margin: '2px 0' } }, h('b', { style: { width: '150px' } }, k), h('span', {}, v)) : null);
     const body = [
       line('Komis', r.komis), line('Klient', r.client), line('Element', r.element), line('Stanowisko', r.stanowisko),
-      line('Start', r.start), line('Koniec', r.koniec), line('Godziny', r.hoursShown || r.godziny), line('Dostawa', r.dostawa), line('Zakończenie / wysyłka', r.wysylka),
+      line('Start', r.start), line('Koniec', r.koniec), line('Godziny', r.hoursShown || r.godziny), line('Dostawa', r.dostawa), line('Wysyłka', r.wysylka),
       line('Start ręczny', r.startManual), line('Koniec ręczny', r.endManual), line('Status', r.status),
       line('Lp / poprzedzające', [r.lp, r.z1, r.z2, r.z3, r.z4].filter(Boolean).join(' / ')),
       r.sub ? line('Operacja główna', r.parent) : null,
@@ -120,12 +125,10 @@ export function mountHarmLive(el) {
     const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
   }
 
-  const saveCollapsed = () => lsSet(LS.collapsed, [...st.collapsed]);
-  const toggleCollapse = (id) => { if (st.collapsed.has(id)) st.collapsed.delete(id); else st.collapsed.add(id); saveCollapsed(); draw(); };
-  const setAllCollapsed = (on) => {
-    st.collapsed = new Set(on ? (st.data ? st.data.rows.filter((r) => r.subCount > 0).map((r) => r.id) : []) : []);
-    saveCollapsed(); if (st.data) draw();
-  };
+  // Zwijanie suboperacji: po włączeniu wszystkie są zwinięte (przycisk „Rozwiń suboperacje”); stan nie jest zapamiętywany między uruchomieniami.
+  const parentsWithSubs = () => (st.data ? st.data.rows.filter((r) => r.subCount > 0).map((r) => r.id) : []);
+  const toggleCollapse = (id) => { if (st.collapsed.has(id)) st.collapsed.delete(id); else st.collapsed.add(id); draw(); };
+  const toggleAllCollapsed = () => { st.collapsed = new Set(st.collapsed.size ? [] : parentsWithSubs()); if (st.data) draw(); };
 
   // ---------- ustawienia harmonogramu (kolory stanowisk, nowe stanowiska, kolory komisów) ----------
   function stationsDialog() {
@@ -156,7 +159,9 @@ export function mountHarmLive(el) {
         const bgI = h('input', { type: 'color', value: parseSheetColor(r.bg, '#ffe599'), oninput: () => { r.bg = bgI.value; sample.style.background = r.bg; } });
         const fgI = h('input', { type: 'color', value: parseSheetColor(r.color, '#000000'), oninput: () => { r.color = fgI.value; sample.style.color = r.color; } });
         const styleOf = () => ({ fontWeight: r.bold ? 700 : 400, fontStyle: r.italic ? 'italic' : 'normal', textDecoration: r.underline ? 'underline' : 'none' });
-        const sample = h('span', { style: { display: 'inline-block', minWidth: '84px', textAlign: 'center', padding: '2px 6px', background: r.bg, color: r.color, ...styleOf() } }, r.komis);
+        // nazwę komisu można poprawić w miejscu (pole pokazuje od razu wybrany kolor i styl)
+        const sample = h('input', { type: 'text', value: r.komis, spellcheck: 'false', title: 'Komis (można edytować)', list: 'harm-komis-list', oninput: () => { r.komis = sample.value; },
+          style: { width: '110px', textAlign: 'center', padding: '2px 6px', border: '1px solid #999', background: r.bg, color: r.color, ...styleOf() } });
         const flag = (key, label, title) => h('label', { class: 'muted', title }, h('input', { type: 'checkbox', checked: r[key], onchange: (e) => { r[key] = e.target.checked; Object.assign(sample.style, styleOf()); } }), ' ' + label);
         kBox.append(h('div', { class: 'row', style: { margin: '4px 0', alignItems: 'center', flexWrap: 'wrap' } }, sample, h('span', { class: 'muted' }, 'tło'), bgI, h('span', { class: 'muted' }, 'tekst'), fgI,
           flag('bold', 'B', 'Pogrubienie'), flag('italic', 'I', 'Kursywa'), flag('underline', 'U', 'Podkreślenie'),
@@ -175,6 +180,24 @@ export function mountHarmLive(el) {
     // wygląd tabeli (zapamiętywany na tym komputerze)
     const num = (value, min, max) => h('input', { type: 'number', value: String(value), min: String(min), max: String(max), style: { width: '80px', padding: '4px' } });
     const rowHI = num(st.layout.rowH, 16, 80), dateWI = num(st.layout.dateW, 60, 220);
+    // święta: tabela dat (dd.mm.rrrr) z opisem; w nagłówku osi są bordowe z białą pogrubioną czcionką
+    const fmtDay = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso; };
+    const hRows = [...holidayMap(st.m && st.m.cfg && st.m.cfg.holidays)].sort((a, b) => a[0].localeCompare(b[0])).map(([date, name]) => ({ text: fmtDay(date), name }));
+    const hBox = h('div', {});
+    const hRender = () => {
+      clear(hBox);
+      const table = h('table', { style: { borderCollapse: 'collapse' } }, h('thead', {}, h('tr', {}, ...['Data (dd.mm.rrrr)', 'Opis', ''].map((t) => h('th', { style: { textAlign: 'left', padding: '2px 6px', background: '#eee', border: '1px solid #999', fontSize: '12px' } }, t)))));
+      const tb = h('tbody', {});
+      for (const r of hRows) {
+        const dI = h('input', { type: 'text', value: r.text, placeholder: 'np. 11.11.2026', spellcheck: 'false', style: { width: '110px', border: 'none', padding: '3px 6px' }, oninput: () => { r.text = dI.value; } });
+        const nI = h('input', { type: 'text', value: r.name, placeholder: 'np. Święto Niepodległości', style: { width: '240px', border: 'none', padding: '3px 6px' }, oninput: () => { r.name = nI.value; } });
+        tb.append(h('tr', {}, h('td', { style: { border: '1px solid #999', padding: 0 } }, dI), h('td', { style: { border: '1px solid #999', padding: 0 } }, nI),
+          h('td', { style: { border: '1px solid #999', padding: '0 4px' } }, h('button', { class: 'btn small', onclick: () => { hRows.splice(hRows.indexOf(r), 1); hRender(); } }, 'Usuń'))));
+      }
+      table.append(tb); hBox.append(table);
+    };
+    hRender();
+    const hAdd = h('button', { class: 'btn small', onclick: () => { hRows.push({ text: '', name: '' }); hRender(); const ins = hBox.querySelectorAll('tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, 'Dodaj święto');
     const nameI = h('input', { type: 'text', placeholder: 'Nazwa nowego stanowiska, np. 4Fr', style: { padding: '4px', width: '220px' }, spellcheck: 'false' });
     const addBtn = h('button', { class: 'btn small', onclick: () => {
       const name = nameI.value.trim();
@@ -185,10 +208,23 @@ export function mountHarmLive(el) {
     const save = async () => {
       // zapisujemy tylko zmiany: stanowiska dodane i te, których kolory różnią się od domyślnych
       const list = rows.filter((r) => { const d = DEFAULT_STATIONS.find((x) => x.name === r.name); return !d || d.bg !== r.bg || d.color !== r.color || r.sum; });
+      // komisy: bez pustych i powtórzonych nazw; święta: poprawne daty bez powtórzeń
+      const komisList = kRows.map((r) => ({ ...r, komis: r.komis.trim() })).filter((r) => r.komis);
+      if (new Set(komisList.map((r) => r.komis)).size !== komisList.length) { toast('Ten sam komis jest na liście kolorów dwa razy'); return; }
+      const holidays = [];
+      for (const r of hRows) {
+        if (!r.text.trim() && !r.name.trim()) continue;
+        const t = parseDateTime(r.text.trim());
+        if (t == null) { toast(`Święta: nie rozpoznano daty „${r.text}” (wpisz np. 11.11.2026)`); return; }
+        const iso = new Date(t).toISOString().slice(0, 10);
+        if (holidays.some((x) => x.date === iso)) { toast(`Święta: data ${r.text.trim()} jest wpisana dwa razy`); return; }
+        holidays.push({ date: iso, name: r.name.trim() });
+      }
+      holidays.sort((a, b) => a.date.localeCompare(b.date));
       try {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
-        await saveSettings(list, kRows); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
+        await saveSettings(list, komisList, holidays); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
     const m = modal('Ustawienia harmonogramu', h('div', {},
@@ -198,15 +234,18 @@ export function mountHarmLive(el) {
       h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
       h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
       box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
-      h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli.'),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli. Nazwę komisu można poprawić w polu.'),
       kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta są w nagłówku osi czasu bordowe, z białą pogrubioną czcionką, a ich tło na wykresie jest białe jak w weekend.'),
+      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: save }, 'Zapisz'))));
   }
 
   // ---------- rysowanie ----------
   function draw() {
-    const sc = st.scale, HOUR = BASE.hour * sc, ROW = Math.round(st.layout.rowH * sc), FONT = BASE.font * sc;
-    const HEAD = Math.ceil(Math.max(textW('00.00.0000', FONT, false), ...COLS.filter((c) => c.vertical).map((c) => textW(c.title, FONT, true)))) + 14;   // wysokość nagłówka = najdłuższy opis w pionie (data albo tytuł kolumny)
+    const sc = st.scale, iv = intervalOf(st.interval), ROW = Math.round(st.layout.rowH * sc), FONT = BASE.font * sc;
+    const HOUR = CELL_W * sc / iv.hours;        // px na godzinę: kolumna osi ma stałą szerokość, więc interwał działa jak powiększenie osi czasu
+    const HEAD = Math.ceil(Math.max(textW(sampleLabel(st.interval), FONT, true), ...COLS.filter((c) => c.vertical).map((c) => textW(c.title, FONT, true)))) + 14;   // wysokość nagłówka = najdłuższy opis w pionie
     const cols = shownCols();
     const colW = (c) => Math.round((c.isDate ? st.layout.dateW : c.w) * sc);
     const LEFT = cols.reduce((a, c) => a + colW(c), 0) + Math.round(34 * sc);
@@ -214,11 +253,15 @@ export function mountHarmLive(el) {
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
     const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed);   // suboperacje pod operacją główną; zwinięte pomijane
-    const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), st.daysBack, now, { keepAll: true });
-    const n = chart.items.length, chartW = Math.ceil((chart.firstDayHours + chart.totalDays * 24) * HOUR);
+    const startMs = axisStartMs(now.getTime(), st.shift);
+    const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now, { keepAll: true, axisStartMs: startMs });
+    const maxEnd = Math.max(startMs, ...chart.items.filter((it) => it.end).map((it) => it.end.getTime()));
+    const cells = buildCells(startMs, maxEnd, st.interval, holidayMap(st.m && st.m.cfg && st.m.cfg.holidays));
+    const n = chart.items.length, chartW = Math.ceil(cells.reduce((a, c) => a + c.hours, 0) * HOUR);
     st.rows = rows; st.chart = chart; st.geom = { HOUR, ROW, FONT, HEAD, cols, colW, LEFT, chartW, now };
     info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
-    scaleLabel.textContent = Math.round(sc * 100) + '%'; daysLabel.textContent = st.daysBack + ' dni';
+    scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
+    collapseBtn.textContent = st.collapsed.size ? 'Rozwiń suboperacje' : 'Zwiń suboperacje';
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
     // nagłówek
@@ -240,18 +283,16 @@ export function mountHarmLive(el) {
     const chartEl = h('div', { style: { position: 'relative', width: chartW + 'px', flex: 'none' } });
     const head = h('div', { style: { position: 'sticky', top: 0, zIndex: 5, height: HEAD + 'px', width: chartW + 'px', overflow: 'hidden' } });
     const rowsEl = h('div', { style: { position: 'relative', height: n * ROW + 'px', width: chartW + 'px', background: '#f2f2f2' } });
-    const holidays = H.holidaySet([]);
-    let x = 0, day = new Date(Date.UTC(chart.axisStart.getUTCFullYear(), chart.axisStart.getUTCMonth(), chart.axisStart.getUTCDate()));
-    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    for (let i = 0; i < chart.totalDays + 1; i++) {
-      const w = (i === 0 ? chart.firstDayHours : 24) * HOUR;
-      const kind = H.dayKind(day, holidays), isToday = day.getTime() === todayUtc;
-      const bg = kind === 'sun' ? '#ff0000' : kind === 'sat' ? '#00b0f0' : '#00b050';   // jak w arkuszu: dzień roboczy zielony, sobota niebieska, niedziela/święto czerwone
-      head.append(h('div', { style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: HEAD + 'px', background: bg, borderRight: '1px solid #999', borderBottom: '1px solid #999', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
-        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isToday ? 700 : 400, color: kind === 'sat' ? '#000' : '#fff' } }, H.dayLabel(day))));
-      if (kind !== 'work') rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 0, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: '#ffffff' } }));   // weekend i święta: białe tło
-      if (isToday) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 2, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: 'rgba(0,176,80,.18)' } }));
-      x += w; day = new Date(day.getTime() + 24 * 3600000);
+    // kolumny osi: dzień roboczy zielony, sobota niebieska, niedziela czerwona, święto bordowe (biała pogrubiona czcionka); tygodnie i miesiące zielone
+    let x = 0;
+    for (const c of cells) {
+      const w = c.hours * HOUR, isNow = now.getTime() >= c.start && now.getTime() < c.end, off = c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday';
+      const bg = c.kind === 'holiday' ? HOLIDAY_BG : c.kind === 'sun' ? '#ff0000' : c.kind === 'sat' ? '#00b0f0' : '#00b050';
+      head.append(h('div', { title: c.kind === 'holiday' ? 'Święto' + (c.holidayName ? ': ' + c.holidayName : '') : '', style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: HEAD + 'px', background: bg, borderRight: '1px solid #999', borderBottom: '1px solid #999', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
+        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isNow || c.kind === 'holiday' ? 700 : 400, color: c.kind === 'sat' ? '#000' : '#fff' } }, c.label)));
+      if (off) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 0, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: '#ffffff' } }));   // weekend i święta: białe tło
+      if (isNow) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 2, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: 'rgba(0,176,80,.18)' } }));
+      x += w;
     }
     const nowX = (now.getTime() - chart.axisStart.getTime()) / 3600000 * HOUR;
     if (nowX > 0) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 3, pointerEvents: 'none', left: nowX + 'px', top: 0, width: 0, height: n * ROW + 'px', borderLeft: '2px dashed #ff6600' } }));
@@ -363,16 +404,24 @@ export function mountHarmLive(el) {
   const setScale = (v) => { st.scale = Math.max(0.5, Math.min(2.5, Math.round(v * 100) / 100)); if (st.data) draw(); };
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setScale(st.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); } }, { passive: false });
   const scaleLabel = h('button', { class: 'btn small', title: 'Kliknij, aby wrócić do 100%', onclick: () => setScale(1) }, '100%');
-  const daysLabel = h('span', {});
+  // przesunięcie początku osi względem dziś: „+” przesuwa harmonogram do przodu (przyszłość), „−” cofa (przeszłość); można też wpisać liczbę dni
+  const setShift = (v) => { const n = Math.round(Number(v)); if (!Number.isFinite(n)) return; st.shift = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, n)); if (st.data) draw(); };
+  const shiftInput = h('input', { type: 'number', value: '-3', step: '1', title: 'Początek osi względem dziś [dni]: ujemne = przeszłość, dodatnie = przyszłość', style: { width: '64px', padding: '3px', textAlign: 'center' },
+    onchange: () => setShift(shiftInput.value), onkeydown: (e) => { if (e.key === 'Enter') { setShift(shiftInput.value); shiftInput.blur(); } } });
+  const intervalSel = h('select', { title: 'Interwał osi czasu: długość jednej kolumny', onchange: () => { st.interval = intervalOf(intervalSel.value).id; lsSet(LS.interval, st.interval); if (st.data) draw(); } },
+    ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
+  intervalSel.value = st.interval;
+  const collapseBtn = h('button', { class: 'btn small', title: 'Zwija albo rozwija suboperacje (np. 3000a, 3000b) wszystkich operacji', onclick: toggleAllCollapsed }, 'Rozwiń suboperacje');
   const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap' } },
-    h('button', { class: 'btn small', onclick: () => { if (st.daysBack > 0) { st.daysBack--; if (st.data) draw(); } } }, '−'), daysLabel, h('button', { class: 'btn small', onclick: () => { if (st.daysBack < 30) { st.daysBack++; if (st.data) draw(); } } }, '+'), h('span', { class: 'muted' }, 'dni wstecz'),
+    h('button', { class: 'btn small', title: 'Cofnij harmonogram o dzień (przeszłość)', onclick: () => setShift(st.shift - 1) }, '−'), shiftInput,
+    h('button', { class: 'btn small', title: 'Przesuń harmonogram o dzień do przodu', onclick: () => setShift(st.shift + 1) }, '+'), h('span', { class: 'muted' }, 'dni od dziś'),
+    h('span', { class: 'muted' }, 'Interwał:'), intervalSel,
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    h('button', { class: 'btn small', title: 'Chowa suboperacje (np. 3000a, 3000b) pod operacjami głównymi', onclick: () => setAllCollapsed(true) }, 'Zwiń suboperacje'),
-    h('button', { class: 'btn small', onclick: () => setAllCollapsed(false) }, 'Rozwiń suboperacje'),
+    collapseBtn,
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,
