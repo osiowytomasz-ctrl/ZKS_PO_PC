@@ -184,11 +184,12 @@ export function statKey(o, r, key) {
  */
 /**
  * Wiersze po filtrach i sortowaniu: suboperacje układają się chronologicznie razem z pozostałymi; znikają, gdy któryś ich przodek jest zwinięty.
- * [hideParents] chowa operacje główne, które mają suboperacje (widać wtedy same suboperacje i subsuboperacje).
+ * [hiddenLevels] – ukryte poziomy liczone od dołu drzewa: I = operacje bez dzieci (najniższy, najważniejszy poziom), II = węzły zbierające
+ * poziom I, III = węzły zbierające poziomy II i I.
  */
-export function arrangeRows(rows, collapsed, hideParents = false) {
+export function arrangeRows(rows, collapsed, hiddenLevels) {
   const hiddenByCollapse = (r) => { if (!collapsed || !collapsed.size) return false; for (let p = r.parent; p != null; p = subParent(p)) if (collapsed.has(p)) return true; return false; };
-  return rows.filter((r) => !hiddenByCollapse(r) && !(hideParents && r.depth === 0 && r.subCount > 0));
+  return rows.filter((r) => !hiddenByCollapse(r) && !(hiddenLevels && hiddenLevels.has(r.level)));
 }
 
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
@@ -206,6 +207,8 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const up = (lp, key) => { const o = opsByLp[lp]; if (o[key]) return o[key]; const p = parentOf(lp); return p ? up(p, key) : ''; };
   const sortStation = (lp) => up(lp, 'station') || (kids.has(lp) ? sortStation(kids.get(lp)[0]) : '');
   const chopped = (lp) => kids.has(lp) && !(opsByLp[lp].hours > 0);
+  // poziom od dołu drzewa: 1 = bez dzieci, 2 = zbiera poziom 1, 3 = zbiera poziomy 2 i 1
+  const levelOf = (lp) => (kids.has(lp) ? 1 + Math.max(...kids.get(lp).map(levelOf)) : 1);
   // czas węzła złożonego = suma czasów dzieci (dziecko złożone liczy swoją sumę)
   const effHours = (lp) => (chopped(lp) ? kids.get(lp).reduce((t, c) => t + (effHours(c) || 0), 0) : (opsByLp[lp].hours > 0 ? opsByLp[lp].hours : 0));
   // odcinki paska węzła złożonego: liście poddrzewa, każdy w kolorze swojego stanowiska (pasek pokazuje plan i kolejność stanowisk)
@@ -229,7 +232,7 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
     const sum = myKids.length ? effHours(o.lp) : 0;
     const hoursShown = o.hours > 0 ? String(o.hours) : (myKids.length && sum > 0 ? `Σ${sum}` : (o.hours == null ? '' : String(o.hours)));
     rows.push({
-      id: o.lp, sub: !!par, parent: par, depth: par ? depthOf(o.lp) : 0, subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
+      id: o.lp, sub: !!par, parent: par, depth: par ? depthOf(o.lp) : 0, level: levelOf(o.lp), subCount: myKids.length, hours: o.hours == null ? '' : String(o.hours), hoursShown,
       station, client: up(o.lp, 'client'), status: o.status || '', endManual: fmtDt(o.endManual), key: statKey({ ...o, station: sortStation(o.lp) }, r, key),
       lp: isSyntheticId(o.lp) ? '' : o.lp, z1: o.preds?.[0] || '', z2: o.preds?.[1] || '', z3: o.preds?.[2] || '', z4: o.preds?.[3] || '',
       komis: up(o.lp, 'komis'), element: o.element || '', stanowisko: station, godziny: hoursShown,

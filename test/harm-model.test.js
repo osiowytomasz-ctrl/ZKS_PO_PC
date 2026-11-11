@@ -254,7 +254,10 @@ test('trzy poziomy: operacja › suboperacja (detal) › subsuboperacja, kolorow
   // zwijanie operacji chowa wszystkie poziomy; zwinięcie suboperacji chowa tylko jej subsuboperacje
   assert.deepEqual(arrangeRows(d.rows, new Set(['100'])).map((x) => x.id).sort(), ['100', '200']);
   assert.deepEqual(arrangeRows(d.rows, new Set(['100a'])).map((x) => x.id).sort(), ['100', '100a', '100b', '100ba', '200']);
-  assert.deepEqual(arrangeRows(d.rows, new Set(), true).map((x) => x.id).sort(), ['100a', '100aa', '100ab', '100b', '100ba', '200']);   // ukryte operacje główne z suboperacjami
+  assert.deepEqual([row('100').level, row('100a').level, row('100aa').level, row('100b').level, row('200').level], [3, 2, 1, 2, 1]);
+  assert.deepEqual(arrangeRows(d.rows, new Set(), new Set([3])).map((x) => x.id).sort(), ['100a', '100aa', '100ab', '100b', '100ba', '200']);   // ukryty poziom III
+  assert.deepEqual(arrangeRows(d.rows, new Set(), new Set([2, 3])).map((x) => x.id).sort(), ['100aa', '100ab', '100ba', '200']);             // widać tylko poziom I
+  assert.deepEqual(arrangeRows(d.rows, new Set(), new Set([1])).map((x) => x.id).sort(), ['100', '100a', '100b']);                          // same poziomy zbiorcze
   // numery i powiązania
   assert.equal(idError('100ac', ops), null); assert.match(idError('100ca', ops), /wymaga istniejącej suboperacji 100c/); assert.match(idError('100aaa', ops), /dwie litery/);
   assert.match(predError(ops, '100aa', 0, '100'), /operacją główną/); assert.match(predError(ops, '100aa', 0, '100a'), /cykl/); assert.match(predError(ops, '100', 0, '100ab'), /subsuboperacją/);

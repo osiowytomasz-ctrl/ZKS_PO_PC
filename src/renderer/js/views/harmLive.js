@@ -25,7 +25,7 @@ export function mountHarmLive(el) {
   const st = {
     m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
-    collapsed: new Set(), collapsedInit: false, hideParents: false, selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const info = h('span', { class: 'muted' });
@@ -40,7 +40,6 @@ export function mountHarmLive(el) {
   const recompute = () => {
     if (!st.m) return;
     st.data = buildHarmData(st.m.opsByLp, st.days || {}, st.m.cfg, H.localNow().getTime());
-    if (!st.collapsedInit && st.data.rows.length) { st.collapsedInit = true; st.collapsed = new Set(parentsWithSubs()); }
     if (st.editing) { st.pending = true; return; }
     draw();
   };
@@ -138,10 +137,8 @@ export function mountHarmLive(el) {
     const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
   }
 
-  // Zwijanie suboperacji: po włączeniu wszystkie są zwinięte (przycisk „Rozwiń suboperacje”); stan nie jest zapamiętywany między uruchomieniami.
-  const parentsWithSubs = () => (st.data ? st.data.rows.filter((r) => r.subCount > 0).map((r) => r.id) : []);
+  // Zwijanie strzałką ▾/▸ w kolumnie lp. (chowa potomków jednego węzła); całe poziomy chowają przyciski III, II, I.
   const toggleCollapse = (id) => { if (st.collapsed.has(id)) st.collapsed.delete(id); else st.collapsed.add(id); draw(); };
-  const toggleAllCollapsed = () => { st.collapsed = new Set(st.collapsed.size ? [] : parentsWithSubs()); if (st.data) draw(); };
 
   // ---------- ustawienia harmonogramu (kolory stanowisk, nowe stanowiska, kolory komisów) ----------
   function stationsDialog() {
@@ -265,7 +262,7 @@ export function mountHarmLive(el) {
     const now = H.localNow();
     if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Import z arkusza” albo „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
     const all = st.data.rows;
-    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hideParents);   // suboperacje pod operacją główną; zwinięte pomijane
+    const rows = arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels);   // suboperacje pod operacją główną; zwinięte pomijane
     const startMs = axisStartMs(now.getTime(), st.shift);
     const chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, now, { keepAll: true, axisStartMs: startMs });
     const maxEnd = Math.max(startMs, ...chart.items.filter((it) => it.end).map((it) => it.end.getTime()));
@@ -274,9 +271,7 @@ export function mountHarmLive(el) {
     st.rows = rows; st.chart = chart; st.geom = { HOUR, ROW, FONT, HEAD, cols, colW, LEFT, chartW, now };
     info.textContent = `Operacji: ${n}` + (n !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
     scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
-    collapseBtn.textContent = st.collapsed.size ? 'Rozwiń suboperacje' : 'Zwiń suboperacje';
-    parentsBtn.textContent = st.hideParents ? 'Pokaż operacje główne' : 'Ukryj operacje główne';
-    parentsBtn.classList.toggle('primary', st.hideParents);
+    for (const [lvl, b] of levelBtns) { const on = !st.hiddenLevels.has(lvl); b.classList.toggle('primary', on); b.style.textDecoration = on ? 'none' : 'line-through'; }
     hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
     // nagłówek
@@ -428,8 +423,10 @@ export function mountHarmLive(el) {
   const intervalSel = h('select', { title: 'Interwał osi czasu: długość jednej kolumny', onchange: () => { st.interval = intervalOf(intervalSel.value).id; lsSet(LS.interval, st.interval); if (st.data) draw(); } },
     ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
-  const parentsBtn = h('button', { class: 'btn small', title: 'Chowa operacje główne, które mają suboperacje: zostają same suboperacje i subsuboperacje', onclick: () => { st.hideParents = !st.hideParents; if (st.data) draw(); } }, 'Ukryj operacje główne');
-  const collapseBtn = h('button', { class: 'btn small', title: 'Zwija albo rozwija suboperacje (np. 3000a, 3000b) wszystkich operacji', onclick: toggleAllCollapsed }, 'Rozwiń suboperacje');
+  // poziomy III, II, I: przycisk wciśnięty = poziom widoczny; kliknięcie chowa albo pokazuje wszystkie wiersze tego poziomu
+  const LEVEL_TIPS = { 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
+  const levelBtns = new Map([3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
+    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
   const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap' } },
@@ -439,7 +436,7 @@ export function mountHarmLive(el) {
     h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
     hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
     h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    collapseBtn, parentsBtn,
+    h('span', { class: 'muted' }, 'Poziomy:'), ...levelBtns.values(),
     h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg)) }, 'Dodaj operację'),
     h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
     h('span', { class: 'grow' }), info,
