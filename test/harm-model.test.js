@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
-import { capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
+import { reorderIds, reorderPlan, capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -265,4 +265,28 @@ test('trzy poziomy: operacja › suboperacja (detal) › subsuboperacja, kolorow
   const mv = renamePlan(ops, '100a', '300');                                                         // detal staje się operacją, jego subsuboperacje suboperacjami
   assert.equal(mv.error, null); assert.deepEqual(mv.moves.map((m) => [m.oldId, m.newId]), [['100a', '300'], ['100aa', '300a'], ['100ab', '300b']]);
   assert.match(renamePlan(ops, '100', '200a').error, /trzy poziomy/);                                  // 100aa → 200aaa
+});
+
+test('zmiana kolejności suboperacji (przeciągnij i upuść): litery zostają w grupie, dzieci idą za rodzicem, powiązania i cykle', () => {
+  const ops = {
+    100: {}, '100a': { element: 'A' }, '100aa': { hours: 1 }, '100ab': { hours: 2 }, '100b': { element: 'B' }, '100ba': { hours: 3 }, '100c': { hours: 4 },
+    500: { preds: ['100b'] }, 600: { preds: ['100ab'] },
+  };
+  // zamiana 100a ↔ 100b: dzieci idą razem z rodzicami
+  const m = reorderIds(ops, '100', { 100: ['100b', '100a', '100c'] });
+  assert.deepEqual(Object.fromEntries(m), { '100b': '100a', '100ba': '100aa', '100a': '100b', '100aa': '100ba', '100ab': '100bb' });
+  const p = reorderPlan(ops, '100', { 100: ['100b', '100a', '100c'] });
+  assert.equal(p.error, null);
+  assert.deepEqual(p.referrers.sort(), [['500', ['100a']], ['600', ['100bb']]]);           // powiązania z zewnątrz idą za operacjami
+  assert.equal(new Set(p.moves.map((x) => x.newId)).size, p.moves.length);
+  // zmiana kolejności subsuboperacji w jednej suboperacji
+  assert.deepEqual(Object.fromEntries(reorderIds(ops, '100a', { '100a': ['100ab', '100aa'] })), { '100ab': '100aa', '100aa': '100ab' });
+  // bez zmian
+  assert.equal(reorderPlan(ops, '100', { 100: ['100a', '100b', '100c'] }).same, true);
+  // przenoszenie między operacjami jest niedozwolone
+  assert.match(reorderPlan(ops, '100', { 100: ['100a', '100b', '100c', '500'] }).error, /niedozwolone/);
+  assert.match(reorderPlan(ops, '100', { '100a': ['100aa', '100ba'] }).error, /niedozwolone/);
+  // cykl: 100b zależy od 100a; po zamianie 100a ↔ 100b pierwsze dziecko czekałoby na swoje następne rodzeństwo
+  const c = { 100: { startManual: 0 }, '100a': { hours: 1 }, '100b': { hours: 1, preds: ['100a'] } };
+  assert.match(reorderPlan(c, '100', { 100: ['100b', '100a'] }).error, /cykl/);
 });

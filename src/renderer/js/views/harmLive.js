@@ -3,9 +3,9 @@
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent } from '../logic/harmModel.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan } from '../logic/harmModel.js';
 import { opsFromSheetRows } from '../logic/harmImport.js';
-import { watchHarm, importOps, saveSettings } from '../harmStore.js';
+import { watchHarm, importOps, saveSettings, renameOp } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { parseSheetColor } from '../logic/common.js';
 import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
@@ -126,6 +126,67 @@ export function mountHarmLive(el) {
   };
   const selectRow = (id) => { st.selected = id; applySelection(); };
 
+  // Zmiana kolejności dzieci (przeciągnij i upuść): operacja główna – suboperacje i subsuboperacje, suboperacja – jej subsuboperacje.
+  // Przeciągać można tylko w obrębie jednego rodzica; litery się zamieniają, a powiązania (także z innych operacji) poprawiają się same.
+  function reorderDialog(rootId) {
+    const ops = st.m.opsByLp;
+    const order = {};
+    const fill = (id) => { const k = subOps(ops, id); if (k.length) { order[id] = k; k.forEach(fill); } };
+    fill(rootId);
+    const box = h('div', {}), status = h('div', { style: { marginTop: '8px', whiteSpace: 'pre-wrap', fontSize: '12px' } });
+    let dragging = null;   // { parent, id }
+    const label = (id) => { const o = ops[id] || {}; const st0 = o.station || ''; return [o.element, st0, o.hours > 0 ? o.hours + ' h' : ''].filter(Boolean).join('  ·  '); };
+    const render = () => {
+      clear(box);
+      let preview;
+      try { preview = reorderIds(ops, rootId, order); } catch (e) { preview = new Map(); }
+      const group = (parent, depth) => {
+        const list = h('div', { style: { marginLeft: depth ? '22px' : 0, borderLeft: depth ? '2px solid #ddd' : 'none', paddingLeft: depth ? '6px' : 0 } });
+        order[parent].forEach((id, idx) => {
+          const newId = preview.get(id) || id, moved = newId !== id;
+          const row = h('div', { draggable: 'true', title: 'Przeciągnij, aby zmienić kolejność (tylko w obrębie tej samej operacji)',
+            style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px', margin: '2px 0', border: '1px solid #bbb', background: moved ? '#fff4d6' : '#fff', cursor: 'grab', userSelect: 'none' },
+            ondragstart: (e) => { dragging = { parent, id }; e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); },
+            ondragover: (e) => { if (dragging && dragging.parent === parent) { e.preventDefault(); e.stopPropagation(); row.style.borderTop = '3px solid #1a73e8'; } },
+            ondragleave: () => { row.style.borderTop = '1px solid #bbb'; },
+            ondrop: (e) => {
+              e.preventDefault(); e.stopPropagation(); row.style.borderTop = '1px solid #bbb';
+              if (!dragging || dragging.parent !== parent || dragging.id === id) return;
+              const arr = order[parent].filter((x) => x !== dragging.id);
+              arr.splice(arr.indexOf(id), 0, dragging.id);
+              order[parent] = arr; dragging = null; render();
+            } },
+            h('span', { style: { color: '#888' } }, '⠿'),
+            h('b', { style: { minWidth: '64px' } }, id), moved ? h('span', { style: { color: '#b45309', fontWeight: 700 } }, '→ ' + newId) : h('span', { style: { color: '#888', minWidth: '64px' } }, ''),
+            h('span', { class: 'muted', style: { flex: 1 } }, label(id)),
+            h('button', { class: 'btn small', title: 'W górę', disabled: idx === 0, onclick: () => { const a = order[parent]; [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; render(); } }, '↑'),
+            h('button', { class: 'btn small', title: 'W dół', disabled: idx === order[parent].length - 1, onclick: () => { const a = order[parent]; [a[idx + 1], a[idx]] = [a[idx], a[idx + 1]]; render(); } }, '↓'));
+          list.append(row);
+          if (order[id]) list.append(group(id, depth + 1));
+        });
+        return list;
+      };
+      box.append(group(rootId, 0));
+      const plan = reorderPlan(ops, rootId, order);
+      status.className = plan.error ? 'err' : 'muted';
+      status.textContent = plan.error ? plan.error
+        : plan.same ? 'Kolejność bez zmian.'
+        : `Zmiana numerów: ${plan.moves.length}` + (plan.referrers.length ? `\nPowiązania innych operacji poprawione automatycznie: ${plan.referrers.map(([lp, p]) => lp + ' → ' + p.join(', ')).join('; ')}` : '\nBrak powiązań z innymi operacjami.') + '\nKonfliktów (cykli) nie ma.';
+      applyBtn.disabled = !!plan.error || !!plan.same;
+    };
+    const applyBtn = h('button', { class: 'btn primary', onclick: async () => {
+      const plan = reorderPlan(st.m.opsByLp, rootId, order);
+      if (plan.error || plan.same) { render(); return; }
+      try { await renameOp(plan); m.close(); toast(`Zmieniono kolejność w ${rootId}: ${plan.moves.length} numerów`); }
+      catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
+    } }, 'Zastosuj');
+    const m = modal(`Kolejność: ${subParent(rootId) ? 'suboperacja' : 'operacja'} ${rootId}`, h('div', {},
+      h('p', { class: 'muted' }, 'Przeciągnij wiersz (albo użyj ↑ ↓), aby zmienić kolejność. Można przesuwać tylko w obrębie tej samej operacji; zmiana kolejności zmienia litery w numerach, a operacje wykonują się w kolejności liter.'),
+      h('div', { style: { maxHeight: '60vh', overflow: 'auto' } }, box), status,
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), applyBtn)), { wide: true });
+    render();
+  }
+
   // Szczegóły operacji: tylko prawy przycisk myszy (lewy zaznacza linię i edytuje komórki)
   function detail(r) {
     const subs = st.data ? st.data.rows.filter((x) => x.parent === r.id) : [];
@@ -138,7 +199,9 @@ export function mountHarmLive(el) {
       r.sub ? line(r.depth === 2 ? 'Suboperacja (detal)' : 'Operacja główna', r.parent) : null,
       subs.length ? h('div', { style: { marginTop: '6px' } }, h('b', {}, `${r.depth === 1 ? 'Subsuboperacje' : 'Suboperacje'} (${subs.length}):`), ...subs.map((x) => h('div', { style: { margin: '2px 0 2px 12px' } }, `${x.lp}  ·  ${x.start || '—'} → ${x.koniec || '—'}  ·  ${x.hours ? x.hours + ' h' : ''}${x.element ? '  ·  ' + x.element : ''}`))) : null,
     ].filter(Boolean);
-    const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
+    const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' },
+      r.subCount ? h('button', { class: 'btn', title: 'Zmiana kolejności suboperacji przeciąganiem', onclick: () => { m.close(); reorderDialog(r.id); } }, 'Kolejność suboperacji…') : null,
+      h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
   }
 
   // Zwijanie strzałką ▾/▸ w kolumnie lp. (chowa potomków jednego węzła); całe poziomy chowają przyciski III, II, I.
@@ -358,7 +421,7 @@ export function mountHarmLive(el) {
       line.addEventListener('mousedown', () => selectRow(r.id));
       line.addEventListener('contextmenu', (e) => { e.preventDefault(); selectRow(r.id); detail(r); });   // właściwości operacji: prawy przycisk myszy
       g.leftRows.append(line);
-      const chartRow = h('div', { onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box' } });   // klik w wiersz wykresu
+      const chartRow = h('div', { onclick: () => selectRow(r.id), ondblclick: () => { if (r.subCount) reorderDialog(r.id); }, oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box' } });   // klik w wiersz wykresu
       g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow });
       const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
@@ -367,7 +430,7 @@ export function mountHarmLive(el) {
       // każdy pasek wypełniony kolorem stanowiska z czarną ramką; węzeł złożony z dzieci (operacja albo detal) ma jedną czarną ramkę od pierwszego
       // do ostatniego odcinka, a w środku odcinki wszystkich subsuboperacji w kolorach ich stanowisk, oddzielone białymi przerwami (plan i kolejność stanowisk)
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
+        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => { if (r.subCount) reorderDialog(r.id); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
         if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
         g.dyn.append(box);
       };
@@ -375,7 +438,7 @@ export function mountHarmLive(el) {
         const lefts = r.segs.map(([s0]) => Math.max(0, hoursAt(s0)) * HOUR), rights = r.segs.map(([, e0]) => Math.max(0, hoursAt(e0)) * HOUR);
         const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
         if (Math.max(...rights) > 0) {
-          const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', background: '#fff', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
+          const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => { if (r.subCount) reorderDialog(r.id); }, style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', background: '#fff', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
           r.segs.forEach(([, , color], k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: done ? ZAK_BAR : color, borderRight: '1px solid #fff', boxSizing: 'border-box', pointerEvents: 'none' } })); });
           if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
           g.dyn.append(box);

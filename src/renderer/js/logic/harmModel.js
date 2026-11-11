@@ -106,6 +106,52 @@ export function renamePlan(opsByLp, oldId, newId) {
   return { error: null, oldId, newId: neu, op: moves[0].op, moves, referrers };
 }
 
+/**
+ * Nowe numery po zmianie kolejności dzieci w gałęzi [rootId] (przeciągnij i upuść). [order]: rodzic (stary numer) → dzieci w nowej kolejności (stare numery).
+ * Każda grupa rodzeństwa zachowuje swoje litery, zmienia się tylko ich przydział (pierwsze na liście dostaje najniższą literę); dziecko zabiera swoje dzieci.
+ * Przenoszenie między rodzicami nie jest możliwe. Zwraca Map stary numer → nowy (tylko zmienione).
+ */
+export function reorderIds(opsByLp, rootId, order) {
+  const map = new Map();
+  const assign = (oldNode, newNode) => {
+    const kids = subOps(opsByLp, oldNode);
+    if (!kids.length) return;
+    const wanted = order && order[oldNode] ? order[oldNode] : kids;
+    if (wanted.length !== kids.length || wanted.some((k) => !kids.includes(k))) throw new Error(`Lista dzieci operacji ${oldNode} nie zgadza się z bazą (przenoszenie między operacjami jest niedozwolone)`);
+    const letters = kids.map((k) => k.slice(oldNode.length));          // litery w kolejności a, b, …
+    wanted.forEach((k, i) => { const nk = newNode + letters[i]; if (nk !== k) map.set(k, nk); assign(k, nk); });
+  };
+  assign(String(rootId), String(rootId));
+  return map;
+}
+
+/** Plan zmiany kolejności dzieci w gałęzi [rootId]: przeniesienia, poprawione powiązania (także operacji spoza gałęzi) i kontrola cykli. */
+export function reorderPlan(opsByLp, rootId, order) {
+  if (!opsByLp[rootId]) return { error: `Operacja ${rootId} nie istnieje` };
+  let idMap;
+  try { idMap = reorderIds(opsByLp, rootId, order); } catch (e) { return { error: e.message }; }
+  if (!idMap.size) return { error: null, same: true, moves: [], referrers: [] };
+  return finishMoves(opsByLp, idMap);
+}
+
+/** Wspólne zakończenie planu przeniesień: dane z poprawionymi poprzednikami, operacje z zewnątrz do poprawy i kontrola nowych cykli. */
+function finishMoves(opsByLp, idMap) {
+  const fix = (preds) => (preds || []).map((p) => idMap.get(p) ?? p);
+  const moves = [...idMap].map(([from, to]) => ({ oldId: from, newId: to, op: { ...opsByLp[from], preds: fix(opsByLp[from].preds) } }));
+  const referrers = [];
+  for (const [lp, op] of Object.entries(opsByLp)) if (!idMap.has(lp) && (op.preds || []).some((p) => idMap.has(p))) referrers.push([lp, fix(op.preds)]);
+  const sim = { ...opsByLp };
+  for (const m of moves) delete sim[m.oldId];
+  for (const m of moves) sim[m.newId] = m.op;
+  for (const [lp, preds] of referrers) sim[lp] = { ...sim[lp], preds };
+  const cyclesOf = (ops) => new Set([...computeSchedule(Object.entries(ops).map(([lp, o]) => ({ lp, ...o })), {})].filter(([, r]) => r.state === 'cycle').map(([lp]) => lp));
+  const before = cyclesOf(opsByLp), after = cyclesOf(sim);
+  const back = new Map([...idMap].map(([from, to]) => [to, from]));
+  const fresh = [...after].filter((lp) => !before.has(back.get(lp) ?? lp));
+  if (fresh.length) return { error: `Zmiana utworzyłaby cykl zależności (operacje: ${fresh.slice(0, 5).join(', ')}); popraw najpierw powiązania` };
+  return { error: null, moves, referrers };
+}
+
 const hashLp = (t) => { let h = 7; for (const ch of t) h = (h * 31 + ch.codePointAt(0)) % 1000003; return h; };
 
 /** Dokument z operacjami: numery po 50 (c0000…), suboperacje i subsuboperacje razem z operacją główną, techniczne „s…” osobno, pozostałe rozproszone po x00…x19. */

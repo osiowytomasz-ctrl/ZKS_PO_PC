@@ -72,10 +72,9 @@ export async function renameOp(plan) {
   const { sdk, db } = await firebase();
   const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
   const b = sdk.writeBatch(db);
-  for (const m of plan.moves) {
-    b.set(ref(m.newId), { ops: { [m.newId]: clean(m.op) } }, { merge: true });
-    b.update(ref(m.oldId), { [`ops.${m.oldId}`]: sdk.deleteField() });
-  }
+  // najpierw usuwamy wszystkie stare klucze, potem zapisujemy nowe – dzięki temu działa też zamiana miejscami (a ↔ b)
+  for (const m of plan.moves) b.update(ref(m.oldId), { [`ops.${m.oldId}`]: sdk.deleteField() });
+  for (const m of plan.moves) b.set(ref(m.newId), { ops: { [m.newId]: clean(m.op) } }, { merge: true });
   for (const [lp, preds] of plan.referrers) b.update(ref(lp), { [`ops.${lp}.preds`]: preds });
   await b.commit();
 }
