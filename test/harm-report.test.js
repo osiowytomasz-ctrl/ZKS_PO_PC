@@ -43,3 +43,16 @@ test('raport: kolor operacji (komisu) na pasku – pasek maszyny z lewej, reszta
   const txt = Buffer.from(x).toString('latin1');
   assert.ok(/FF66FF/i.test(txt)); assert.ok(/0070C0/i.test(txt));   // pierwsza komórka – kolor maszyny, kolejne – kolor operacji
 });
+
+test('raport HTML: samodzielna strona z tabelą, osią, paskami (kolor operacji) i nagłówkiem firmowym', async () => {
+  const { reportHtml } = await import('../src/renderer/js/logic/harmReport.js');
+  const m = model(2);
+  m.rows[0].bars = [{ start: D(10, 0), end: D(12, 0), color: '#0070c0', fill: '#ff66ff' }];
+  m.brand = { company: 'Firma <A>', dept: 'Wydział', sharer: 'Udostępnił: T', program: 'Program', owner: '', date: '12.11.2026' };
+  const html = reportHtml(m, { generated: 'test' });
+  assert.match(html, /^<!doctype html>/); assert.ok(html.includes('Firma &lt;A&gt;'));
+  assert.ok(html.includes('linear-gradient(to right, #0070c0 0 10px, #ff66ff 10px)'));
+  assert.equal((html.match(/<tr>/g) || []).length, 3);                     // nagłówek + 2 wiersze
+  assert.ok(html.includes('class="ax"')); assert.ok(html.includes('id="q"'));
+  assert.ok(!reportHtml({ ...m, chart: null }).includes('class="ax"'));
+});

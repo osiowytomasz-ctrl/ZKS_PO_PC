@@ -1,7 +1,7 @@
 // Udostępnianie Harmonogramu: JPG (dobra jakość), obraz do schowka, Excel, PDF i wydruk. Na początku wybierasz, co ma być w raporcie:
 // kolumny, wiersze (jak na ekranie, wszystkie, gałąź zaznaczonej operacji), poziomy III/II/I, wykres (od – do, interwał), tytuł i stronę.
 import { h, clear, modal, toast } from '../ui.js';
-import { reportSvg, reportPagesHtml, reportXlsx, layout, pagePlan } from '../logic/harmReport.js';
+import { reportSvg, reportPagesHtml, reportXlsx, reportHtml, layout, pagePlan } from '../logic/harmReport.js';
 import { toBase64 } from '../logic/xlsx.js';
 import { INTERVALS, intervalOf, buildCells } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
@@ -156,7 +156,7 @@ export function shareDialog(ctx) {
     bf('program', 'Program', 'nazwa programu'), bf('owner', 'Twórca programu', 'imię i nazwisko'));
   function renderParts() {
     clear(fmtBox); clear(rowBox); clear(lvlBox); clear(colBox); clear(pageBox); clear(imgBox);
-    fmtBox.append(...[['jpg', 'JPG (dobra jakość)'], ['clip', 'Obraz do schowka'], ['xlsx', 'Excel'], ['pdf', 'PDF'], ['print', 'Wydruk']].map(([v, l]) => radio('fmt', v, l, st.format, (x) => { st.format = x; })));
+    fmtBox.append(...[['jpg', 'JPG (dobra jakość)'], ['clip', 'Obraz do schowka'], ['xlsx', 'Excel'], ['html', 'HTML (przeglądarka)'], ['pdf', 'PDF'], ['print', 'Wydruk']].map(([v, l]) => radio('fmt', v, l, st.format, (x) => { st.format = x; })));
     rowBox.append(radio('rows', 'screen', 'Jak na ekranie (filtry, zwinięte)', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'all', 'Wszystkie operacje', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'branch', ctx.selectedId ? (ctx.selectedId.startsWith('K:') ? `Zaznaczony komis ${ctx.selectedId.slice(2)} (wszystkie jego operacje)` : `Zaznaczona operacja ${ctx.selectedId} z gałęzią`) : 'Zaznaczona operacja z gałęzią (zaznacz linię)', st.rows, (x) => { st.rows = x; }, !ctx.selectedId));
@@ -195,6 +195,11 @@ export function shareDialog(ctx) {
       if (st.format === 'xlsx') {
         const ok = await window.zks.saveFile(base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', toBase64(reportXlsx(model)));
         if (ok) { toast('Zapisano plik Excel'); if (st.openAfter) await window.zks.openLastSaved?.(); }
+      } else if (st.format === 'html') {
+        const html = reportHtml(model, { generated: `${ctx.user ? 'Udostępnił: ' + ctx.user + ' · ' : ''}ZKS PO (PC) ${ctx.version || ''}`.trim() });
+        const bytes = new TextEncoder().encode(html); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        const ok = await window.zks.saveFile(base + '.html', 'text/html', btoa(bin));
+        if (ok) { toast('Zapisano plik HTML (otwiera się w przeglądarce)'); if (st.openAfter) await window.zks.openLastSaved?.(); }
       } else if (st.format === 'pdf' || st.format === 'print') {
         const { html, pages } = reportPagesHtml(model, pageOpts());
         const ok = st.format === 'pdf' ? await window.zks.savePdf(html, { name: base + '.pdf', pageSize: st.pageSize, landscape: st.landscape }) : await window.zks.printReport(html, { pageSize: st.pageSize, landscape: st.landscape });

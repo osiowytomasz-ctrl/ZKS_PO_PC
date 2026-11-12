@@ -212,3 +212,89 @@ export function reportXlsx(model) {
   return buildXlsx({ name: 'Harmonogram', rows, rowHeights, merges, colWidths, freeze: { row: top + 3, col: nCols } });
 }
 const colLetter = (i) => { let s = ''; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
+
+/**
+ * Plik HTML (jedna strona do przeglądarki, poczty, Dysku): nagłówek firmowy, tytuł, tabela HTML (zaznaczalny tekst, kolory komisów
+ * i stanowisk) i oś czasu z paskami w tych samych wierszach (kolor stanowiska, kolor operacji, odcinki operacji złożonych, napisy),
+ * nagłówek tabeli przyklejony przy przewijaniu, powiększenie i wyszukiwanie wierszy. Ten sam układ tworzy Android (HarmReport.kt: reportHtml).
+ */
+export function reportHtml(model, { generated = '' } = {}) {
+  const L = layout(model), { font, rowH, chartW, pxH, headH } = L;
+  const ch = model.chart, startMs = ch ? ch.cells[0].start : 0;
+  const X = (ms) => Math.max(0, (ms - startMs) / 3600000) * pxH;
+  const f1 = (v) => (Math.round(v * 10) / 10).toString();
+  const dt = (ms) => { if (ms == null) return ''; const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; };
+  const style = (o) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}:${v}`).join(';');
+  // tło osi (dni robocze szare, weekend i święta białe, teraz zielone, linia „teraz”) – jeden obrazek SVG na wszystkie wiersze
+  let axisBg = '', axisHead = '';
+  if (ch) {
+    const parts = [`<rect width="${f1(chartW)}" height="10" fill="#f2f2f2"/>`];
+    let cx = 0;
+    for (const c of ch.cells) {
+      const w = c.hours * pxH;
+      if (c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday') parts.push(`<rect x="${f1(cx)}" width="${f1(w)}" height="10" fill="#fff"/>`);
+      if (ch.nowMs >= c.start && ch.nowMs < c.end) parts.push(`<rect x="${f1(cx)}" width="${f1(w)}" height="10" fill="rgba(0,176,80,0.18)"/>`);
+      parts.push(`<rect x="${f1(cx + w - 0.5)}" width="0.5" height="10" fill="#d8d8d8"/>`);
+      axisHead += `<div class="d" style="${style({ left: f1(cx) + 'px', width: f1(w) + 'px', background: DAY_BG[c.kind] || DAY_BG.work, color: c.kind === 'sat' ? '#000' : '#fff', 'font-weight': c.kind === 'holiday' ? 700 : null })}" title="${esc(c.label + (c.holidayName ? ' – ' + c.holidayName : ''))}">${w >= font * 0.9 ? `<span>${esc(c.label)}</span>` : ''}</div>`;
+      cx += w;
+    }
+    if (ch.nowMs > startMs && X(ch.nowMs) <= chartW) parts.push(`<rect x="${f1(X(ch.nowMs) - 1)}" width="2" height="10" fill="#ff6600"/>`);
+    axisBg = `url("data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${f1(chartW)}" height="10" preserveAspectRatio="none">${parts.join('')}</svg>`)}")`;
+  }
+  const barBg = (b) => (b.fill ? `linear-gradient(to right, ${b.color} 0 ${BAR_STRIP}px, ${b.fill} ${BAR_STRIP}px)` : b.color);
+  const lane = (r) => {
+    let inner = '';
+    const lbl = r.label ? `<span class="l">${esc(r.label)}</span>` : '';
+    if (r.frame && r.frame.end >= startMs) {
+      const a = X(r.frame.start), w = Math.max(1, Math.min(chartW, X(r.frame.end)) - a);
+      const segs = r.bars.map((b) => { const sa = X(b.start) - a, sw = Math.max(1, Math.min(chartW, X(b.end)) - X(b.start) - 1); return sw > 0 ? `<i style="${style({ left: f1(sa) + 'px', width: f1(sw) + 'px', background: barBg(b) })}"></i>` : ''; }).join('');
+      inner = `<div class="b f" style="${style({ left: f1(a) + 'px', width: f1(w) + 'px' })}" title="${esc(`${r.label || ''}\n${dt(r.frame.start)} → ${dt(r.frame.end)}`)}">${segs}${lbl}</div>`;
+    } else if (r.bars.length && r.bars[0].end >= startMs) {
+      const b = r.bars[0], a = X(b.start), w = Math.max(2, Math.min(chartW, X(b.end)) - a);
+      inner = `<div class="b" style="${style({ left: f1(a) + 'px', width: f1(w) + 'px', background: barBg(b) })}" title="${esc(`${r.label || ''}\n${dt(b.start)} → ${dt(b.end)}`)}">${lbl}</div>`;
+    }
+    return `<td class="ch"><div class="lane">${inner}</div></td>`;
+  };
+  const th = model.columns.map((c) => `<th style="${style({ width: c.w + 'px', 'min-width': c.w + 'px' })}"${c.vertical ? ' class="v"' : ''}><span>${esc(c.title)}</span></th>`).join('');
+  const body = model.rows.map((r) => {
+    const tds = model.columns.map((c, k) => {
+      const cell = r.cells[k] || {};
+      return `<td style="${style({ background: cell.bg || r.bg, color: cell.color, 'font-weight': cell.bold ? 700 : null, 'font-style': cell.italic ? 'italic' : null, 'text-decoration': cell.underline ? 'underline' : null })}">${esc(cell.text || '')}</td>`;
+    }).join('');
+    return `<tr>${tds}${ch ? lane(r) : ''}</tr>`;
+  }).join('\n');
+  const b = model.brand;
+  const brand = b ? `<header class="brand"><div class="bl">${b.logo ? `<img src="${esc(b.logo)}" alt="">` : ''}<div><div class="co">${esc(b.company || '')}</div><div class="de">${esc(b.dept || '')}</div><div class="sh">${esc(b.sharer || '')}</div></div></div>`
+    + `<div class="br"><div class="pr">${esc(b.program || '')}</div><div class="ow">${esc(b.owner || '')}</div><div class="dt">${esc(b.date || '')}</div></div></header>` : '';
+  const css = `body{margin:0;padding:10px;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#000}
+.brand{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${BRAND_RED};box-shadow:0 1.5px 0 ${BRAND_DARK};padding:4px 4px 6px;margin-bottom:8px}
+.bl{display:flex;gap:8px;align-items:center}.bl img{width:48px;height:48px;object-fit:contain}.co{font-size:17px;font-weight:700;color:${BRAND_DARK}}.de{font-size:12px;font-weight:700;color:${BRAND_RED}}.sh,.ow{font-size:11px;color:#555}
+.br{text-align:right}.pr{font-size:15px;font-weight:700;color:${BRAND_DARK}}.dt{font-size:10px;color:#888}
+h1{font-size:${font + 6}px;margin:2px 0 6px}.tools{display:flex;gap:6px;align-items:center;margin:0 0 6px;font-size:12px}.tools button{padding:2px 8px}.tools input{padding:3px 6px;width:220px}
+.wrap{overflow:auto;max-height:calc(100vh - 150px);border:1.5px solid #555}
+table{border-collapse:separate;border-spacing:0;font-size:${font}px;transform-origin:0 0}
+th,td{border-right:0.6px solid ${GRID};border-bottom:0.6px solid ${GRID};height:${rowH}px;padding:0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;box-sizing:border-box}
+th{position:sticky;top:0;z-index:2;background:#e4e4e4;height:${headH}px;vertical-align:bottom;text-align:left;padding-bottom:5px}
+th.v span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block}
+th.ax{padding:0;width:${f1(chartW)}px;min-width:${f1(chartW)}px;max-width:none}.axh{position:relative;height:${headH}px}
+.d{position:absolute;top:0;bottom:0;border-right:0.5px solid #555;box-sizing:border-box;display:flex;align-items:flex-end;justify-content:center;font-size:${font}px;overflow:hidden}
+.d span{writing-mode:vertical-rl;transform:rotate(180deg);padding-bottom:5px;white-space:nowrap}
+td.ch{padding:0;max-width:none;width:${f1(chartW)}px;min-width:${f1(chartW)}px}
+.lane{position:relative;width:${f1(chartW)}px;height:${rowH - 1}px;background:${axisBg || '#f2f2f2'};background-size:100% 100%}
+.b{position:absolute;top:2px;bottom:2px;border:1px solid #000;box-sizing:border-box;overflow:visible;white-space:nowrap}.b.f{background:#fff}
+.b i{position:absolute;top:0;bottom:0;border-right:1px solid #fff;box-sizing:border-box}
+.l{position:absolute;left:3px;top:50%;transform:translateY(-50%);font-weight:700;font-size:${font}px;pointer-events:none}
+tr.hide{display:none}footer{font-size:10px;color:#888;margin-top:6px}
+@media print{.tools{display:none}.wrap{max-height:none;overflow:visible;border:none}body{padding:0}}`;
+  const js = `(()=>{const t=document.querySelector('table'),z=document.getElementById('z');let s=1;const ap=()=>{t.style.zoom=s;z.textContent=Math.round(s*100)+'%'};
+document.getElementById('zm').onclick=()=>{s=Math.max(.3,s/1.2);ap()};document.getElementById('zp').onclick=()=>{s=Math.min(3,s*1.2);ap()};z.onclick=()=>{s=1;ap()};
+document.getElementById('q').oninput=(e)=>{const q=e.target.value.trim().toLowerCase();for(const r of t.tBodies[0].rows)r.classList.toggle('hide',!!q&&!r.textContent.toLowerCase().includes(q))}})();`;
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>
+${brand}${model.title ? `<h1>${esc(model.title)}</h1>` : ''}${model.subtitle ? `<div>${esc(model.subtitle)}</div>` : ''}
+<div class="tools">Powiększenie: <button id="zm" title="Pomniejsz">−</button><button id="z" title="100%">100%</button><button id="zp" title="Powiększ">+</button><span style="margin-left:12px">Szukaj:</span><input id="q" type="search" placeholder="np. komis, numer, opis"></div>
+<div class="wrap"><table><thead><tr>${th}${ch ? `<th class="ax"><div class="axh">${axisHead}</div></th>` : ''}</tr></thead><tbody>
+${body}
+</tbody></table></div>
+<footer>Wierszy: ${model.rows.length}${generated ? ' · ' + esc(generated) : ''}</footer>
+<script>${js}</script></body></html>`;
+}

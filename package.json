@@ -1,7 +1,7 @@
 {
   "name": "zks-po-pc",
   "productName": "ZKS PO",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "ZKS PO na komputer: odpowiednik aplikacji na Androida (Electron).",
   "main": "src/main/main.cjs",
   "type": "module",
