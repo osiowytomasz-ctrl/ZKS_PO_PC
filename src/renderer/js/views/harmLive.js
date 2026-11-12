@@ -7,6 +7,7 @@ import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS,
 import { watchHarm, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
+import { iconSvg } from './harmIcons.js';
 import { parseSheetColor } from '../logic/common.js';
 import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
@@ -31,8 +32,8 @@ export function mountHarmLive(el) {
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
+  let syncTools = () => {};   // stan ikon paska (ustawiany niżej)
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
-  const info = h('span', { class: 'muted' });
   const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
   const val = (row, col) => (col.isDate ? noMin(row[col.key]) : col.key === 'hours' ? String(row.hoursShown ?? '') : String(row[col.key] ?? ''));
   let measureCtx = null;
@@ -398,6 +399,7 @@ export function mountHarmLive(el) {
       h('h3', { style: { margin: '4px 0' } }, 'Wygląd tabeli'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
+      h('div', { class: 'row', style: { alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Lista kolumn chowanych ikoną oka (zapisuje się od razu)', onclick: hideDialog }, 'Które dane ukrywać…'), h('span', { class: 'muted' }, 'kolumny chowane ikoną oka na pasku')),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
@@ -422,7 +424,8 @@ export function mountHarmLive(el) {
     const colW = (c) => Math.round((c.isDate ? st.layout.dateW : c.w) * sc);
     const LEFT = cols.reduce((a, c) => a + colW(c), 0) + Math.round(34 * sc);
     const now = H.localNow();
-    if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Dodaj operację”.' : 'Wczytywanie…')); info.textContent = 'Operacji: 0'; st.rows = []; return; }
+    syncTools();
+    if (!st.data || !st.data.rows.length) { clear(body); body.append(h('div', { class: 'muted', style: { padding: '12px' } }, st.data ? 'Baza jest pusta. Użyj „Dodaj operację”.' : 'Wczytywanie…')); st.rows = []; return; }
     const all = st.data.rows;
     // suboperacje pod operacją główną; zwinięte pomijane; paski podsumowania komisów na górze (albo przy pierwszym wystąpieniu komisu)
     const rows = withKomisRows(arrangeRows(sortRows(visibleRows(all, COLS, st.filters, val), COLS, st.sorts, val), st.collapsed, st.hiddenLevels), komisSummaryList(), st.collapsed, { inline: st.komisOpt.inline });
@@ -433,11 +436,9 @@ export function mountHarmLive(el) {
     const n = chart.items.length, chartW = Math.ceil(cells.reduce((a, c) => a + c.hours, 0) * HOUR);
     st.rows = rows; st.chart = chart; st.geom = { HOUR, ROW, FONT, HEAD, cols, colW, LEFT, chartW, now };
     const nOps = rows.filter((r) => !r.komisRow).length;
-    info.textContent = `Operacji: ${nOps}` + (nOps !== all.length ? ` z ${all.length}` : '') + (st.collapsed.size ? ` (zwinięte: ${st.collapsed.size})` : '');
-    scaleLabel.textContent = Math.round(sc * 100) + '%'; if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
-    komisBtn.classList.toggle('primary', st.komisOpt.show);
+    if (document.activeElement !== shiftInput) shiftInput.value = String(st.shift);
+    syncTools();
     for (const [lvl, b] of levelBtns) { const on = !st.hiddenLevels.has(lvl); b.classList.toggle('primary', on); b.style.textDecoration = on ? 'none' : 'line-through'; }
-    hideBtn.textContent = st.compact ? 'Pokaż dane' : 'Ukryj dane';
 
     // nagłówek
     const left = h('div', { style: { position: st.compact ? 'sticky' : 'relative', left: 0, zIndex: 6, width: LEFT + 'px', flex: 'none', background: '#fff', borderRight: '2px solid #888' } });
@@ -613,8 +614,7 @@ export function mountHarmLive(el) {
   // ---------- pasek narzędzi ----------
   const setScale = (v) => { st.scale = Math.max(0.5, Math.min(2.5, Math.round(v * 100) / 100)); if (st.data) draw(); };
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setScale(st.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); } }, { passive: false });
-  const scaleLabel = h('button', { class: 'btn small', title: 'Kliknij, aby wrócić do 100%', onclick: () => setScale(1) }, '100%');
-  // przesunięcie początku osi względem dziś: „+” przesuwa harmonogram do przodu (przyszłość), „−” cofa (przeszłość); można też wpisać liczbę dni
+  // przesunięcie początku osi względem dziś w dniach (ujemne = przeszłość, dodatnie = przyszłość)
   const setShift = (v) => { const n = Math.round(Number(v)); if (!Number.isFinite(n)) return; st.shift = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, n)); if (st.data) draw(); };
   const shiftInput = h('input', { type: 'number', value: '-3', step: '1', title: 'Początek osi względem dziś [dni]: ujemne = przeszłość, dodatnie = przyszłość', style: { width: '64px', padding: '3px', textAlign: 'center' },
     onchange: () => setShift(shiftInput.value), onkeydown: (e) => { if (e.key === 'Enter') { setShift(shiftInput.value); shiftInput.blur(); } } });
@@ -625,22 +625,31 @@ export function mountHarmLive(el) {
   const LEVEL_TIPS = { 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
   const levelBtns = new Map([3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
     onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
-  const komisBtn = h('button', { class: 'btn small primary', title: 'Paski podsumowania komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia…',
-    onclick: () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); } }, 'Podsumowanie komisów');
-  const hideBtn = h('button', { class: 'btn small primary', title: 'Ukrywa kolumny z listy „Które dane ukrywać” (domyślnie wszystkie poza lp, startem, końcem i stanowiskiem)', onclick: () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); } }, 'Ukryj dane');
-  el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap' } },
-    h('button', { class: 'btn small', title: 'Cofnij harmonogram o dzień (przeszłość)', onclick: () => setShift(st.shift - 1) }, '−'), shiftInput,
-    h('button', { class: 'btn small', title: 'Przesuń harmonogram o dzień do przodu', onclick: () => setShift(st.shift + 1) }, '+'), h('span', { class: 'muted' }, 'dni od dziś'),
-    h('span', { class: 'muted' }, 'Interwał:'), intervalSel,
-    h('button', { class: 'btn small', title: 'Pomniejsz (Ctrl+kółko)', onclick: () => setScale(st.scale / 1.15) }, '−'), scaleLabel, h('button', { class: 'btn small', title: 'Powiększ (Ctrl+kółko)', onclick: () => setScale(st.scale * 1.15) }, '+'),
-    hideBtn, h('button', { class: 'btn small', title: 'Wybierz, które kolumny chowa przycisk „Ukryj dane”', onclick: hideDialog }, 'Które dane ukrywać…'),
-    h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; if (st.data) draw(); } }, 'Wyczyść filtry'),
-    h('span', { class: 'muted' }, 'Poziomy:'), ...levelBtns.values(), komisBtn,
-    h('button', { class: 'btn small primary', onclick: () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg) })) }, 'Dodaj operację'),
-    h('button', { class: 'btn small', title: 'Kolory stanowisk, nowe stanowiska i kolory komisów', onclick: stationsDialog }, 'Ustawienia…'),
-    h('button', { class: 'btn small primary', title: 'JPG, obraz do schowka, Excel, PDF albo wydruk; wybór kolumn, wierszy, poziomów i zakresu wykresu', onclick: openShare }, 'Udostępnij…'),
-    h('span', { class: 'grow' }), info,
-    h('button', { class: 'btn', onclick: load }, 'Odśwież')), body);
+  // Przyciski z ikonami (te same co na Androidzie): kwadrat z ramką, wypełniony = włączone
+  const ICON_BTN = { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
+  const iconBtn = (icon, title, onclick) => { const b = h('button', { class: 'btn small', title, 'aria-label': title, style: ICON_BTN, onclick }); b.append(iconSvg(icon)); return b; };
+  const setIcon = (b, icon) => { b.replaceChildren(iconSvg(icon)); };
+  const komisBtn = iconBtn('sigma', 'Podsumowanie komisów – paski komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia', () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); });
+  const hideBtn = iconBtn('eye', 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)', () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); });
+  const broomBtn = iconBtn('broom', 'Wyczyść filtry i sortowanie', () => { st.filters = {}; st.sorts = []; if (st.data) draw(); });
+  const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg) })));
+  const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
+  const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, które dane ukrywać, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
+  const refreshBtn = iconBtn('refresh', 'Odśwież', load);
+  for (const b of levelBtns.values()) Object.assign(b.style, ICON_BTN);
+  shiftInput.style.width = '52px'; shiftInput.style.height = '30px'; shiftInput.style.boxSizing = 'border-box';
+  intervalSel.style.height = '30px';
+  // stan przycisków (oko / oko przekreślone, Σ / Σ przekreślona, miotełka nieaktywna bez filtrów) – odświeżany w draw()
+  syncTools = () => {
+    setIcon(hideBtn, st.compact ? 'eyeOff' : 'eye'); hideBtn.classList.toggle('primary', st.compact); hideBtn.title = st.compact ? 'Pokaż dane – wszystkie kolumny' : 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)';
+    setIcon(komisBtn, st.komisOpt.show ? 'sigma' : 'sigmaOff'); komisBtn.classList.toggle('primary', st.komisOpt.show);
+    broomBtn.disabled = !(Object.keys(st.filters).length || st.sorts.length);
+  };
+  el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '4px';
+  el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
+    ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
+    h('span', { class: 'grow' }),
+    h('span', { style: { display: 'inline-flex', gap: '3px' } }, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
+  syncTools();
   load();
 }
