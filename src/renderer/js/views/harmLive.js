@@ -412,12 +412,12 @@ export function mountHarmLive(el, appCtx) {
     const boxes = new Map();
     const list = h('div', {}, ...COLS.filter((c) => c.group !== 'z' || c.key === 'z1').map((c) => {
       const keys = c.group === 'z' ? COLS.filter((x) => x.group === 'z').map((x) => x.key) : [c.key];
-      const cb = h('input', { type: 'checkbox', checked: keys.every((k) => st.hideSet.has(k)) });
+      const cb = h('input', { type: 'checkbox', checked: !keys.every((k) => st.hideSet.has(k)) });   // zaznaczone = pokazywane przy przekreślonym oku
       boxes.set(keys, cb);
       return h('label', { style: { display: 'block', margin: '3px 0' } }, cb, ' ', c.group === 'z' ? 'Zależności Z1–Z4 (B–E)' : `${c.title} (${c.letter})`);
     }));
-    const apply = () => { st.hideSet = new Set(); for (const [keys, cb] of boxes) if (cb.checked) keys.forEach((k) => st.hideSet.add(k)); lsSet(LS.hide, [...st.hideSet]); m.close(); draw(); };
-    const m = modal('Które dane ukrywać', h('div', {}, h('p', { class: 'muted' }, 'Zaznaczone kolumny znikają po kliknięciu „Ukryj dane”. Odznaczone zostają na ekranie. Zależności Z1–Z4 działają jako grupa.'), list,
+    const apply = () => { st.hideSet = new Set(); for (const [keys, cb] of boxes) if (!cb.checked) keys.forEach((k) => st.hideSet.add(k)); lsSet(LS.hide, [...st.hideSet]); m.close(); if (st.data) draw(); };
+    const m = modal('Co pokazywać przy ukrytych danych', h('div', {}, h('p', { class: 'muted' }, 'Zaznaczone kolumny zostają na ekranie, gdy oko jest przekreślone (dane ukryte). Odznaczone wtedy znikają. Przy zwykłym oku widać wszystkie kolumny. Zależności Z1–Z4 działają jako grupa. Okno otwiera prawy przycisk myszy na ikonie oka.'), list,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => { boxes.forEach((cb) => { cb.checked = true; }); } }, 'Zaznacz wszystkie'), h('button', { class: 'btn', onclick: () => { boxes.forEach((cb) => { cb.checked = false; }); } }, 'Odznacz wszystkie'),
         h('button', { class: 'btn primary', onclick: apply }, 'OK'))));
   }
@@ -725,7 +725,6 @@ export function mountHarmLive(el, appCtx) {
       h('h3', { style: { margin: '4px 0' } }, 'Wygląd tabeli'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
-      h('div', { class: 'row', style: { alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Lista kolumn chowanych ikoną oka (zapisuje się od razu)', onclick: hideDialog }, 'Które dane ukrywać…'), h('span', { class: 'muted' }, 'kolumny chowane ikoną oka na pasku')),
       h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: st.confirmChanges, onchange: (e) => { st.confirmChanges = e.target.checked; lsSet(LS.confirm, st.confirmChanges); } }), ' Potwierdzaj zmiany komórek (okno ze starą i nową wartością przed zapisem)'),
       ...(god ? [h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres'),
       h('p', { class: 'muted' }, 'Napis na pasku operacji (zaznaczone pola, w tej kolejności) i wielkość jego czcionki. Zapisywane na tym komputerze.'),
@@ -1070,11 +1069,12 @@ export function mountHarmLive(el, appCtx) {
   const iconBtn = (icon, title, onclick) => { const b = h('button', { class: 'btn small', title, 'aria-label': title, style: ICON_BTN, onclick }); b.append(iconSvg(icon)); return b; };
   const setIcon = (b, icon) => { b.replaceChildren(iconSvg(icon)); };
   const komisBtn = iconBtn('sigma', 'Podsumowanie komisów – paski komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia', () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); });
-  const hideBtn = iconBtn('eye', 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)', () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); });
+  const hideBtn = iconBtn('eye', 'Ukryj dane. Prawy przycisk myszy: co pokazywać', () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); });
+  hideBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); hideDialog(); });   // prawy przycisk na oku: wybór kolumn widocznych przy ukrytych danych
   const broomBtn = iconBtn('broom', 'Wyczyść filtry i sortowanie', () => { st.filters = {}; st.sorts = []; saveFilters(); if (st.data) draw(); });
   const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && acc().add && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg), access: acc() })));
   const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
-  const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, które dane ukrywać, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
+  const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, potwierdzanie zmian, wykres, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
   const refreshBtn = iconBtn('refresh', 'Odśwież', load);
   const undoBtn = iconBtn('undo', 'Cofnij ostatnią zmianę (Ctrl+Z)', doUndo);
   onUndoChange((n, label) => { undoBtn.disabled = !n; undoBtn.title = n ? `Cofnij: ${label} (Ctrl+Z)` : 'Nie ma zmian do cofnięcia'; });
@@ -1088,7 +1088,7 @@ export function mountHarmLive(el, appCtx) {
   intervalSel.style.height = '30px';
   // stan przycisków (oko / oko przekreślone, Σ / Σ przekreślona, miotełka nieaktywna bez filtrów) – odświeżany w draw()
   syncTools = () => {
-    setIcon(hideBtn, st.compact ? 'eyeOff' : 'eye'); hideBtn.classList.toggle('primary', st.compact); hideBtn.title = st.compact ? 'Pokaż dane – wszystkie kolumny' : 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)';
+    setIcon(hideBtn, st.compact ? 'eyeOff' : 'eye'); hideBtn.classList.toggle('primary', st.compact); hideBtn.title = (st.compact ? 'Pokaż dane – wszystkie kolumny' : 'Ukryj dane – zostają tylko kolumny wybrane do pokazywania') + '. Prawy przycisk myszy: co pokazywać';
     setIcon(komisBtn, st.komisOpt.show ? 'sigma' : 'sigmaOff'); komisBtn.classList.toggle('primary', st.komisOpt.show);
     broomBtn.disabled = !(Object.keys(st.filters).length || st.sorts.length);
     const a = acc();
