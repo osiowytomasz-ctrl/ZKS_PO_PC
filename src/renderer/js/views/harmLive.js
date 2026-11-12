@@ -137,8 +137,22 @@ export function mountHarmLive(el, appCtx) {
   const sortLabel = (key) => { const i = st.sorts.findIndex((s) => s.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
   function openFilter(c) {
     const cur = st.sorts.find((s) => s.key === c.key);
-    columnFilterDialog({
-      title: c.title, options: filterOptions(st.komisOpt.show && st.komisOpt.filter ? [...st.data.rows, ...st.data.komisRows.values()] : st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null, dateRange: !!c.isDate,
+    // ukryte kolumny („Ukryj dane”): na górze okna wybór kolumny do filtrowania – także schowanej (jak filtr w tabeli przestawnej Excela)
+    const hidden = st.compact ? COLS.filter((x) => st.hideSet.has(x.key)) : [];
+    let dlg = null;
+    const picker = hidden.length ? h('div', { style: { border: '1px solid #ccc', background: '#f6f8fc', padding: '6px', marginBottom: '6px' } },
+      h('div', { style: { fontWeight: 700, fontSize: '12px', marginBottom: '4px' } }, 'Kolumna do filtrowania (także ukryte):'),
+      (() => {
+        const opt = (x) => h('option', { value: x.key }, `${x.title}${st.filters[x.key] ? ' ▼' : ''}${st.sorts.some((s) => s.key === x.key) ? ' ' + sortLabel(x.key) : ''}`);
+        const sel = h('select', { style: { width: '100%', padding: '4px' }, onchange: () => { const n = COLS.find((x) => x.key === sel.value); if (n && n.key !== c.key) { if (dlg) dlg.close(); openFilter(n); } } },
+          h('optgroup', { label: 'Widoczne' }, ...COLS.filter((x) => !st.hideSet.has(x.key)).map(opt)),
+          h('optgroup', { label: 'Ukryte' }, ...hidden.map(opt)));
+        sel.value = c.key; return sel;
+      })(),
+      hidden.some((x) => st.filters[x.key]) ? h('div', { class: 'muted', style: { fontSize: '11px', marginTop: '3px' } }, 'Filtry na ukrytych kolumnach: ' + hidden.filter((x) => st.filters[x.key]).map((x) => x.title).join(', ')) : null) : null;
+    dlg = columnFilterDialog({
+      top: picker,
+      title: c.title + (hidden.some((x) => x.key === c.key) ? ' (kolumna ukryta)' : ''), options: filterOptions(st.komisOpt.show && st.komisOpt.filter ? [...st.data.rows, ...st.data.komisRows.values()] : st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null, dateRange: !!c.isDate,
       onApply: (filter, sort) => {
         if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
         st.sorts = st.sorts.filter((s) => s.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
