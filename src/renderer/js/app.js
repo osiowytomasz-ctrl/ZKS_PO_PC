@@ -40,6 +40,7 @@ export const MODULES = [
 ];
 
 export const ctx = {
+  version: '',         // numer wersji programu PC (np. 1.1.0)
   user: null,          // { email, name, roles, permissions }
   userError: null,
   go,
@@ -71,7 +72,7 @@ function backTarget(id) {
 }
 
 function topbar(title, showBack) {
-  const who = ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '';
+  const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO (PC) wersja ${ctx.version}` : '');
   return h('div', { class: 'topbar' },
     showBack ? h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć') : null,
     h('h1', {}, title),
@@ -104,6 +105,7 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
 
 (async () => {
   const cfg = await window.zks.getSettings();
+  try { ctx.version = (await window.zks.appVersion?.()) || ''; } catch { ctx.version = ''; }
   if (cfg.url && cfg.key) await ctx.loadUser();
   go(cfg.url && cfg.key ? 'home' : 'settings');
   if (cfg.url && cfg.key) {

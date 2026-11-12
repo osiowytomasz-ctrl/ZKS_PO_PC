@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('zks', {
   saveText: (name, text) => ipcRenderer.invoke('file:saveText', name, text),
   printHtml: (html) => ipcRenderer.invoke('file:printHtml', html),
   savePdf: (html, opts) => ipcRenderer.invoke('file:savePdf', html, opts || {}),
+  openLastSaved: () => ipcRenderer.invoke('file:openLast'),
+  appVersion: () => ipcRenderer.invoke('app:version'),
   printReport: (html, opts) => ipcRenderer.invoke('file:print', html, opts || {}),
   copyImage: (base64) => ipcRenderer.invoke('clipboard:image', base64),
   openExternal: (url) => ipcRenderer.invoke('shell:open', url),

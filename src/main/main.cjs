@@ -108,6 +108,7 @@ app.whenReady().then(() => {
     const res = await dialog.showSaveDialog(mainWindow, { defaultPath: safeName(name) });
     if (res.canceled || !res.filePath) return false;
     fs.writeFileSync(res.filePath, bytes);
+    lastSaved = res.filePath;
     return true;
   });
   ipcMain.handle('file:saveText', async (_e, name, text) => {
@@ -129,6 +130,7 @@ app.whenReady().then(() => {
       win.destroy();
     }
   });
+  let lastSaved = null;   // ostatni plik zapisany przez okno „Zapisz” (do otwarcia gotowego dokumentu)
   // Raport HTML (Harmonogram) → plik PDF albo wydruk. HTML trafia do pliku tymczasowego (duże raporty nie mieszczą się w adresie data:).
   const withReportWindow = async (html, fn) => {
     const tmp = path.join(app.getPath('temp'), `zks-raport-${Date.now()}.html`);
@@ -141,8 +143,15 @@ app.whenReady().then(() => {
     const res = await dialog.showSaveDialog(mainWindow, { defaultPath: safeName(opts.name || 'harmonogram.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (res.canceled || !res.filePath) return false;
     fs.writeFileSync(res.filePath, pdf);
+    lastSaved = res.filePath;
     return true;
   }));
+  // Otwarcie gotowego dokumentu w domyślnym programie – tylko pliku zapisanego przed chwilą przez ten program (nie dowolnej ścieżki)
+  ipcMain.handle('file:openLast', async () => {
+    if (!lastSaved || !fs.existsSync(lastSaved)) return false;
+    const err = await shell.openPath(lastSaved);
+    return !err;
+  });
   ipcMain.handle('file:print', async (_e, html, opts = {}) => withReportWindow(html, (win) => new Promise((resolve) => {
     win.webContents.print({ silent: false, printBackground: true, landscape: opts.landscape !== false, pageSize: opts.pageSize === 'A3' ? 'A3' : 'A4' }, (ok) => resolve(!!ok));
   })));
@@ -151,6 +160,7 @@ app.whenReady().then(() => {
     if (/^https?:\/\//i.test(String(url))) return shell.openExternal(String(url));
     return false;
   });
+  ipcMain.handle('app:version', () => app.getVersion());   // numer wersji programu PC (package.json)
   ipcMain.handle('clipboard:write', (_e, text) => { clipboard.writeText(String(text || '')); return true; });
 
   createWindow();

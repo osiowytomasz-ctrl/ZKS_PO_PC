@@ -3,7 +3,7 @@ const NS = 'http://www.w3.org/2000/svg';
 const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); return e; };
 const P = (x, y) => `${(x * 16).toFixed(2)} ${(y * 16).toFixed(2)}`;
 
-/** SVG ikony [name]: share, gear, broom, eye, eyeOff, sigma, sigmaOff, plus, refresh. Kolor = currentColor. */
+/** SVG ikony [name]: share, gear, broom, eye, eyeOff, sigma, sigmaOff, plus, refresh, undo. Kolor = currentColor. */
 export function iconSvg(name, size = 18) {
   const svg = el('svg', { viewBox: '0 0 16 16', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
   const add = (tag, attrs) => svg.append(el(tag, attrs));
@@ -30,6 +30,11 @@ export function iconSvg(name, size = 18) {
       add('path', { d: `M${P(0.82, 0.14)} L${P(0.2, 0.14)} L${P(0.56, 0.5)} L${P(0.2, 0.86)} L${P(0.82, 0.86)}`, 'stroke-width': 1.9 });
       if (name === 'sigmaOff') add('line', { x1: 0.8, y1: 15.2, x2: 15.2, y2: 0.8 });
       break;
+    case 'undo': {   // cofnij: łuk ze strzałką w lewo
+      add('path', { d: 'M4.2 6.4 H10.2 A3.9 3.9 0 0 1 10.2 14.2 H6.4', 'stroke-width': 1.8 });
+      add('path', { d: 'M5.8 2.6 L1.8 6.4 L5.8 10.2 Z', fill: 'currentColor', stroke: 'none' });
+      break;
+    }
     case 'plus':
       add('path', { d: `M8 1.6 V14.4 M1.6 8 H14.4`, 'stroke-width': 2.1 });
       break;

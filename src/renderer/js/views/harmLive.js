@@ -1,10 +1,11 @@
 // Harmonogram (baza Firebase): widok klasyczny jak w arkuszu. Jedna tabela: z lewej dane (kolumny jak w pliku), z prawej oś czasu z paskami w tych samych wierszach.
 // Dane twarde edytujesz w komórkach; Start, Koniec i klucz liczy program. Przycisk „Ukryj dane” chowa kolumny z listy ukrywanych (domyślnie „czerwone”).
-import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
+import { h, clear, api, apiCached, modal, toast, columnFilterDialog, confirmBox } from '../ui.js';
+import { datePickerDialog } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
-import { watchHarm, saveSettings } from '../harmStore.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
 import { iconSvg } from './harmIcons.js';
@@ -17,7 +18,7 @@ import { shareDialog } from './harmShare.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const LS = { confirm: 'zks.harm.confirmChanges', filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
 const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
 const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -44,10 +45,25 @@ export function mountHarmLive(el, appCtx) {
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
     // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
+    confirmChanges: lsGet(LS.confirm, true) !== false,   // okno potwierdzenia przed zapisem zmiany komórki
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
-  let syncTools = () => {};   // stan ikon paska (ustawiany niżej)
+  let syncTools = () => {};
+  setOpsSource(() => (st.m ? st.m.opsByLp : {}));   // stan sprzed zmiany – do cofania
+  // Zmiana komórki: informacja o zmianie i potwierdzenie (można wyłączyć w Ustawieniach), potem zapis; po zapisie można cofnąć (↶, Ctrl+Z)
+  const saveWithConfirm = async (id, col, oldText, newText) => {
+    if (String(oldText ?? '').trim() === String(newText ?? '').trim()) return false;
+    const lp = id;
+    if (st.confirmChanges && !(await confirmBox('Potwierdź zmianę', `Operacja ${lp}\n${col.title}:  „${String(oldText || '').trim() || '—'}”  →  „${String(newText || '').trim() || '—'}”\n\nZapisać zmianę?`, 'Zapisz'))) return false;
+    const ok = await saveCell(st.m.opsByLp, id, col, String(newText ?? '').trim());
+    if (ok) toast(`Zapisano: ${col.title} operacji ${lp}. Cofnij: ↶ albo Ctrl+Z`);
+    return ok;
+  };
+  const doUndo = async () => {
+    try { const label = await undoLast(); toast(label ? `Cofnięto: ${label}` : 'Nie ma zmian do cofnięcia'); }
+    catch (e) { toast('Nie cofnięto: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
+  };   // stan ikon paska (ustawiany niżej)
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
   const val = (row, col) => (col.isDate ? noMin(row[col.key]) : col.key === 'hours' ? String(row.hoursShown ?? '') : String(row[col.key] ?? ''));
@@ -160,6 +176,7 @@ export function mountHarmLive(el, appCtx) {
     const maxEnd = Math.max(Date.now(), ...all.map((r) => res.get(r.id)?.end || 0));
     shareDialog({
       user: appCtx && appCtx.user ? (appCtx.user.name || appCtx.user.email || '') : '',
+      version: appCtx && appCtx.version ? appCtx.version : '',
       cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), komisSummaryList(), new Set(), { inline: st.komisOpt.inline }), komisShown: st.komisOpt.show, selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
       axisStart: axisStartMs(H.localNow().getTime(), st.shift), maxEnd, nowMs: H.localNow().getTime(),
@@ -417,6 +434,7 @@ export function mountHarmLive(el, appCtx) {
       h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Lista kolumn chowanych ikoną oka (zapisuje się od razu)', onclick: hideDialog }, 'Które dane ukrywać…'), h('span', { class: 'muted' }, 'kolumny chowane ikoną oka na pasku')),
+      h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: st.confirmChanges, onchange: (e) => { st.confirmChanges = e.target.checked; lsSet(LS.confirm, st.confirmChanges); } }), ' Potwierdzaj zmiany komórek (okno ze starą i nową wartością przed zapisem)'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
@@ -557,10 +575,15 @@ export function mountHarmLive(el, appCtx) {
         if (!col.ro) cell.addEventListener('click', (ev) => {
           if (col.key === 'lp' && r.subCount && ev.offsetX < (20 + 26 * (r.depth || 0)) * st.scale) { toggleCollapse(r.id); return; }
           if (col.pred !== undefined) {
-            predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveCell(st.m.opsByLp, r.id, col, lp));
+            predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveWithConfirm(r.id, col, text, lp));
             return;
           }
           const op = st.m.opsByLp[r.id] || {};
+          if (col.date) {   // komórka z datą: okno z kalendarzem
+            datePickerDialog({ title: `${col.title} · operacja ${r.lp || r.id}`, value: op[col.key] ?? null, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
+              onPick: (ms) => saveWithConfirm(r.id, col, fmtDt(op[col.key]), ms == null ? '' : fmtDt(ms)) });
+            return;
+          }
           const initial = col.key === 'lp' ? r.lp : col.date ? fmtDt(op[col.key]) : col.key === 'hours' ? (op.hours == null ? '' : String(op.hours)) : text;
           startEdit(cell, r.id, col, initial);
         });
@@ -617,7 +640,7 @@ export function mountHarmLive(el, appCtx) {
     let done = false;
     const finish = async (commit) => {
       if (done) return; done = true;
-      if (commit && input.value.trim() !== text.trim()) await saveCell(st.m.opsByLp, id, col, input.value.trim());
+      if (commit && input.value.trim() !== text.trim()) await saveWithConfirm(id, col, text, input.value.trim());
       st.editing = false;
       if (st.pending) { st.pending = false; recompute(); } else paintWindow();
     };
@@ -653,6 +676,13 @@ export function mountHarmLive(el, appCtx) {
   const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
   const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, które dane ukrywać, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
   const refreshBtn = iconBtn('refresh', 'Odśwież', load);
+  const undoBtn = iconBtn('undo', 'Cofnij ostatnią zmianę (Ctrl+Z)', doUndo);
+  onUndoChange((n, label) => { undoBtn.disabled = !n; undoBtn.title = n ? `Cofnij: ${label} (Ctrl+Z)` : 'Nie ma zmian do cofnięcia'; });
+  const onKey = (e) => {
+    if (!el.isConnected) { document.removeEventListener('keydown', onKey); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName) && !document.querySelector('.overlay')) { e.preventDefault(); doUndo(); }
+  };
+  document.addEventListener('keydown', onKey);
   for (const b of levelBtns.values()) Object.assign(b.style, ICON_BTN);
   shiftInput.style.width = '52px'; shiftInput.style.height = '30px'; shiftInput.style.boxSizing = 'border-box';
   intervalSel.style.height = '30px';
@@ -666,7 +696,7 @@ export function mountHarmLive(el, appCtx) {
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
     h('span', { class: 'grow' }),
-    h('span', { style: { display: 'inline-flex', gap: '3px' } }, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
+    h('span', { style: { display: 'inline-flex', gap: '3px' } }, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
   syncTools();
   load();
 }

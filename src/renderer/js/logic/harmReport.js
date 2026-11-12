@@ -5,6 +5,7 @@ import { buildXlsx } from './xlsx.js';
 const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 // Nagłówek firmowy raportu: z lewej logo, firma, wydział i osoba udostępniająca; z prawej nazwa programu i właściciel.
 const BRAND_H = 66, BRAND_MIN_W = 760;
+const FRAME = 10;   // odstęp treści od ramki
 const BRAND_RED = '#d71920', BRAND_DARK = '#2b2b2b';
 function brandSvg(out, b, W, text) {
   out.push(`<rect x="0" y="0" width="${W}" height="${BRAND_H - 6}" fill="#ffffff"/>`);
@@ -42,20 +43,24 @@ export function layout(model) {
   const headH = Math.ceil(labelLen * font * 0.58) + 14;
   const brandH = model.brand ? BRAND_H : 0;
   const titleH = brandH + (model.title ? (model.subtitle ? 46 : 30) : 0);
-  return { font, rowH, tableW, chartW, pxH, headH, titleH, brandH, width: Math.max(tableW + chartW + 2, model.brand ? BRAND_MIN_W : 0), height: titleH + headH + model.rows.length * rowH + 2 };
+  // ramka wokół treści raportu (pod nagłówkiem firmowym); treść wyśrodkowana w poziomie
+  const innerW = tableW + chartW + 2;
+  const width = Math.max(innerW + 2 * FRAME, model.brand ? BRAND_MIN_W : 0);
+  return { font, rowH, tableW, chartW, pxH, headH, titleH, brandH, innerW, ox: (width - innerW) / 2, width, height: titleH + headH + model.rows.length * rowH + 2 + 2 * FRAME };
 }
 
 /** SVG raportu dla wierszy [from, to) (domyślnie wszystkich). */
 export function reportSvg(model, { from = 0, to = model.rows.length, page = '' } = {}) {
   const L = layout(model), { font, rowH, tableW, chartW, pxH, headH, titleH } = L;
   const rows = model.rows.slice(from, to), n = rows.length;
-  const H = titleH + headH + n * rowH + (page ? 18 : 2), W = L.width;
+  const H = titleH + headH + n * rowH + 2 + 2 * FRAME + (page ? 16 : 0), W = L.width;
   const out = [];
   const text = (x, y, t, o = {}) => out.push(`<text x="${x}" y="${y}" font-size="${o.size || font}" font-family="Arial, Helvetica, sans-serif"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.underline ? ' text-decoration="underline"' : ''} fill="${o.color || '#000'}"${o.anchor ? ` text-anchor="${o.anchor}"` : ''}${o.rotate ? ` transform="rotate(-90 ${x} ${y})"` : ''}>${esc(t)}</text>`);
   const rect = (x, y, w, h, fill, stroke, sw = 1) => out.push(`<rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${Math.max(0, h)}" fill="${fill || 'none'}"${stroke ? ` stroke="${stroke}" stroke-width="${sw}"` : ''}/>`);
   rect(0, 0, W, H, '#ffffff');
   const bH = L.brandH;
   if (model.brand) brandSvg(out, model.brand, W, text);
+  out.push(`<g transform="translate(${L.ox} ${FRAME})">`);   // treść w ramce, wyśrodkowana
   if (model.title) { text(4, bH + 20, model.title, { size: font + 6, bold: true }); if (model.subtitle) text(4, bH + 38, model.subtitle, { size: font, color: '#444' }); }
   const y0 = titleH, yRows = titleH + headH;
   // nagłówek tabeli
@@ -115,7 +120,10 @@ export function reportSvg(model, { from = 0, to = model.rows.length, page = '' }
     }
   });
   if (model.chart && model.chart.nowMs > startMs) { const nx = px(model.chart.nowMs); if (nx <= tableW + chartW) out.push(`<line x1="${nx}" y1="${yRows}" x2="${nx}" y2="${yRows + n * rowH}" stroke="#ff6600" stroke-width="2" stroke-dasharray="5 3"/>`); }
-  if (page) text(W - 4, H - 4, page, { size: font - 1, color: '#555', anchor: 'end' });
+  out.push('</g>');
+  const fb = H - (page ? 16 : 0);
+  rect(2, bH + 2, W - 4, fb - bH - 4, null, '#000', 3);   // ramka wokół harmonogramu
+  if (page) text(W - 4, H - 3, page, { size: font - 1, color: '#555', anchor: 'end' });
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${out.join('')}</svg>`, width: W, height: H };
 }
 
@@ -127,17 +135,18 @@ export function reportPagesHtml(model, { pageSize = 'A4', landscape = true } = {
   const [pw0, ph0] = PAGE_PX[pageSize] || PAGE_PX.A4;
   const [pw, ph] = landscape ? [ph0, pw0] : [pw0, ph0];
   const L = layout(model);
-  const scale = Math.min(1, (pw - 2 * MARGIN) / L.width);
-  const usable = (ph - 2 * MARGIN) / scale - L.titleH - L.headH - 20;
+  // dopasowanie do szerokości strony (także powiększenie wąskiego raportu, najwyżej 2×); strona wyśrodkowana
+  const scale = Math.min(2, (pw - 2 * MARGIN) / L.width);
+  const usable = (ph - 2 * MARGIN) / scale - L.titleH - L.headH - 2 * FRAME - 20;
   const perPage = Math.max(1, Math.floor(usable / L.rowH));
   const pages = [];
   const total = Math.max(1, Math.ceil(model.rows.length / perPage));
   for (let p = 0; p < total; p++) {
     const { svg } = reportSvg(model, { from: p * perPage, to: Math.min(model.rows.length, (p + 1) * perPage), page: `Strona ${p + 1} z ${total}` });
-    pages.push(`<div class="page">${svg.replace('<svg ', `<svg style="width:${Math.round(L.width * scale)}px;height:auto" `)}</div>`);
+    pages.push(`<div class="page">${svg.replace('<svg ', `<svg style="display:block;margin:0 auto;width:${Math.round(L.width * scale)}px;height:auto" `)}</div>`);
   }
   const css = `@page { size: ${pageSize} ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; } html, body { margin: 0; padding: 0; background: #fff; } .page { page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; }`;
-  return { html: `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>${pages.join('')}</body></html>`, pages: total, perPage, scale };
+  return { pw, ph, margin: MARGIN, width: L.width, html: `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>${pages.join('')}</body></html>`, pages: total, perPage, scale };
 }
 
 /**
