@@ -1,6 +1,8 @@
 import { h, clear, api, apiCached, toast, modal, field, confirmBox, alertBox, columnFilterDialog } from '../ui.js';
 import * as W from '../logic/workflow.js';
 import { parseSheetColor, updateSorts, sortLabels } from '../logic/common.js';
+import { watchWorkflow, saveWorkflow, importFromSheet } from '../wfStore.js';
+import { harmLevel } from '../fb.js';
 
 const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
 
@@ -64,8 +66,8 @@ const block = (label, node) => h('div', { style: { margin: '6px 0' } }, h('div',
 
 const PALETTE = ['#cc0000', '#e69138', '#38761d', '#1155cc', '#674ea7', '#666666', '#000000'];
 
-/** Zakładka Workflow na ekranie głównym: karta Z, kolorowanie liczone lokalnie, edycja w tabeli (jak w arkuszu). */
-export function createWorkflow() {
+/** Zakładka Workflow na ekranie głównym: zadania w Firebase (na żywo; dawniej karta Z), kolorowanie liczone lokalnie, edycja w tabeli (jak w arkuszu). */
+export function createWorkflow(appCtx) {
   const st = { headers: [], records: [], changes: new Map(), fresh: false, filters: {}, sorts: [], saving: false, sel: null, editing: null, order: [] };
   const cells = new Map();      // `${wiersz}:${kolumna}` → <td>
   const recByRow = new Map();
@@ -119,7 +121,7 @@ export function createWorkflow() {
       const changed = st.changes.get(rec.row);
       const tr = h('tr', {});
       for (const col of W.COLS) {
-        const s = W.cellStyle(eff, col, rec.row);
+        const s = W.cellStyle(eff, col, 2);   // formatowanie warunkowe jak w karcie Z – dla wszystkich zadań
         const isStatus = W.STATUS_COLS.includes(col);
         const isText = W.TEXT_COLS.includes(col);
         const dirty = changed && ((isStatus && changed.status !== undefined) || (isText && changed.cells && changed.cells[col]));
@@ -150,8 +152,8 @@ export function createWorkflow() {
     };
     body.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...W.COLS.map(th))), tbody));
     body.scrollTop = sy; body.scrollLeft = sx;
-    const bad = W.mismatches(st.records).length;
-    info.textContent = [st.fresh ? '' : 'dane z pamięci, odświeżanie… (edycja po odświeżeniu)', bad ? `niezgodne z kolumną H w arkuszu: ${bad}` : ''].filter(Boolean).join('  ·  ');
+    info.textContent = st.fresh ? `Firebase na żywo · zadań: ${st.records.length}` + (st.offline ? ' · bez połączenia (zmiany wyślą się po połączeniu)' : '') : 'Łączenie z Firebase…';
+    importBtn.style.display = harmLevel() === 'god' ? '' : 'none';
     clearBtn.disabled = !Object.keys(st.filters).length && !st.sorts.length;
     saveBtn.disabled = !canEdit() || !st.changes.size;
     discardBtn.disabled = !st.changes.size;
@@ -277,11 +279,11 @@ export function createWorkflow() {
       if (!Object.keys(item.cells).length) { err.textContent = 'Wpisz komis albo treść zadania.'; return; }
       send.disabled = true;
       try {
-        const r = await api('api_saveWorkflow', [[item]]);
-        m.close(); toast((r && r.message) || 'Dodano zadanie.'); await load(true);
+        const r = await saveWorkflow([item], userName(), maxRow());
+        m.close(); toast((r && r.message) || 'Dodano zadanie.');
       } catch (ex) {
         send.disabled = false;
-        err.textContent = 'Błąd zapisu: ' + ex.message + (ex.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież listę i sprawdź, zanim spróbujesz ponownie.' : '');
+        err.textContent = 'Błąd zapisu: ' + (ex.code === 'permission-denied' ? 'brak uprawnień' : ex.message || ex);
       }
     } }, 'Dodaj');
     const m = modal('Nowe zadanie', h('div', {}, h('div', { class: 'muted' }, 'Data i zlecający uzupełnią się automatycznie.'),
@@ -297,48 +299,46 @@ export function createWorkflow() {
     if (!(await confirmBox('Zapisać zmiany?', `Zmienione wiersze: ${items.length}. Data i zlecający uzupełnią się tylko tam, gdzie są puste.`, 'Zapisz'))) return;
     st.saving = true; draw();
     try {
-      const r = await api('api_saveWorkflow', [items]);
+      const r = await saveWorkflow(items, userName(), maxRow());
       st.changes = new Map(); st.saving = false;
-      toast((r && r.message) || 'Zapisano.'); await load(true);
+      toast((r && r.message) || 'Zapisano.'); draw();
     } catch (e) {
       st.saving = false; draw();
-      await alertBox('Workflow', 'Błąd zapisu: ' + e.message + (e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież listę i sprawdź, zanim spróbujesz ponownie.' : ''));
+      await alertBox('Workflow', 'Błąd zapisu: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e));
     }
   }
 
-  const onData = (d, meta) => {
-    st.headers = d.headers || [];
-    st.records = (d.rows || []).map((r) => ({ ...W.toRecord(r.cells || [], r.runs || {}), row: r.row }));
-    st.fresh = !meta.cached;
-    if (st.fresh) st.changes = new Map();
-    if (st.editing) { st.editing = null; endEditUi(); }
-    draw();
-  };
-
-  async function load(skipCache = false) {
-    info.textContent = 'Wczytywanie karty Z…';
+  // dane na żywo z Firebase: zmiany innych osób pojawiają się od razu; własne niezapisane zmiany zostają (zapis sprawdza konflikty)
+  const userName = () => (appCtx && appCtx.user && (appCtx.user.name || appCtx.user.email)) || '';
+  const maxRow = () => st.records.reduce((a, r) => Math.max(a, r.row), 0);
+  let stop = null;
+  async function load() {
+    if (stop) { stop(); stop = null; }
+    st.fresh = false; draw();
     try {
-      if (skipCache) { st.fresh = false; onData(await api('api_getWorkflow', [], { timeoutMs: 120000, cache: true }), { cached: false }); }
-      else await apiCached('api_getWorkflow', [], onData, { timeoutMs: 120000 });
-    } catch (e) {
-      clear(body);
-      const cfg = await window.zks.getSettings();
-      const m = /\/s\/([^/]+)\//.exec(cfg.url || '');
-      const dep = m ? m[1] : '';
-      const tail = dep ? `…${dep.slice(-8)} (długość ${dep.length})` : '(nie rozpoznano adresu)';
-      const missing = e.code === 'UNKNOWN_FN';
-      body.append(h('div', { style: { padding: '12px' } },
-        h('div', { class: missing ? '' : 'err' }, missing ? 'Serwer, z którym łączy się aplikacja, odpowiedział, że nie zna funkcji api_getWorkflow.' : 'Błąd: ' + e.message),
-        h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } }, `Kod odpowiedzi: ${e.code || '—'}\nKomunikat serwera: ${e.message}\nWdrożenie, z którym łączy się aplikacja: ${tail}`),
-        missing ? h('div', { class: 'muted', style: { marginTop: '8px' } }, 'Wklej kod z backend/Api.gs do Apps Script i wdróż Nową wersję tego wdrożenia (patrz docs/WORKFLOW_API.md).') : null));
-      info.textContent = '';
-    }
+      stop = await watchWorkflow((recs, meta) => {
+        if (!node.isConnected && stop) { /* zakładka zamknięta – nasłuch zostaje do ponownego wejścia */ }
+        st.records = recs; st.fresh = true; st.offline = !!meta.fromCache;
+        // zmiany czekające na zapis dla zadań, których już nie ma – usuwamy
+        for (const row of [...st.changes.keys()]) if (!recs.some((r) => r.row === row)) st.changes.delete(row);
+        if (st.editing && !recs.some((r) => r.row === st.editing.row)) { st.editing = null; endEditUi(); }
+        if (!st.editing) draw();
+        if (meta.empty) info.textContent = 'Lista zadań w Firebase jest pusta' + (harmLevel() === 'god' ? ' – użyj „Import z karty Z”, aby przenieść zadania z arkusza.' : ' – poproś administratora (GOD) o import z karty Z.');
+      }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd Firebase: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły z wf_tasks)' : e.message || e))); });
+    } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd połączenia z Firebase: ' + (e.message || e))); }
   }
+  const importBtn = h('button', { class: 'btn', style: { display: 'none' }, title: 'Jednorazowo: przenosi zadania z karty Z arkusza do Firebase (zastępuje listę w Firebase). Tylko GOD.', onclick: async () => {
+    if (!(await confirmBox('Import z karty Z', 'Zadania z karty Z arkusza zastąpią całą listę Workflow w Firebase (zadania dodane tylko w Firebase znikną). Kontynuować?', 'Importuj'))) return;
+    importBtn.disabled = true; info.textContent = 'Import z karty Z… (to może potrwać, arkusz jest wolny)';
+    try { const n = await importFromSheet(); st.changes = new Map(); toast(`Przeniesiono zadań: ${n}`); }
+    catch (e) { await alertBox('Workflow', 'Import nieudany: ' + (e.code === 'permission-denied' ? 'brak uprawnień (tylko GOD)' : e.message || e)); }
+    finally { importBtn.disabled = false; draw(); }
+  } }, 'Import z karty Z');
 
   const node = h('div', { class: 'panel', style: { maxWidth: '1400px', margin: '0 auto' } },
     h('div', { class: 'row', style: { marginBottom: '4px' } },
       h('button', { class: 'btn primary', onclick: newTask }, '+ Nowe zadanie'), saveBtn, discardBtn, clearBtn,
-      h('span', { class: 'grow' }), info,
-      h('button', { class: 'btn', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); load(); } }, 'Odśwież')), bar, body);
+      h('span', { class: 'grow' }), info, importBtn,
+      h('button', { class: 'btn', title: 'Połącz ponownie (dane i tak odświeżają się same)', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); load(); } }, 'Odśwież')), bar, body);
   return { node, refresh: load };
 }

@@ -70,7 +70,7 @@ export function mountHome(el, ctx) {
       h('h2', { style: { margin: 0 } }, 'Braki części'), h('span', { class: 'grow' }),
       codeInput, levelSel, h('button', { class: 'btn', onclick: refresh }, 'Odśwież')),
     listBox);
-  const wf = createWorkflow(); const workflow = wf.node; let wfLoaded = false;
+  const wf = createWorkflow(ctx); const workflow = wf.node; let wfLoaded = false;
   const drawTabs = () => {
     clear(tabs);
     for (const [id, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) tabs.append(h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; drawTabs(); if (id === 'workflow' && !wfLoaded) { wfLoaded = true; wf.refresh(); } braki.style.display = id === 'braki' ? '' : 'none'; workflow.style.display = id === 'workflow' ? '' : 'none'; } }, label));

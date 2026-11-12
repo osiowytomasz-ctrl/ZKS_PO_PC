@@ -40,6 +40,16 @@ service cloud.firestore {
       allow write: if isGod();
     }
 
+    // Workflow (dawniej karta Z): zadania czyta i edytuje każdy zalogowany użytkownik programu (jak wcześniej w arkuszu);
+    // usuwanie (import z karty Z zastępuje listę) – tylko GOD
+    match /wf_tasks/{id} {
+      allow read, create, update: if request.auth != null;
+      allow delete: if isGod();
+    }
+    match /wf_meta/{id} {
+      allow read, write: if request.auth != null;
+    }
+
     // test połączenia z Ustawień aplikacji PC
     match /test/{doc} {
       allow read, write: if canView();
