@@ -7,6 +7,19 @@ const dateKey = (text) => {
   return d ? d.getTime() : Number.NEGATIVE_INFINITY;
 };
 
+const DAY = 86400000;
+/**
+ * Filtr zakresu dat: od dnia [from] 00:00 do dnia [to] 23:59 (ms jak z parseDate; null = bez ograniczenia z tej strony).
+ * Ma metodę has(tekst) jak zbiór wartości, więc działa w visibleRows; obejmuje też wiersze dodane później. Puste daty nie pasują.
+ */
+export function rangeFilter(from, to) {
+  return {
+    range: true, from: from ?? null, to: to ?? null,
+    has(text) { const d = parseDate(text); if (!d) return false; const t = d.getTime(); return (from == null || t >= from) && (to == null || t < to + DAY); },
+  };
+}
+export const isRangeFilter = (f) => !!(f && f.range);
+
 /** Wiersze spełniające filtry WSZYSTKICH kolumn naraz; `except` pomija filtr jednej kolumny. */
 export function visibleRows(rows, columns, filters, getValue, except = null) {
   const active = columns.filter((c) => c.key !== except && filters[c.key]);

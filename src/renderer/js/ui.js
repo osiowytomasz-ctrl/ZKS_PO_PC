@@ -1,4 +1,6 @@
 // Pomocnicze funkcje interfejsu: tworzenie elementów, dialogi, komunikaty, wywołania API.
+import { rangeFilter } from './logic/tableFilter.js';
+import { parseDate } from './logic/common.js';
 
 /** Tworzy element: h('div', {class:'x', onclick: fn}, 'tekst', dziecko…). */
 export function h(tag, props, ...children) {
@@ -140,11 +142,12 @@ export function field(label, input) {
 /**
  * Okno kolumny: sortowanie (A→Z / Z→A / brak) i wybór wartości (jak autofiltr w arkuszu).
  * options: [{value,count}]; activeFilter: Set|undefined; activeSort: true|false|null.
- * onApply(filter: Set|null, sort: true|false|null).
+ * onApply(filter: Set|rangeFilter|null, sort: true|false|null). [dateRange] – kolumna z datami: dodatkowo zakres od – do.
  */
-export function columnFilterDialog({ title, options, activeFilter, activeSort, onApply }) {
+export function columnFilterDialog({ title, options, activeFilter, activeSort, onApply, dateRange = false }) {
   let sort = activeSort === undefined ? null : activeSort;
-  const selected = new Set(activeFilter ? [...activeFilter] : options.map((o) => o.value));
+  const isRange = !!(activeFilter && activeFilter.range);
+  const selected = new Set(activeFilter && !isRange ? [...activeFilter] : options.map((o) => o.value));
   const before = new Set(selected);
   const list = h('div', { class: 'opts' });
   const search = h('input', { type: 'search', placeholder: 'Szukaj…', style: { width: '100%', padding: '6px', margin: '4px 0' } });
@@ -181,8 +184,29 @@ export function columnFilterDialog({ title, options, activeFilter, activeSort, o
     onApply(all ? null : new Set(selected), sort);
     m.close();
   };
+  // zakres dat od – do (dzień „od” od 00:00, dzień „do” do 23:59; jedno pole puste = bez ograniczenia z tej strony)
+  let rangeBox = null;
+  if (dateRange) {
+    const fmt = (ms) => { if (ms == null) return ''; const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`; };
+    const fromI = h('input', { type: 'text', placeholder: 'od, np. 01.11.2026', value: isRange ? fmt(activeFilter.from) : '', style: { width: '130px', padding: '4px' } });
+    const toI = h('input', { type: 'text', placeholder: 'do, np. 30.11.2026', value: isRange ? fmt(activeFilter.to) : '', style: { width: '130px', padding: '4px' } });
+    const err = h('span', { class: 'err', style: { fontSize: '12px' } });
+    const day = (t) => { const d = parseDate(t.trim()); return d ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : null; };
+    const applyRange = () => {
+      const f = fromI.value.trim() ? day(fromI.value) : null, t = toI.value.trim() ? day(toI.value) : null;
+      if ((fromI.value.trim() && f == null) || (toI.value.trim() && t == null)) { err.textContent = 'Wpisz datę jako dd.mm.rrrr'; return; }
+      if (f == null && t == null) { err.textContent = 'Wpisz przynajmniej jedną datę'; return; }
+      if (f != null && t != null && t < f) { err.textContent = 'Data „do” jest przed „od”'; return; }
+      onApply(rangeFilter(f, t), sort); m.close();
+    };
+    rangeBox = h('div', { style: { border: '1px solid #ccc', padding: '6px', margin: '4px 0', background: isRange ? '#eef5ff' : '' } },
+      h('div', { style: { fontWeight: 700, fontSize: '12px', marginBottom: '4px' } }, 'Zakres dat' + (isRange ? ' (aktywny)' : '')),
+      h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, fromI, '–', toI, h('button', { class: 'btn small primary', onclick: applyRange }, 'Filtruj zakresem')), err);
+    for (const i of [fromI, toI]) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyRange(); });
+  }
   const content = h('div', {},
     h('div', { class: 'row' }, 'Sortuj: ', mkSort('A→Z', true), mkSort('Z→A', false), mkSort('Brak', null)),
+    rangeBox, dateRange ? h('div', { style: { fontWeight: 700, fontSize: '12px', marginTop: '4px' } }, 'albo wybrane wartości:') : null,
     search, list,
     h('div', { class: 'row' },
       h('button', { class: 'btn small', onclick: () => { options.forEach((o) => selected.add(o.value)); render(); } }, 'Zaznacz wszystko'),

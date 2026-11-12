@@ -3,6 +3,22 @@
 import { buildXlsx } from './xlsx.js';
 
 const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Nagłówek firmowy raportu: z lewej logo, firma, wydział i osoba udostępniająca; z prawej nazwa programu i właściciel.
+const BRAND_H = 66, BRAND_MIN_W = 760;
+const BRAND_RED = '#d71920', BRAND_DARK = '#2b2b2b';
+function brandSvg(out, b, W, text) {
+  out.push(`<rect x="0" y="0" width="${W}" height="${BRAND_H - 6}" fill="#ffffff"/>`);
+  if (b.logo) out.push(`<image href="${b.logo}" x="6" y="6" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>`);
+  const lx = b.logo ? 62 : 8;
+  if (b.company) text(lx, 22, b.company, { size: 17, bold: true, color: BRAND_DARK });
+  if (b.dept) text(lx, 39, b.dept, { size: 12, bold: true, color: BRAND_RED });
+  if (b.sharer) text(lx, 54, b.sharer, { size: 11, color: '#555' });
+  if (b.program) text(W - 8, 24, b.program, { size: 15, bold: true, color: BRAND_DARK, anchor: 'end' });
+  if (b.owner) text(W - 8, 41, b.owner, { size: 11, color: '#555', anchor: 'end' });
+  if (b.date) text(W - 8, 55, b.date, { size: 10, color: '#888', anchor: 'end' });
+  out.push(`<rect x="0" y="${BRAND_H - 6}" width="${W}" height="3" fill="${BRAND_RED}"/><rect x="0" y="${BRAND_H - 3}" width="${W}" height="1.5" fill="${BRAND_DARK}"/>`);
+}
+
 const DAY_BG = { work: '#00b050', sat: '#00b0f0', sun: '#ff0000', holiday: '#800000', span: '#00b050' };
 const GRID = '#8c8c8c';
 
@@ -24,8 +40,9 @@ export function layout(model) {
   const chartW = chart ? Math.ceil(chart.cells.reduce((a, c) => a + c.hours, 0) * pxH) : 0;
   const labelLen = Math.max(10, ...(chart ? chart.cells.map((c) => c.label.length) : [0]), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length));
   const headH = Math.ceil(labelLen * font * 0.58) + 14;
-  const titleH = model.title ? (model.subtitle ? 46 : 30) : 0;
-  return { font, rowH, tableW, chartW, pxH, headH, titleH, width: tableW + chartW + 2, height: titleH + headH + model.rows.length * rowH + 2 };
+  const brandH = model.brand ? BRAND_H : 0;
+  const titleH = brandH + (model.title ? (model.subtitle ? 46 : 30) : 0);
+  return { font, rowH, tableW, chartW, pxH, headH, titleH, brandH, width: Math.max(tableW + chartW + 2, model.brand ? BRAND_MIN_W : 0), height: titleH + headH + model.rows.length * rowH + 2 };
 }
 
 /** SVG raportu dla wierszy [from, to) (domyślnie wszystkich). */
@@ -37,7 +54,9 @@ export function reportSvg(model, { from = 0, to = model.rows.length, page = '' }
   const text = (x, y, t, o = {}) => out.push(`<text x="${x}" y="${y}" font-size="${o.size || font}" font-family="Arial, Helvetica, sans-serif"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.underline ? ' text-decoration="underline"' : ''} fill="${o.color || '#000'}"${o.anchor ? ` text-anchor="${o.anchor}"` : ''}${o.rotate ? ` transform="rotate(-90 ${x} ${y})"` : ''}>${esc(t)}</text>`);
   const rect = (x, y, w, h, fill, stroke, sw = 1) => out.push(`<rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${Math.max(0, h)}" fill="${fill || 'none'}"${stroke ? ` stroke="${stroke}" stroke-width="${sw}"` : ''}/>`);
   rect(0, 0, W, H, '#ffffff');
-  if (titleH) { text(4, 20, model.title, { size: font + 6, bold: true }); if (model.subtitle) text(4, 38, model.subtitle, { size: font, color: '#444' }); }
+  const bH = L.brandH;
+  if (model.brand) brandSvg(out, model.brand, W, text);
+  if (model.title) { text(4, bH + 20, model.title, { size: font + 6, bold: true }); if (model.subtitle) text(4, bH + 38, model.subtitle, { size: font, color: '#444' }); }
   const y0 = titleH, yRows = titleH + headH;
   // nagłówek tabeli
   let x = 0;
@@ -128,12 +147,19 @@ export function reportPagesHtml(model, { pageSize = 'A4', landscape = true } = {
 export function reportXlsx(model) {
   const rows = [], merges = [], rowHeights = {};
   const nCols = model.columns.length, chartCells = model.chart ? model.chart.cells : [];
+  const b = model.brand;
+  if (b) {
+    rows.push([{ v: [b.company, b.dept].filter(Boolean).join(' · '), style: { bold: true, size: 14 } }]);
+    rows.push([{ v: [b.sharer, b.date].filter(Boolean).join(' · '), style: { italic: true, color: '#555555' } }]);
+    rows.push([{ v: [b.program, b.owner].filter(Boolean).join(' · '), style: { bold: true, color: BRAND_RED } }]);
+  }
+  const top = rows.length;
   rows.push([{ v: model.title || 'Harmonogram', style: { bold: true, size: 14 } }]);
   rows.push([{ v: model.subtitle || '', style: { italic: true, color: '#444444' } }]);
   const head = model.columns.map((c) => ({ v: c.title, style: { bold: true, bg: '#e4e4e4', border: true, rotate: c.vertical ? 90 : 0, wrap: !c.vertical } }));
   for (const c of chartCells) head.push({ v: c.label, style: { bold: c.kind === 'holiday', bg: DAY_BG[c.kind] || DAY_BG.work, color: c.kind === 'sat' ? '#000000' : '#ffffff', rotate: 90, border: true, size: 8 } });
   rows.push(head);
-  rowHeights[2] = Math.min(150, Math.max(40, Math.ceil(Math.max(10, ...chartCells.map((c) => c.label.length), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length)) * 5.6)));
+  rowHeights[top + 2] = Math.min(150, Math.max(40, Math.ceil(Math.max(10, ...chartCells.map((c) => c.label.length), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length)) * 5.6)));
   const covers = (bars, c) => { for (const b of bars) if (b.start < c.end && b.end > c.start) return b.color; return null; };
   for (const r of model.rows) {
     const line = model.columns.map((c, k) => {
@@ -150,8 +176,8 @@ export function reportXlsx(model) {
     }
     rows.push(line);
   }
-  merges.push(`A1:${colLetter(Math.max(0, nCols - 1))}1`);
+  merges.push(`A${top + 1}:${colLetter(Math.max(0, nCols - 1))}${top + 1}`);
   const colWidths = [...model.columns.map((c) => Math.max(4, Math.round(c.w / 7))), ...chartCells.map(() => 2.6)];
-  return buildXlsx({ name: 'Harmonogram', rows, rowHeights, merges, colWidths, freeze: { row: 3, col: nCols } });
+  return buildXlsx({ name: 'Harmonogram', rows, rowHeights, merges, colWidths, freeze: { row: top + 3, col: nCols } });
 }
 const colLetter = (i) => { let s = ''; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };

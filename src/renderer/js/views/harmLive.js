@@ -2,7 +2,7 @@
 // Dane twarde edytujesz w komórkach; Start, Koniec i klucz liczy program. Przycisk „Ukryj dane” chowa kolumny z listy ukrywanych (domyślnie „czerwone”).
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog } from '../ui.js';
 import * as H from '../logic/harm.js';
-import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
+import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
 import { watchHarm, saveSettings } from '../harmStore.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
@@ -29,12 +29,16 @@ function loadFilters() {
   const saved = lsGet(LS.filters, {}) || {};
   const keys = new Set(COLS.map((c) => c.key));
   const filters = {};
-  for (const [k, v] of Object.entries(saved.filters || {})) if (keys.has(k) && Array.isArray(v)) filters[k] = new Set(v.map(String));
+  for (const [k, v] of Object.entries(saved.filters || {})) {
+    if (!keys.has(k)) continue;
+    if (Array.isArray(v)) filters[k] = new Set(v.map(String));
+    else if (v && v.range) filters[k] = rangeFilter(v.from, v.to);   // zakres dat
+  }
   const sorts = (Array.isArray(saved.sorts) ? saved.sorts : []).filter((x) => x && keys.has(x.key)).map((x) => ({ key: x.key, ascending: x.ascending !== false }));
   return { filters, sorts };
 }
 
-export function mountHarmLive(el) {
+export function mountHarmLive(el, appCtx) {
   const st = {
     m: null, days: null, data: null, ...loadFilters(), shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
@@ -42,7 +46,7 @@ export function mountHarmLive(el) {
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
-  const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
+  const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
   let syncTools = () => {};   // stan ikon paska (ustawiany niżej)
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
@@ -95,7 +99,7 @@ export function mountHarmLive(el) {
   function openFilter(c) {
     const cur = st.sorts.find((s) => s.key === c.key);
     columnFilterDialog({
-      title: c.title, options: filterOptions(st.komisOpt.show && st.komisOpt.filter ? [...st.data.rows, ...st.data.komisRows.values()] : st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
+      title: c.title, options: filterOptions(st.komisOpt.show && st.komisOpt.filter ? [...st.data.rows, ...st.data.komisRows.values()] : st.data.rows, COLS, st.filters, val, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null, dateRange: !!c.isDate,
       onApply: (filter, sort) => {
         if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
         st.sorts = st.sorts.filter((s) => s.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
@@ -155,6 +159,7 @@ export function mountHarmLive(el) {
     const all = st.data.rows;
     const maxEnd = Math.max(Date.now(), ...all.map((r) => res.get(r.id)?.end || 0));
     shareDialog({
+      user: appCtx && appCtx.user ? (appCtx.user.name || appCtx.user.email || '') : '',
       cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), komisSummaryList(), new Set(), { inline: st.komisOpt.inline }), komisShown: st.komisOpt.show, selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
       axisStart: axisStartMs(H.localNow().getTime(), st.shift), maxEnd, nowMs: H.localNow().getTime(),

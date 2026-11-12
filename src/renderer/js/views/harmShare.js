@@ -13,6 +13,18 @@ const lsSet = (v) => { try { localStorage.setItem(LS_KEY, JSON.stringify(v)); } 
 const fmtDay = (ms) => fmtDt(ms).slice(0, 10);
 const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
 
+/** Logo programu (img/logo.png) zmniejszone do 128 px jako data URI – do nagłówka raportu. Raz na sesję. */
+let logoCache = null;
+export function loadLogo() {
+  if (!logoCache) logoCache = new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => { try { const c = document.createElement('canvas'); c.width = 128; c.height = 128; c.getContext('2d').drawImage(img, 0, 0, 128, 128); resolve(c.toDataURL('image/png')); } catch { resolve(null); } };
+    img.onerror = () => resolve(null);
+    img.src = 'img/logo.png';
+  });
+  return logoCache;
+}
+
 /** SVG → płótno → JPG/PNG (base64). Skala ograniczona do rozmiarów, które przeglądarka potrafi narysować. */
 export async function svgToImage(svg, width, height, { scale = 2, type = 'image/jpeg', quality = 0.95 } = {}) {
   const s = Math.max(0.2, Math.min(scale, 32000 / width, 32000 / height, Math.sqrt(200e6 / (width * height))));
@@ -37,13 +49,19 @@ export function shareDialog(ctx) {
     format: saved.format || 'jpg', rows: 'screen', komis: ctx.komisShown !== false, levels: new Set([1, 2, 3].filter((l) => !ctx.levelsHidden.has(l))),
     cols: new Set(ctx.shownKeys), chart: saved.chart !== false, interval: ctx.interval, title: saved.title || 'Harmonogram',
     pageSize: saved.pageSize || 'A4', landscape: saved.landscape !== false, scale: saved.scale || 2,
+    inRange: saved.inRange !== false,   // wiersze tylko z operacjami trwającymi w zakresie dat
+    // nagłówek firmowy (zapamiętany na tym komputerze); osoba udostępniająca = zalogowany użytkownik
+    brand: saved.brand !== false, company: saved.company ?? 'ZKS Ferrum', dept: saved.dept ?? 'Wydział Obróbki Mechanicznej',
+    program: saved.program ?? 'ZKS PO – Harmonogram produkcji', owner: saved.owner ?? '', sharer: ctx.user || '',
   };
+  let logo = null;   // logo programu jako obraz w raporcie (data URI, 128 px)
+  loadLogo().then((d) => { logo = d; schedule(); });
   const descendantsOf = (id) => ctx.rowsAll.filter((r) => { for (let p = r.parent; p != null; p = parentOf(p)) if (p === id) return true; return false; });
   const parentOf = (id) => { const r = ctx.rowsAll.find((x) => x.id === id); return r ? r.parent : null; };
   const fromI = h('input', { type: 'text', value: fmtDay(ctx.axisStart), style: { width: '100px', padding: '3px' } });
   // domyślny zakres osi: od początku osi na ekranie, najwyżej 30 dni (czytelny raport); dalszy zakres wpisujesz ręcznie
   const toI = h('input', { type: 'text', value: fmtDay(Math.min(ctx.maxEnd, ctx.axisStart + 30 * 86400000)), style: { width: '100px', padding: '3px' } });
-  const titleI = h('input', { type: 'text', value: st.title, style: { width: '320px', padding: '3px' }, oninput: () => { st.title = titleI.value; } });
+  const titleI = h('input', { type: 'text', value: st.title, style: { width: '320px', padding: '3px' }, oninput: () => { st.title = titleI.value; schedule(); } });
   const info = h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap', margin: '6px 0' } });
 
   // --- wybór wierszy, kolumn i osi → model raportu
@@ -55,19 +73,25 @@ export function shareDialog(ctx) {
   }
   function buildModel() {
     const cols = ctx.cols.filter((c) => st.cols.has(c.key));
-    const rows = pickRows();
+    let rows = pickRows();
     let chart = null;
+    const useRange = st.chart || st.inRange;
+    const from = useRange ? parseDateTime(fromI.value.trim()) : null, to = useRange ? parseDateTime(toI.value.trim()) : null;
+    if (useRange && (from == null || to == null || to < from)) throw new Error('Zakres dat: wpisz poprawne daty od – do (np. 10.11.2026 – 31.12.2026)');
+    // tylko operacje, które w zakresie trwają (zaczęły się przed końcem i kończą po początku); bez terminów – pomijane
+    if (st.inRange) rows = rows.filter((r) => { const b = ctx.barsOf(r), span = b.frame || b.bars[0]; return span && span.start < to + 86400000 && span.end > from; });
     if (st.chart) {
-      const from = parseDateTime(fromI.value.trim()), to = parseDateTime(toI.value.trim());
-      if (from == null || to == null || to <= from) throw new Error('Wykres: wpisz poprawny zakres dat od – do (np. 10.11.2026 – 31.12.2026)');
       const iv = intervalOf(st.interval);
       const cells = buildCells(from, to + 86400000, st.interval, ctx.holidays).filter((c) => c.start < to + 86400000);
       chart = { cells, cellW: 18, nominalHours: iv.hours, nowMs: ctx.nowMs };
     }
     const sub = [`Wygenerowano: ${fmtDt(Date.now() - new Date().getTimezoneOffset() * 60000)}`, `wierszy: ${rows.length}`,
       st.chart ? `oś: ${fromI.value} – ${toI.value}, interwał ${intervalOf(st.interval).label}` : '', `poziomy: ${[3, 2, 1].filter((l) => st.levels.has(l)).map((l) => ['', 'I', 'II', 'III'][l]).join(', ')}`, st.komis ? 'z podsumowaniem komisów' : ''].filter(Boolean).join('   ·   ');
+    const now = new Date(), p2 = (n) => String(n).padStart(2, '0');
+    const brand = st.brand ? { logo, company: st.company.trim(), dept: st.dept.trim(), sharer: st.sharer.trim() ? 'Udostępnił: ' + st.sharer.trim() : '',
+      program: st.program.trim(), owner: st.owner.trim() ? 'Właściciel programu: ' + st.owner.trim() : '', date: `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${now.getFullYear()} ${p2(now.getHours())}:${p2(now.getMinutes())}` } : null;
     return {
-      title: st.title.trim(), subtitle: sub, font: 11, rowH: 22, chart,
+      title: st.title.trim(), subtitle: sub, font: 11, rowH: 22, chart, brand,
       columns: cols.map((c) => ({ key: c.key, title: c.title, w: c.isDate ? 104 : c.key === 'element' ? 260 : Math.max(c.w, 34), vertical: !!c.vertical })),
       rows: rows.map((r) => ({ ...ctx.rowStyle(r), cells: cols.map((c) => ctx.cellOf(r, c)), ...ctx.barsOf(r) })),
     };
@@ -82,8 +106,20 @@ export function shareDialog(ctx) {
       info.textContent = `Wierszy: ${m.rows.length}, kolumn tabeli: ${m.columns.length}${m.chart ? `, kolumn osi: ${m.chart.cells.length}` : ''}. Rozmiar obrazu: ${L.width} × ${L.height} px`
         + (pageScale ? `\nStrony: ${pageScale.pages}, skala na stronie: ${Math.round(pageScale.scale * 100)}%` + (pageScale.scale < 0.55 ? ' – mało czytelne: zawęź zakres dat, wybierz dłuższy interwał, mniej kolumn albo A3' : '') : '')
         + (big ? '\nUwaga: bardzo duży raport – zawęź zakres dat, wybierz dłuższy interwał albo mniej wierszy.' : '');
-    } catch (e) { info.className = 'err'; info.textContent = e.message; }
+      renderPreview(m);
+    } catch (e) { info.className = 'err'; info.textContent = e.message; clear(preview); }
   }
+  // podgląd na żywo: pierwsze wiersze raportu (PDF/wydruk: pierwsza strona), dopasowany do szerokości okna
+  const preview = h('div', { style: { border: '1px solid #ccc', background: '#fff', maxHeight: '64vh', overflow: 'auto', margin: '6px 0' } });
+  function renderPreview(m) {
+    const paged = st.format === 'pdf' || st.format === 'print';
+    const n = paged ? reportPagesHtml(m, { pageSize: st.pageSize, landscape: st.landscape }).perPage : 40;
+    const { svg } = reportSvg(m, { from: 0, to: Math.min(m.rows.length, n), page: paged ? 'Strona 1 – podgląd' : '' });
+    preview.innerHTML = svg.replace('<svg ', '<svg style="width:100%;height:auto;display:block" ');
+    if (m.rows.length > n) preview.append(h('div', { class: 'muted', style: { padding: '4px 8px', fontSize: '12px' } }, `Podgląd: ${n} z ${m.rows.length} wierszy${paged ? ' (pierwsza strona)' : ''}.`));
+  }
+  let timer = null;
+  const schedule = () => { clearTimeout(timer); timer = setTimeout(refreshInfo, 200); };
 
   // --- elementy okna
   const radio = (name, value, label, cur, onchange, disabled) => h('label', { style: { marginRight: '12px', opacity: disabled ? 0.5 : 1 } },
@@ -93,7 +129,14 @@ export function shareDialog(ctx) {
   const intervalSel = h('select', { onchange: () => { st.interval = intervalSel.value; refreshInfo(); } }, ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
   const chartCb = h('input', { type: 'checkbox', checked: st.chart, onchange: () => { st.chart = chartCb.checked; refreshInfo(); } });
-  fromI.addEventListener('change', refreshInfo); toI.addEventListener('change', refreshInfo);
+  fromI.addEventListener('change', refreshInfo); toI.addEventListener('change', refreshInfo); fromI.addEventListener('input', schedule); toI.addEventListener('input', schedule);
+  const inRangeCb = h('input', { type: 'checkbox', checked: st.inRange, onchange: () => { st.inRange = inRangeCb.checked; refreshInfo(); } });
+  // pola nagłówka firmowego
+  const brandCb = h('input', { type: 'checkbox', checked: st.brand, onchange: () => { st.brand = brandCb.checked; brandFields.style.display = st.brand ? '' : 'none'; refreshInfo(); } });
+  const bf = (key, label, ph, w = '200px') => { const i = h('input', { type: 'text', value: st[key], placeholder: ph, style: { width: w, padding: '3px' }, oninput: () => { st[key] = i.value; schedule(); } }); return h('label', { style: { display: 'inline-flex', flexDirection: 'column', fontSize: '12px', marginRight: '10px' } }, label, i); };
+  const brandFields = h('div', { style: { display: st.brand ? '' : 'none', marginTop: '4px' } },
+    bf('company', 'Firma', 'ZKS Ferrum'), bf('dept', 'Wydział', 'Wydział Obróbki Mechanicznej'), bf('sharer', 'Udostępnia', 'imię i nazwisko'),
+    bf('program', 'Program', 'nazwa programu'), bf('owner', 'Właściciel programu', 'imię i nazwisko'));
   function renderParts() {
     clear(fmtBox); clear(rowBox); clear(lvlBox); clear(colBox); clear(pageBox); clear(imgBox);
     fmtBox.append(...[['jpg', 'JPG (dobra jakość)'], ['clip', 'Obraz do schowka'], ['xlsx', 'Excel'], ['pdf', 'PDF'], ['print', 'Wydruk']].map(([v, l]) => radio('fmt', v, l, st.format, (x) => { st.format = x; })));
@@ -123,7 +166,7 @@ export function shareDialog(ctx) {
     let model;
     try { model = buildModel(); } catch (e) { toast(e.message); return; }
     if (!model.rows.length) { toast('Brak wierszy do pokazania (sprawdź wiersze i poziomy)'); return; }
-    lsSet({ format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale });
+    lsSet({ format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale, inRange: st.inRange, brand: st.brand, company: st.company, dept: st.dept, program: st.program, owner: st.owner });
     const base = `harmonogram_${stamp()}`;
     go.disabled = true; go.textContent = 'Przygotowuję…';
     try {
@@ -146,15 +189,19 @@ export function shareDialog(ctx) {
     finally { go.disabled = false; go.textContent = 'Udostępnij'; }
   } }, 'Udostępnij');
 
-  const m = modal('Udostępnij harmonogram', h('div', {},
+  // dwie kolumny: z lewej opcje, z prawej podgląd na żywo (cały czas widoczny)
+  const m = modal('Udostępnij harmonogram', h('div', {}, h('div', { style: { display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' } }, h('div', { style: { flex: '1 1 460px', minWidth: '420px', maxHeight: '74vh', overflow: 'auto', paddingRight: '6px' } },
     section('Format', fmtBox),
     section('Tytuł raportu', titleI),
     section('Wiersze', rowBox),
     section('Poziomy', lvlBox),
     section('Kolumny', colQuick, colBox),
-    section('Wykres', h('label', {}, chartCb, ' pokaż wykres'), h('span', { style: { marginLeft: '14px' } }, 'od '), fromI, ' do ', toI, h('span', { style: { marginLeft: '14px' } }, 'interwał '), intervalSel),
-    pageBox, imgBox, info,
+    section('Zakres dat', 'od ', fromI, ' do ', toI, h('label', { style: { marginLeft: '14px' } }, chartCb, ' pokaż wykres'), h('span', { style: { marginLeft: '14px' } }, 'interwał '), intervalSel,
+      h('div', { style: { marginTop: '4px' } }, h('label', {}, inRangeCb, ' tylko operacje trwające w tym zakresie (bez zakończonych wcześniej i jeszcze nierozpoczętych)'))),
+    section('Nagłówek raportu', h('label', {}, brandCb, ' logo, firma, wydział i osoba udostępniająca z lewej; program i właściciel z prawej'), brandFields),
+    pageBox, imgBox),
+    h('div', { style: { flex: '1 1 520px', minWidth: '420px', position: 'sticky', top: 0 } }, h('b', {}, 'Podgląd na żywo'), info, preview)),
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), go)), { wide: true });
-  m.root.style.width = 'min(900px, 96vw)'; m.root.style.maxWidth = '96vw';
+  m.root.style.width = 'min(1500px, 97vw)'; m.root.style.maxWidth = '97vw';
   refreshInfo();
 }
