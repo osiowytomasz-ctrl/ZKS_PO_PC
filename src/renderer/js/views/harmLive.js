@@ -18,7 +18,7 @@ import { shareDialog } from './harmShare.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { confirm: 'zks.harm.confirmChanges', filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const LS = { chart: 'zks.harm.chartOpt', confirm: 'zks.harm.confirmChanges', filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
 const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
 const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -45,7 +45,9 @@ export function mountHarmLive(el, appCtx) {
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
     // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
-    confirmChanges: lsGet(LS.confirm, true) !== false,   // okno potwierdzenia przed zapisem zmiany komórki
+    confirmChanges: lsGet(LS.confirm, true) !== false,
+    // wykres: pola napisu na pasku (w tej kolejności), wielkość czcionki napisów [px przy 100%; 0 = jak w tabeli], kolor komisu na pasku
+    chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, komisColor: false, ...lsGet(LS.chart, {}) },   // okno potwierdzenia przed zapisem zmiany komórki
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
@@ -75,6 +77,15 @@ export function mountHarmLive(el, appCtx) {
     let list = [...st.data.komisRows.values()];
     if (st.komisOpt.filter) { list = visibleRows(list, COLS, st.filters, val); if (st.sorts.length) list = sortRows(list, COLS, st.sorts, val); }
     return list;
+  };
+  // napis na pasku wykresu z pól wybranych w Ustawieniach (kolejność jak na liście)
+  const CHART_FIELDS = [['lp', 'lp.'], ['komis', 'Komis'], ['client', 'Klient'], ['element', 'Opis'], ['hours', 'Czas [h]'], ['station', 'Stanowisko'], ['start', 'Start'], ['koniec', 'Koniec'], ['wysylka', 'Wysyłka']];
+  const chartLabel = (r) => st.chartOpt.fields.map((k) => (k === 'hours' ? r.godziny : k === 'station' ? r.stanowisko : ['start', 'koniec', 'wysylka'].includes(k) ? noMin(r[k]) : r[k]))
+    .map((v) => String(v ?? '').trim()).filter(Boolean).join(' - ');
+  // tło paska: kolor maszyny; z opcją „kolor komisu” – 10 px koloru maszyny z lewej, reszta w kolorze komisu z Ustawień
+  const barBackground = (r, stationColor) => {
+    const kc = st.chartOpt.komisColor ? komisColor(r.komis) : null;
+    return kc ? `linear-gradient(to right, ${stationColor} 0 10px, ${parseSheetColor(kc.bg, stationColor)} 10px)` : stationColor;
   };
   const shownCols = () => COLS.filter((c) => !(st.compact && st.hideSet.has(c.key)));
 
@@ -197,7 +208,7 @@ export function mountHarmLive(el, appCtx) {
       barsOf: (r) => {
         const done = String(r.status).trim().toLowerCase() === 'zak.';
         if (r.komisRow) return { label: [r.komisName, r.hoursShown, r.status].filter(Boolean).join(' · '), frame: r.segs.length ? { start: r.ms.start, end: r.ms.koniec } : null, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: c })) };
-        const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
+        const label = chartLabel(r);
         if (r.segs && r.segs.length) return { label, frame: { start: Math.min(...r.segs.map((x) => x[0])), end: Math.max(...r.segs.map((x) => x[1])) }, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: done ? ZAK_BAR : c })) };
         const rr = res.get(r.id);
         return { label, frame: null, bars: rr && rr.start != null && rr.end != null ? [{ start: rr.start, end: rr.end, color: done ? ZAK_BAR : stationBg(r) }] : [] };
@@ -380,6 +391,7 @@ export function mountHarmLive(el, appCtx) {
     const num = (value, min, max) => h('input', { type: 'number', value: String(value), min: String(min), max: String(max), style: { width: '80px', padding: '4px' } });
     const rowHI = num(st.layout.rowH, 16, 80), dateWI = num(st.layout.dateW, 60, 220);
     const kOpt = { ...st.komisOpt };
+    const cOpt = { ...st.chartOpt, fields: [...st.chartOpt.fields] };   // wykres: pola napisu, czcionka, kolor komisu
     const kCheck = (key, label, tip) => h('label', { style: { display: 'block', margin: '3px 0' }, title: tip || '' }, h('input', { type: 'checkbox', checked: !!kOpt[key], onchange: (e) => { kOpt[key] = e.target.checked; } }), ' ' + label);
     // święta: tabela dat (dd.mm.rrrr) z opisem; w nagłówku osi są bordowe z białą pogrubioną czcionką
     const fmtDay = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso; };
@@ -426,6 +438,7 @@ export function mountHarmLive(el, appCtx) {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
         st.komisOpt = kOpt; lsSet(LS.komis, kOpt);
+        st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) }; lsSet(LS.chart, st.chartOpt);
         await saveSettings(list, komisList, holidays); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
@@ -435,6 +448,14 @@ export function mountHarmLive(el, appCtx) {
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Lista kolumn chowanych ikoną oka (zapisuje się od razu)', onclick: hideDialog }, 'Które dane ukrywać…'), h('span', { class: 'muted' }, 'kolumny chowane ikoną oka na pasku')),
       h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: st.confirmChanges, onchange: (e) => { st.confirmChanges = e.target.checked; lsSet(LS.confirm, st.confirmChanges); } }), ' Potwierdzaj zmiany komórek (okno ze starą i nową wartością przed zapisem)'),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres'),
+      h('p', { class: 'muted' }, 'Napis na pasku operacji (zaznaczone pola, w tej kolejności) i wielkość jego czcionki. Zapisywane na tym komputerze.'),
+      h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 14px' } }, ...CHART_FIELDS.map(([k, label]) => h('label', {}, h('input', { type: 'checkbox', checked: cOpt.fields.includes(k),
+        onchange: (e) => { cOpt.fields = e.target.checked ? [...cOpt.fields, k] : cOpt.fields.filter((x) => x !== k); } }), ' ' + label))),
+      h('div', { class: 'row', style: { alignItems: 'center', marginTop: '6px' } }, 'Czcionka napisów na wykresie: ',
+        (() => { const sel = h('select', { onchange: () => { cOpt.font = Number(sel.value); } }, h('option', { value: 0 }, 'jak w tabeli'), ...[8, 9, 10, 11, 12, 13, 14, 16, 18].map((n) => h('option', { value: n }, n + ' px'))); sel.value = String(cOpt.font || 0); return sel; })()),
+      h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: !!cOpt.komisColor, onchange: (e) => { cOpt.komisColor = e.target.checked; } }),
+        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
@@ -595,15 +616,16 @@ export function mountHarmLive(el, appCtx) {
       g.leftRows.append(line);
       const chartRow = h('div', { onclick: () => selectRow(r.id), ondblclick: () => editTree(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, style: { position: 'absolute', left: 0, top: i * ROW + 'px', width: g.chartW + 'px', height: ROW + 'px', cursor: 'pointer', boxSizing: 'border-box' } });   // klik w wiersz wykresu
       g.dyn.append(chartRow); g.rowEls.set(r.id, { line, chart: chartRow, komis: r.komis });
-      const bg = done ? ZAK_BAR : parseSheetColor(r.stanowiskoBg, '#cccccc');
+      const bg = done ? ZAK_BAR : barBackground(r, parseSheetColor(r.stanowiskoBg, '#cccccc'));
+      const LF = st.chartOpt.font ? st.chartOpt.font * st.scale : FONT;   // czcionka napisów na wykresie
       const tip = [r.komis, r.element, r.stanowisko].filter(Boolean).join(' - ') + `\n${r.start} → ${r.koniec}`;
-      const label = [r.komis, r.element, r.godziny].filter((v) => String(v).trim()).join(' - ');
+      const label = chartLabel(r);
       const hoursAt = (ms) => (ms - chart.axisStart.getTime()) / 3600000;
       // każdy pasek wypełniony kolorem stanowiska z czarną ramką; węzeł złożony z dzieci (operacja albo detal) ma jedną czarną ramkę od pierwszego
       // do ostatniego odcinka, a w środku odcinki wszystkich subsuboperacji w kolorach ich stanowisk, oddzielone białymi przerwami (plan i kolejność stanowisk)
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
-        if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
+        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: LF + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
+        if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - LF * 1.25) / 2) + 'px', lineHeight: '1.25', ...(st.chartOpt.komisColor ? { paddingLeft: '10px' } : {}) } }, label));
         g.dyn.append(box);
       };
       if (r.segs && r.segs.length) {
@@ -611,8 +633,8 @@ export function mountHarmLive(el, appCtx) {
         const L = Math.min(...lefts), W = Math.max(2, Math.max(...rights) - L);
         if (Math.max(...rights) > 0) {
           const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: L + 'px', top: i * ROW + 2 + 'px', width: W + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', background: '#fff', fontSize: FONT + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000' } });
-          r.segs.forEach(([, , color], k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: done ? ZAK_BAR : color, borderRight: '1px solid #fff', boxSizing: 'border-box', pointerEvents: 'none' } })); });
-          if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - FONT * 1.25) / 2) + 'px', lineHeight: '1.25' } }, label));
+          r.segs.forEach(([, , color], k) => { const l = lefts[k] - L, w = Math.max(1, rights[k] - lefts[k]); box.append(h('div', { style: { position: 'absolute', left: l - 1 + 'px', top: 0, bottom: 0, width: w + 'px', background: done ? ZAK_BAR : barBackground(r, color), borderRight: '1px solid #fff', boxSizing: 'border-box', pointerEvents: 'none' } })); });
+          if (label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - LF * 1.25) / 2) + 'px', lineHeight: '1.25', fontSize: LF + 'px' } }, label));
           g.dyn.append(box);
         }
       } else if (!it.noBar) {
