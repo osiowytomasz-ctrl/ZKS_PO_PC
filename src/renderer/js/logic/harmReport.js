@@ -24,6 +24,7 @@ const DAY_BG = { work: '#00b050', sat: '#00b0f0', sun: '#ff0000', holiday: '#800
 const GRID = '#8c8c8c';
 
 /** Tekst przycięty do szerokości (szacunkowo, czcionka proporcjonalna). */
+const BAR_STRIP = 10;   // szerokość paska koloru maszyny przy kolorze operacji [px raportu]
 export function fitText(text, widthPx, fontPx) {
   const t = String(text ?? ''), max = Math.max(0, Math.floor((widthPx - 6) / (fontPx * 0.56)));
   return t.length <= max ? t : max <= 1 ? '' : t.slice(0, max - 1) + '…';
@@ -31,7 +32,7 @@ export function fitText(text, widthPx, fontPx) {
 
 /**
  * Geometria raportu. model = { title, subtitle, columns: [{title, w, vertical, text(row)}], rows: [{cells: [{text, bg, color, bold, italic, underline}],
- * bg, bars: [{start, end, color}], frame: {start, end} | null, label}], chart: null | {cells: [{start, end, hours, label, kind}], cellW, nowMs}, rowH, font }.
+ * bg, bars: [{start, end, color, fill?}] (fill – kolor operacji/komisu: z lewej STRIP px koloru stanowiska, reszta fill), frame: {start, end} | null, label}], chart: null | {cells: [{start, end, hours, label, kind}], cellW, nowMs}, rowH, font }.
  */
 export function layout(model) {
   const font = model.font || 11, rowH = model.rowH || 22;
@@ -105,17 +106,20 @@ export function reportSvg(model, { from = 0, to = model.rows.length, page = '' }
       cx += c.w;
     });
     if (!model.chart) return;
+    // pasek: kolor stanowiska; z kolorem operacji (fill) – z lewej STRIP px koloru stanowiska, reszta w kolorze operacji
+    const paintBar = (x, w, sg) => { if (!sg.fill) { rect(x, y + 2, w, rowH - 4, sg.color); return; } const sw = Math.min(BAR_STRIP, w / 3); rect(x, y + 2, w, rowH - 4, sg.fill); rect(x, y + 2, sw, rowH - 4, sg.color); };
     const end = tableW + chartW;
     const clipX = (v) => Math.min(end, v);
     if (r.frame && r.frame.end >= startMs) {
       const a = px(r.frame.start), b = clipX(px(r.frame.end));
       rect(a, y + 2, Math.max(1, b - a), rowH - 4, '#ffffff');
-      for (const sg of r.bars) { const sa = px(sg.start), sb = clipX(px(sg.end)); if (sb > sa) rect(sa, y + 2, Math.max(1, sb - sa - 1), rowH - 4, sg.color); }
+      for (const sg of r.bars) { const sa = px(sg.start), sb = clipX(px(sg.end)); if (sb > sa) paintBar(sa, Math.max(1, sb - sa - 1), sg); }
       rect(a, y + 2, Math.max(1, b - a), rowH - 4, null, '#000', 1);
       if (r.label) text(a + 3, y + rowH / 2 + font / 2.8, r.label, { bold: true });
     } else if (r.bars.length && r.bars[0].end >= startMs) {
       const sg = r.bars[0], a = px(sg.start), b = clipX(px(sg.end));
-      rect(a, y + 2, Math.max(2, b - a), rowH - 4, sg.color, '#000', 1);
+      paintBar(a, Math.max(2, b - a), sg);
+      rect(a, y + 2, Math.max(2, b - a), rowH - 4, null, '#000', 1);
       if (r.label) text(a + 3, y + rowH / 2 + font / 2.8, r.label, { bold: true });
     }
   });
@@ -186,7 +190,8 @@ export function reportXlsx(model) {
   for (const c of chartCells) head.push({ v: c.label, style: { bold: c.kind === 'holiday', bg: DAY_BG[c.kind] || DAY_BG.work, color: c.kind === 'sat' ? '#000000' : '#ffffff', rotate: 90, border: true, size: 8 } });
   rows.push(head);
   rowHeights[top + 2] = Math.min(150, Math.max(40, Math.ceil(Math.max(10, ...chartCells.map((c) => c.label.length), ...model.columns.filter((c) => c.vertical).map((c) => c.title.length)) * 5.6)));
-  const covers = (bars, c) => { for (const b of bars) if (b.start < c.end && b.end > c.start) return b.color; return null; };
+  // komórka osi w kolorze paska; z kolorem operacji (fill): pierwsza komórka paska w kolorze stanowiska, kolejne w kolorze operacji
+  const covers = (bars, c) => { for (const b of bars) if (b.start < c.end && b.end > c.start) return b.fill && b.start < c.start ? b.fill : b.color; return null; };
   for (const r of model.rows) {
     const line = model.columns.map((c, k) => {
       const cell = r.cells[k] || {};

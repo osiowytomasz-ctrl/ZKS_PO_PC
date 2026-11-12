@@ -235,9 +235,13 @@ export function mountHarmLive(el, appCtx) {
         const done = String(r.status).trim().toLowerCase() === 'zak.';
         if (r.komisRow) return { label: [r.komisName, r.hoursShown, r.status].filter(Boolean).join(' · '), frame: r.segs.length ? { start: r.ms.start, end: r.ms.koniec } : null, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: c })) };
         const label = chartLabel(r);
-        if (r.segs && r.segs.length) return { label, frame: { start: Math.min(...r.segs.map((x) => x[0])), end: Math.max(...r.segs.map((x) => x[1])) }, bars: r.segs.map(([s0, e0, c]) => ({ start: s0, end: e0, color: done ? ZAK_BAR : c })) };
+        // kolor operacji (komisu) jak na ekranie: z lewej pasek koloru maszyny, reszta w kolorze komisu (opcja „Kolor komisu na pasku”)
+        const kcb = !done && st.chartOpt.komisColor ? komisColor(r.komis) : null;
+        const fill = kcb ? parseSheetColor(kcb.bg, null) : null;
+        const bar = (start, end, color) => (fill ? { start, end, color, fill } : { start, end, color });
+        if (r.segs && r.segs.length) return { label, frame: { start: Math.min(...r.segs.map((x) => x[0])), end: Math.max(...r.segs.map((x) => x[1])) }, bars: r.segs.map(([s0, e0, c]) => bar(s0, e0, done ? ZAK_BAR : c)) };
         const rr = res.get(r.id);
-        return { label, frame: null, bars: rr && rr.start != null && rr.end != null ? [{ start: rr.start, end: rr.end, color: done ? ZAK_BAR : stationBg(r) }] : [] };
+        return { label, frame: null, bars: rr && rr.start != null && rr.end != null ? [bar(rr.start, rr.end, done ? ZAK_BAR : stationBg(r))] : [] };
       },
     });
   }

@@ -33,3 +33,13 @@ test('raport: SVG z tabelą, osią i paskami; strony PDF dzielą wiersze; Excel 
   assert.equal(x[0], 0x50);
   assert.equal(fitText('abcdefghijklmnop', 40, 11), 'abcd…'); assert.equal(fitText('ab', 40, 11), 'ab');
 });
+
+test('raport: kolor operacji (komisu) na pasku – pasek maszyny z lewej, reszta w kolorze operacji; Excel tak samo', () => {
+  const m = model(1);
+  m.rows[0].bars = [{ start: D(10, 0), end: D(12, 0), color: '#0070c0', fill: '#ff66ff' }];
+  const { svg } = reportSvg(m);
+  assert.ok(svg.includes('fill="#ff66ff"')); assert.ok(svg.includes('fill="#0070c0"'));
+  const x = reportXlsx(m);
+  const txt = Buffer.from(x).toString('latin1');
+  assert.ok(/FF66FF/i.test(txt)); assert.ok(/0070C0/i.test(txt));   // pierwsza komórka – kolor maszyny, kolejne – kolor operacji
+});
