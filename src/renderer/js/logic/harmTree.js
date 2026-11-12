@@ -187,5 +187,5 @@ export function planTree(opsByLp, origIds, nodes, { stations = [], parseNum = (t
   }
   for (const id of deleted) changes.push(`Usunięcie ${id}${opsByLp[id].element ? ' – ' + opsByLp[id].element : ''}`);
   for (const [lp, op] of refs) { changes.push(`Poprawione zależności operacji ${lp}: ${op.preds.join(', ')}`); sets.push([lp, op]); }
-  return { errors: [...new Set(errors)], warnings, changes, remove: [...remove], sets };
+  return { errors: [...new Set(errors)], warnings, changes, remove: [...remove], sets, deleted: [...deleted] };
 }

@@ -1,0 +1,49 @@
+rules_version = '2';
+// Reguły Firestore (projekt harmonohram-zks) – poziomy dostępu do Harmonogramu z claimu `harm` w tokenie (backend/Firebase.gs):
+//   god     – odczyt, dodawanie, edycja, usuwanie, ustawienia (config/main: stanowiska, kolory komisów, święta)
+//   master  – odczyt, dodawanie, edycja (usuwanie blokują aplikacje; reguła pozwala usuwać klucze, bo zmiana numeru = przeniesienie)
+//   clerik  – odczyt i dodawanie nowych operacji (bez zmiany i usuwania istniejących)
+//   tourist – tylko odczyt
+//   none    – brak dostępu
+// Token bez `harm` (stary Firebase.gs): zapis w Planie lub Grafiku = god, odczyt = tourist.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function tok() { return request.auth.token; }
+    function legacy() {
+      return (tok().get('plan', 'none') == 'write' || tok().get('grafik', 'none') == 'write') ? 'god'
+        : ((tok().get('plan', 'none') == 'read' || tok().get('grafik', 'none') == 'read') ? 'tourist' : 'none');
+    }
+    function lvl() { return request.auth == null ? 'none' : tok().get('harm', legacy()); }
+    function canView() { return lvl() in ['tourist', 'clerik', 'master', 'god']; }
+    function canAdd() { return lvl() in ['clerik', 'master', 'god']; }
+    function canEdit() { return lvl() in ['master', 'god']; }
+    function isGod() { return lvl() == 'god'; }
+    // tylko nowe klucze w mapie ops (bez zmiany i usuwania istniejących operacji)
+    function onlyAdds() {
+      let before = resource.data.get('ops', {});
+      let after = request.resource.data.get('ops', {});
+      let d = after.diff(before);
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ops'])
+        && d.removedKeys().size() == 0 && d.changedKeys().size() == 0;
+    }
+
+    // operacje harmonogramu: dokumenty-paczki {ops: {lp: operacja}}
+    match /harm_ops/{chunk} {
+      allow read: if canView();
+      allow create: if canAdd() && request.resource.data.keys().hasOnly(['ops']);
+      allow update: if canEdit() || (canAdd() && onlyAdds());
+      allow delete: if isGod();
+    }
+
+    // ustawienia harmonogramu: stanowiska, kolory komisów, święta
+    match /config/{doc} {
+      allow read: if canView();
+      allow write: if isGod();
+    }
+
+    // test połączenia z Ustawień aplikacji PC
+    match /test/{doc} {
+      allow read, write: if canView();
+    }
+  }
+}

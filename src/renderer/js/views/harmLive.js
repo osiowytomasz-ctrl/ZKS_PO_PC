@@ -14,6 +14,8 @@ import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holid
 import { parseDateTime } from '../logic/harmImport.js';
 import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../logic/harmDay.js';
 import { shareDialog } from './harmShare.js';
+import { harmLevel, onHarmLevel } from '../fb.js';
+import { harmAccess, legacyLevel } from '../logic/harmAccess.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
@@ -52,10 +54,14 @@ export function mountHarmLive(el, appCtx) {
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
   let syncTools = () => {};
+  // poziom dostępu (GOD / MASTER / CLERIK / TOURIST / ---) z tokenu Firebase; bez niego (stary serwer) – jak dotychczas wg uprawnień Planu/Grafiku
+  const acc = () => harmAccess(harmLevel() ?? legacyLevel(appCtx && appCtx.user && appCtx.user.permissions));
+  const offLevel = onHarmLevel(() => { if (!el.isConnected) { offLevel(); return; } syncTools(); recompute(); });
   setOpsSource(() => (st.m ? st.m.opsByLp : {}));   // stan sprzed zmiany – do cofania
   // Zmiana komórki: informacja o zmianie i potwierdzenie (można wyłączyć w Ustawieniach), potem zapis; po zapisie można cofnąć (↶, Ctrl+Z)
   const saveWithConfirm = async (id, col, oldText, newText) => {
     if (String(oldText ?? '').trim() === String(newText ?? '').trim()) return false;
+    if (!acc().edit) { toast(`Poziom ${acc().label}: edycja jest zablokowana`); return false; }
     const lp = id;
     if (st.confirmChanges && !(await confirmBox('Potwierdź zmianę', `Operacja ${lp}\n${col.title}:  „${String(oldText || '').trim() || '—'}”  →  „${String(newText || '').trim() || '—'}”\n\nZapisać zmianę?`, 'Zapisz'))) return false;
     const ok = await saveCell(st.m.opsByLp, id, col, String(newText ?? '').trim());
@@ -63,6 +69,7 @@ export function mountHarmLive(el, appCtx) {
     return ok;
   };
   const doUndo = async () => {
+    if (!acc().edit) return;
     try { const label = await undoLast(); toast(label ? `Cofnięto: ${label}` : 'Nie ma zmian do cofnięcia'); }
     catch (e) { toast('Nie cofnięto: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
   };   // stan ikon paska (ustawiany niżej)
@@ -93,6 +100,7 @@ export function mountHarmLive(el, appCtx) {
   let stop = null, grJson = '', grTimer = null;
   const recompute = () => {
     if (!st.m) return;
+    if (!acc().view) { st.data = null; clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Brak dostępu do Harmonogramu (poziom ---). Poziom ustawia administrator w zakładce Uzytkownicy, kolumna „Harmonogram”.')); return; }
     st.data = buildHarmData(st.m.opsByLp, st.days || {}, st.m.cfg, H.localNow().getTime());
     if (st.editing) { st.pending = true; return; }
     draw();
@@ -174,7 +182,7 @@ export function mountHarmLive(el, appCtx) {
   // Przeciągać można tylko w obrębie jednego rodzica; litery się zamieniają, a powiązania (także z innych operacji) poprawiają się same.
   // Edytor gałęzi (dwuklik na operacji albo „Edycja gałęzi…” we właściwościach): numery, opisy, stanowiska, czasy, zależności, kolejność,
   // dodawanie i usuwanie suboperacji, notatnik i plik .txt – views/harmTreeEditor.js
-  const editTree = (rootId) => { if (st.m) treeEditor({ getOps: () => st.m.opsByLp, rootId, stations: stationList(st.m.cfg) }); };
+  const editTree = (rootId) => { if (st.m && acc().add) treeEditor({ getOps: () => st.m.opsByLp, rootId, stations: stationList(st.m.cfg), access: acc() }); };
 
 
   // Udostępnianie: dane dla okna (wiersze, kolumny, style i paski jak na ekranie)
@@ -230,7 +238,7 @@ export function mountHarmLive(el, appCtx) {
       subs.length ? h('div', { style: { marginTop: '6px' } }, h('b', {}, `${r.depth === 1 ? 'Subsuboperacje' : 'Suboperacje'} (${subs.length}):`), ...subs.map((x) => h('div', { style: { margin: '2px 0 2px 12px' } }, `${x.lp}  ·  ${x.start || '—'} → ${x.koniec || '—'}  ·  ${x.hours ? x.hours + ' h' : ''}${x.element ? '  ·  ' + x.element : ''}`))) : null,
     ].filter(Boolean);
     const m = modal('Operacja', h('div', {}, ...body, h('div', { class: 'actions' },
-      h('button', { class: 'btn', title: 'Edycja operacji z suboperacjami jako drzewo: numery, opisy, kolejność, nowe suboperacje, notatnik, plik .txt', onclick: () => { m.close(); editTree(r.id); } }, 'Edycja gałęzi…'),
+      acc().add ? h('button', { class: 'btn', title: acc().edit ? 'Edycja operacji z suboperacjami jako drzewo: numery, opisy, kolejność, nowe suboperacje, notatnik, plik .txt' : 'Dodawanie suboperacji do tej operacji (poziom ' + acc().label + ': bez zmian istniejących)', onclick: () => { m.close(); editTree(r.id); } }, acc().edit ? 'Edycja gałęzi…' : 'Dodaj suboperacje…') : null,
       h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))));
   }
 
@@ -342,6 +350,7 @@ export function mountHarmLive(el, appCtx) {
 
   // ---------- ustawienia harmonogramu (kolory stanowisk, nowe stanowiska, kolory komisów) ----------
   function stationsDialog() {
+    const god = acc().style;   // kolory i czcionki operacji, stanowiska, komisy i święta – tylko GOD
     const cur = stationList(st.m && st.m.cfg);
     const rows = cur.map((x) => ({ name: x.name, bg: x.bg, color: x.color, sum: !!x.sum, builtin: x.builtin }));
     const box = h('div', {});
@@ -438,8 +447,9 @@ export function mountHarmLive(el, appCtx) {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
         st.komisOpt = kOpt; lsSet(LS.komis, kOpt);
-        st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) }; lsSet(LS.chart, st.chartOpt);
-        await saveSettings(list, komisList, holidays); m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
+        if (god) st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) }; lsSet(LS.chart, st.chartOpt);
+        if (god) await saveSettings(list, komisList, holidays);
+        m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
     const m = modal('Ustawienia harmonogramu', h('div', {},
@@ -448,26 +458,26 @@ export function mountHarmLive(el, appCtx) {
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Lista kolumn chowanych ikoną oka (zapisuje się od razu)', onclick: hideDialog }, 'Które dane ukrywać…'), h('span', { class: 'muted' }, 'kolumny chowane ikoną oka na pasku')),
       h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: st.confirmChanges, onchange: (e) => { st.confirmChanges = e.target.checked; lsSet(LS.confirm, st.confirmChanges); } }), ' Potwierdzaj zmiany komórek (okno ze starą i nową wartością przed zapisem)'),
-      h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres'),
+      ...(god ? [h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres'),
       h('p', { class: 'muted' }, 'Napis na pasku operacji (zaznaczone pola, w tej kolejności) i wielkość jego czcionki. Zapisywane na tym komputerze.'),
       h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 14px' } }, ...CHART_FIELDS.map(([k, label]) => h('label', {}, h('input', { type: 'checkbox', checked: cOpt.fields.includes(k),
         onchange: (e) => { cOpt.fields = e.target.checked ? [...cOpt.fields, k] : cOpt.fields.filter((x) => x !== k); } }), ' ' + label))),
       h('div', { class: 'row', style: { alignItems: 'center', marginTop: '6px' } }, 'Czcionka napisów na wykresie: ',
         (() => { const sel = h('select', { onchange: () => { cOpt.font = Number(sel.value); } }, h('option', { value: 0 }, 'jak w tabeli'), ...[8, 9, 10, 11, 12, 13, 14, 16, 18].map((n) => h('option', { value: n }, n + ' px'))); sel.value = String(cOpt.font || 0); return sel; })()),
       h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: !!cOpt.komisColor, onchange: (e) => { cOpt.komisColor = e.target.checked; } }),
-        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”'),
+        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”')] : []),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
       kCheck('inline', 'Przypasuj pasek do pierwszego wystąpienia komisu (zamiast wszystkich na górze tabeli)'),
       kCheck('filter', 'Filtruj i sortuj także paski podsumowania (wg filtrów i sortowania kolumn)', 'Bez zaznaczenia paski są zawsze widoczne i ułożone wg pierwszego wystąpienia komisu'),
-      h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
+      ...(god ? [h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
       h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
       box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli. Nazwę komisu można poprawić w polu.'),
       kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta są w nagłówku osi czasu bordowe, z białą pogrubioną czcionką, a ich tło na wykresie jest białe jak w weekend.'),
-      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd),
+      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd)] : [h('p', { class: 'muted', style: { marginTop: '14px' } }, `Kolory i czcionki wykresu, stanowiska, kolory komisów i święta zmienia tylko poziom GOD (Twój: ${acc().label}).`)]),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: save }, 'Zapisz'))));
   }
 
@@ -590,11 +600,12 @@ export function mountHarmLive(el, appCtx) {
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
         const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
-            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro ? 'default' : 'text',
+            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro || !acc().edit ? 'default' : 'text',
             ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
         if (col.key === 'lp' && r.subCount) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje; resztę komórki, aby zmienić numer';
         if (!col.ro) cell.addEventListener('click', (ev) => {
           if (col.key === 'lp' && r.subCount && ev.offsetX < (20 + 26 * (r.depth || 0)) * st.scale) { toggleCollapse(r.id); return; }
+          if (!acc().edit) return;   // CLERIK, TOURIST: bez edycji komórek
           if (col.pred !== undefined) {
             predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveWithConfirm(r.id, col, text, lp));
             return;
@@ -610,7 +621,7 @@ export function mountHarmLive(el, appCtx) {
         });
         line.append(cell);
       }
-      line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕')));
+      line.append(h('div', { style: { flex: 1, textAlign: 'center' } }, acc().del ? h('button', { class: 'btn small', style: { padding: '0 4px', lineHeight: ROW - 6 + 'px' }, title: 'Usuń operację', onclick: () => removeOp(st.m.opsByLp, r.id) }, '✕') : null));
       line.addEventListener('mousedown', () => selectRow(r.id));
       line.addEventListener('contextmenu', (e) => { e.preventDefault(); selectRow(r.id); detail(r); });   // właściwości operacji: prawy przycisk myszy
       g.leftRows.append(line);
@@ -733,7 +744,7 @@ export function mountHarmLive(el, appCtx) {
   const komisBtn = iconBtn('sigma', 'Podsumowanie komisów – paski komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia', () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); });
   const hideBtn = iconBtn('eye', 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)', () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); });
   const broomBtn = iconBtn('broom', 'Wyczyść filtry i sortowanie', () => { st.filters = {}; st.sorts = []; saveFilters(); if (st.data) draw(); });
-  const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg) })));
+  const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && acc().add && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg), access: acc() })));
   const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
   const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, które dane ukrywać, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
   const refreshBtn = iconBtn('refresh', 'Odśwież', load);
@@ -741,7 +752,7 @@ export function mountHarmLive(el, appCtx) {
   onUndoChange((n, label) => { undoBtn.disabled = !n; undoBtn.title = n ? `Cofnij: ${label} (Ctrl+Z)` : 'Nie ma zmian do cofnięcia'; });
   const onKey = (e) => {
     if (!el.isConnected) { document.removeEventListener('keydown', onKey); return; }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName) && !document.querySelector('.overlay')) { e.preventDefault(); doUndo(); }
+    if (acc().edit && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName) && !document.querySelector('.overlay')) { e.preventDefault(); doUndo(); }
   };
   document.addEventListener('keydown', onKey);
   for (const b of levelBtns.values()) Object.assign(b.style, ICON_BTN);
@@ -752,12 +763,17 @@ export function mountHarmLive(el, appCtx) {
     setIcon(hideBtn, st.compact ? 'eyeOff' : 'eye'); hideBtn.classList.toggle('primary', st.compact); hideBtn.title = st.compact ? 'Pokaż dane – wszystkie kolumny' : 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)';
     setIcon(komisBtn, st.komisOpt.show ? 'sigma' : 'sigmaOff'); komisBtn.classList.toggle('primary', st.komisOpt.show);
     broomBtn.disabled = !(Object.keys(st.filters).length || st.sorts.length);
+    const a = acc();
+    addBtn.style.display = a.add ? 'inline-flex' : 'none'; undoBtn.style.display = a.edit ? 'inline-flex' : 'none';
+    levelTag.textContent = a.label; levelTag.title = `Twój poziom dostępu do Harmonogramu: ${a.label} – ${LEVEL_INFO[a.level]}. Ustawia go administrator w zakładce Uzytkownicy (kolumna „Harmonogram”).`;
   };
+  const LEVEL_INFO = { god: 'przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki, stanowiska, komisy, święta', master: 'przeglądanie, dodawanie, edycja', clerik: 'przeglądanie, dodawanie', tourist: 'przeglądanie', none: 'brak dostępu' };
+  const levelTag = h('span', { class: 'muted', style: { fontSize: '11px', fontWeight: 700, padding: '0 4px', border: '1px solid #bbb', borderRadius: '3px', lineHeight: '18px' } });
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '4px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
     h('span', { class: 'grow' }),
-    h('span', { style: { display: 'inline-flex', gap: '3px' } }, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
+    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
   syncTools();
   load();
 }

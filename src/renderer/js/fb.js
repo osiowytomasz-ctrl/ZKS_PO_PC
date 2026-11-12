@@ -11,7 +11,8 @@ export const FIREBASE_CONFIG = {
   appId: '1:1010964987697:web:638a466ee73d20fddcba10',
 };
 
-let sdk = null, app = null, auth = null, db = null, expiresAt = 0, signing = null;
+let sdk = null, app = null, auth = null, db = null, expiresAt = 0, signing = null, harm = null;
+const harmListeners = new Set();
 
 async function load() { if (!sdk) sdk = await import('../vendor/firebase.js'); return sdk; }
 
@@ -28,8 +29,15 @@ export async function firebase() {
       const t = await api('firebaseToken', []);
       await s.signInWithCustomToken(auth, t.token);
       expiresAt = t.expiresAt;
+      const lv = t.harm == null ? null : String(t.harm);
+      if (lv !== harm) { harm = lv; harmListeners.forEach((fn) => fn(harm)); }
     })().finally(() => { signing = null; });
     await signing;
   }
   return { sdk: s, db };
 }
+
+/** Poziom dostępu do Harmonogramu z ostatniego tokenu ('god'|'master'|'clerik'|'tourist'|'none'); null – serwer go nie podał (stary Firebase.gs). */
+export const harmLevel = () => harm;
+/** Nasłuch zmiany poziomu (po odnowieniu tokenu); zwraca funkcję wyłączającą. */
+export const onHarmLevel = (fn) => { harmListeners.add(fn); return () => harmListeners.delete(fn); };

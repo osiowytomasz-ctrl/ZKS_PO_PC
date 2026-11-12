@@ -7,6 +7,7 @@ import { depthOf, subParent } from '../logic/schedule.js';
 import { parseNumber } from '../logic/harmImport.js';
 import { applyTree } from '../harmStore.js';
 import { stationDropdown } from './harmEdit.js';
+import { harmAccess, treePlanBlock } from '../logic/harmAccess.js';
 
 const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
 const b64 = (text) => { const bytes = new TextEncoder().encode(text); let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
@@ -14,7 +15,7 @@ const b64 = (text) => { const bytes = new TextEncoder().encode(text); let s = ''
 /**
  * Okno edytora. [getOps] – aktualne operacje z bazy, [rootId] – edytowana gałąź (null = nowe drzewo od numeru [newLp]), [stations] – lista stanowisk.
  */
-export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] }) {
+export function treeEditor({ getOps, rootId = null, newLp = '', stations = [], access = harmAccess('god') }) {
   const opsAtStart = getOps();
   const origIds = rootId ? treeFromOps(opsAtStart, rootId).map((n) => n.orig) : [];
   let nodes = rootId ? treeFromOps(opsAtStart, rootId) : [emptyNode(newLp)];
@@ -28,7 +29,9 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
   const gutter = h('div', { style: { width: '92px', height: '56vh', overflow: 'hidden', background: '#f2f2f2', borderRight: '1px solid #ccc', padding: '4px 6px', boxSizing: 'border-box', color: '#555', whiteSpace: 'pre', textAlign: 'right', userSelect: 'none', ...MONO } });
   const notepad = h('div', { style: { display: 'flex', border: '1px solid #bbb' } }, gutter, textArea);
   textArea.addEventListener('scroll', () => { gutter.scrollTop = textArea.scrollTop; });
-  const plan = () => planTree(getOps(), origIds, nodes, { stations: stationNames, parseNum: parseNumber });
+  // poziom dostępu: CLERIK – tylko nowe węzły, MASTER – bez usuwania (sprawdzane też przy zapisie i w regułach bazy)
+  const plan = () => { const ops = getOps(), p = planTree(ops, origIds, nodes, { stations: stationNames, parseNum: parseNumber }); const block = p.errors.length ? null : treePlanBlock(p, ops, access); if (block) p.errors.push(block); return p; };
+  const locked = (n) => !!n.orig && !access.edit;   // istniejący węzeł bez prawa edycji
   const origOf = (n) => (n.orig ? opsAtStart[n.orig] : null);
 
   const refresh = () => {
@@ -56,10 +59,10 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
       const idx = sibs.indexOf(n);
       const o = origOf(n);
       const changed = !n.orig || n.orig !== lp || ['element', 'station', 'komis', 'client'].some((k) => (o[k] || '') !== n[k].trim()) || String(o.hours ?? '') !== n.hours.trim() || (o.preds || []).join(', ') !== n.preds.split(/[,;\s]+/).filter(Boolean).join(', ');
-      const inp = (key, w, extra = {}) => h('input', { type: 'text', value: n[key], spellcheck: 'false', title: extra.title || '', placeholder: extra.ph || '',
+      const inp = (key, w, extra = {}) => h('input', { type: 'text', value: n[key], spellcheck: 'false', title: extra.title || '', placeholder: extra.ph || '', disabled: locked(n),
         style: { width: w, flex: extra.flex || 'none', minWidth: extra.min || 0, boxSizing: 'border-box', border: '1px solid #bbb', padding: '2px 4px', fontSize: '12px', fontWeight: extra.bold ? 700 : 400 },
         oninput: (e) => { n[key] = e.target.value; later(); }, onchange: extra.onchange });
-      const row = h('div', { draggable: par != null ? 'true' : 'false',
+      const row = h('div', { draggable: par != null && access.edit ? 'true' : 'false',
         style: { display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 6px', marginLeft: d * 22 + 'px', borderLeft: d ? '2px solid #ddd' : 'none', borderBottom: '1px solid #eee', background: !n.orig ? '#e6f4ea' : changed ? '#fff4d6' : '#fff' },
         ondragstart: (e) => { if (e.target.tagName === 'INPUT') { e.preventDefault(); return; } dragging = n; e.dataTransfer.effectAllowed = 'move'; },
         ondragover: (e) => { if (dragging && subParent(dragging.lp.trim()) === par && dragging !== n) { e.preventDefault(); row.style.borderTop = '3px solid #1a73e8'; } },
@@ -76,18 +79,18 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
         inp('lp', (140 - d * 22) + 'px', { bold: true, title: 'Numer: zmiana przenosi też potomki (np. 600a → 600c: 600aa → 600ca)', onchange: (e) => { nodes = renameNode(nodes, n.key, e.target.value); renderTree(); refresh(); } }),
         n.orig && n.orig !== lp ? h('span', { title: 'Numer w bazie', style: { color: '#b45309', fontSize: '11px' } }, `(${n.orig})`) : null,
         inp('element', 'auto', { flex: 1, min: '200px' }),
-        h('div', { style: { width: '96px' } }, stationDropdown(stations, n.station, (v) => { n.station = v; refresh(); }).el),
+        h('div', { style: { width: '96px', pointerEvents: locked(n) ? 'none' : 'auto', opacity: locked(n) ? 0.6 : 1 } }, stationDropdown(stations, n.station, (v) => { n.station = v; refresh(); }).el),
         inp('hours', '56px', { ph: n.orig && !n.hours && nodes.some((x) => subParent(x.lp.trim()) === lp) ? 'Σ' : '' }),
         inp('preds', '110px', { ph: 'np. 500, 600a', title: 'Numery operacji poprzedzających, oddzielone przecinkami (najwyżej 4)' }),
         inp('komis', '80px', { ph: d ? 'dziedz.' : '' }), inp('client', '100px', { ph: d ? 'dziedz.' : '' }),
         h('span', { style: { width: '120px', display: 'flex', gap: '2px', justifyContent: 'flex-end' } },
-          h('button', { class: 'btn small', title: 'W górę', disabled: par == null || idx <= 0, onclick: () => { nodes = moveNode(nodes, n.key, -1); renderTree(); refresh(); } }, '↑'),
-          h('button', { class: 'btn small', title: 'W dół', disabled: par == null || idx < 0 || idx >= sibs.length - 1, onclick: () => { nodes = moveNode(nodes, n.key, 1); renderTree(); refresh(); } }, '↓'),
+          h('button', { class: 'btn small', title: 'W górę', disabled: !access.edit || par == null || idx <= 0, onclick: () => { nodes = moveNode(nodes, n.key, -1); renderTree(); refresh(); } }, '↑'),
+          h('button', { class: 'btn small', title: 'W dół', disabled: !access.edit || par == null || idx < 0 || idx >= sibs.length - 1, onclick: () => { nodes = moveNode(nodes, n.key, 1); renderTree(); refresh(); } }, '↓'),
           h('button', { class: 'btn small', title: depthOf(lp) >= 2 ? 'Subsuboperacja nie ma dzieci' : 'Dodaj ' + (depthOf(lp) === 0 ? 'suboperację' : 'subsuboperację'), disabled: depthOf(lp) >= 2, onclick: () => {
             const r = addChild(nodes, n.key, getOps()); if (r.error) { toast(r.error); return; } nodes = r.nodes; renderTree(); refresh();
             const el = body.querySelector(`[data-key="${r.key}"] input:nth-of-type(2)`); if (el) el.focus();
           } }, '+'),
-          h('button', { class: 'btn small', title: 'Usuń z potomkami (z bazy dopiero po zapisie)', disabled: nodes.length <= 1 && !rootId, onclick: () => { nodes = removeNode(nodes, n.key); renderTree(); refresh(); } }, '✕')));
+          h('button', { class: 'btn small', title: 'Usuń z potomkami (z bazy dopiero po zapisie)', disabled: (nodes.length <= 1 && !rootId) || (!!n.orig && !access.del), onclick: () => { nodes = removeNode(nodes, n.key); renderTree(); refresh(); } }, '✕')));
       row.dataset.key = n.key;
       body.append(row);
     }
@@ -146,6 +149,7 @@ export function treeEditor({ getOps, rootId = null, newLp = '', stations = [] })
 
   const m = modal(rootId ? `Edycja gałęzi: ${subParent(rootId) ? 'suboperacja' : 'operacja'} ${rootId}` : 'Nowa operacja – konfigurator drzewa', h('div', {},
     h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Edytuj numery, opisy, stanowiska, czasy, zależności, komis i klienta. ↑ ↓ albo przeciąganie zmienia kolejność w obrębie tej samej operacji (zmieniają się litery), + dodaje suboperację, ✕ usuwa z potomkami. „Notatnik” pokazuje same opisy – jedna linia na operację (numery z lewej); plik .txt można edytować np. w Notepad++, liczba linii musi się zgadzać. Przed zapisem program sprawdza numery, poziomy, zależności i cykle oraz pokazuje listę zmian.'),
+    !access.edit || !access.del ? h('p', { style: { margin: '0 0 6px', color: '#b45309' } }, `Poziom ${access.label}: ${!access.edit ? 'można tylko dodawać nowe operacje i suboperacje (istniejące są zablokowane)' : 'usuwanie operacji jest zablokowane'}.`) : null,
     h('div', { class: 'row', style: { gap: '6px', marginBottom: '6px' } }, treeBtn, textBtn, h('span', { style: { flex: 1 } }), exportBtn, importBtn, fileIn),
     body, status,
     h('div', { class: 'actions' }, closeBtn, saveBtn)), { wide: true, sticky: true });
