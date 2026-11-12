@@ -5,7 +5,8 @@ import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
-import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange } from '../harmStore.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup } from '../harmStore.js';
+import { backupData, backupText, parseBackup, backupDiff, backupFileName } from '../logic/harmBackup.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
 import { iconSvg } from './harmIcons.js';
@@ -499,8 +500,57 @@ export function mountHarmLive(el, appCtx) {
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli. Nazwę komisu można poprawić w polu.'),
       kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta są w nagłówku osi czasu bordowe, z białą pogrubioną czcionką, a ich tło na wykresie jest białe jak w weekend.'),
-      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd)] : [h('p', { class: 'muted', style: { marginTop: '14px' } }, `Kolory i czcionki wykresu, stanowiska, kolory komisów i święta zmienia tylko poziom GOD (Twój: ${acc().label}).`)]),
+      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Kopia całego harmonogramu'),
+      h('p', { class: 'muted' }, 'Eksport zapisuje wszystkie operacje i ustawienia (stanowiska, kolory komisów, święta) do pliku .json. Import zastępuje cały harmonogram zawartością pliku – przed zapisem pokazuje zmiany i może najpierw zapisać kopię obecnego stanu. Tylko poziom GOD.'),
+      h('div', { class: 'row', style: { gap: '6px' } },
+        h('button', { class: 'btn small', onclick: () => exportBackup() }, 'Eksport do pliku…'),
+        h('button', { class: 'btn small', onclick: () => { m.close(); importBackup(); } }, 'Import z pliku…'))] : [h('p', { class: 'muted', style: { marginTop: '14px' } }, `Kolory i czcionki wykresu, stanowiska, kolory komisów i święta zmienia tylko poziom GOD (Twój: ${acc().label}).`)]),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: save }, 'Zapisz'))));
+  }
+
+  // ---------- kopia całego harmonogramu (tylko GOD) ----------
+  const b64utf8 = (text) => { const bytes = new TextEncoder().encode(text); let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
+  async function exportBackup() {
+    if (!st.m) { toast('Poczekaj na wczytanie danych'); return false; }
+    if (!acc().style) { toast(`Poziom ${acc().label}: eksport tylko dla GOD`); return false; }
+    const data = backupData(st.m.opsByLp, st.m.cfg, { app: 'PC ' + ((appCtx && appCtx.version) || ''), user: (appCtx && appCtx.user && (appCtx.user.name || appCtx.user.email)) || '' });
+    const name = backupFileName();
+    const ok = await window.zks.saveFile(name, 'application/json', b64utf8(backupText(data)));
+    if (ok) toast(`Zapisano kopię: ${name} (operacji: ${data.count})`);
+    return !!ok;
+  }
+  function importBackup() {
+    if (!acc().style) { toast(`Poziom ${acc().label}: import tylko dla GOD`); return; }
+    const fileIn = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' } });
+    fileIn.addEventListener('change', async () => {
+      const f = fileIn.files && fileIn.files[0]; fileIn.remove();
+      if (!f || !st.m) return;
+      const p = parseBackup(await f.text());
+      const d = backupDiff(st.m.opsByLp, p.ops);
+      const list = (title, items, color) => (items.length ? h('div', { style: { margin: '3px 0', color } }, h('b', {}, `${title}: ${items.length}`), ' ', items.slice(0, 30).join(', ') + (items.length > 30 ? ' …' : '')) : null);
+      const withCfg = h('input', { type: 'checkbox', checked: !!p.config, disabled: !p.config });
+      const backupFirst = h('input', { type: 'checkbox', checked: true });
+      const go = h('button', { class: 'btn primary', disabled: p.errors.length > 0 || !Object.keys(p.ops).length, style: { background: '#c00000', borderColor: '#c00000' } }, 'Zastąp harmonogram');
+      const dm = modal('Import całego harmonogramu', h('div', {},
+        h('div', {}, h('b', {}, f.name), p.meta.exportedAt ? `  ·  wyeksportowano ${new Date(p.meta.exportedAt).toLocaleString('pl-PL')}` : '', p.meta.user ? `  ·  ${p.meta.user}` : '', p.meta.app ? `  ·  ${p.meta.app}` : ''),
+        h('div', { style: { margin: '6px 0' } }, `Operacji w pliku: ${Object.keys(p.ops).length}, obecnie w bazie: ${Object.keys(st.m.opsByLp).length}.`),
+        list('Nowe', d.added, '#1e7b34'), list('Zmienione', d.changed, '#b45309'), list('Usunięte (nie ma ich w pliku)', d.removed, '#c00000'),
+        h('div', { class: 'muted' }, `Bez zmian: ${d.unchanged}`),
+        p.errors.length ? h('div', { class: 'err', style: { whiteSpace: 'pre-wrap', marginTop: '6px' } }, 'Błędy (import zablokowany):\n' + p.errors.join('\n')) : null,
+        p.warnings.length ? h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap', marginTop: '6px', maxHeight: '90px', overflow: 'auto' } }, 'Uwagi:\n' + p.warnings.join('\n')) : null,
+        h('label', { style: { display: 'block', marginTop: '8px' } }, withCfg, ' Importuj też ustawienia: stanowiska, kolory komisów, święta' + (p.config ? '' : ' (brak w pliku)')),
+        h('label', { style: { display: 'block' } }, backupFirst, ' Najpierw zapisz kopię obecnego harmonogramu do pliku'),
+        h('p', { style: { color: '#c00000', fontWeight: 700 } }, 'Import zastępuje CAŁY harmonogram (wszyscy użytkownicy zobaczą zmianę od razu). Nie da się go cofnąć ikoną ↶.'),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => dm.close() }, 'Anuluj'), go)), { wide: true });
+      go.addEventListener('click', async () => {
+        if (backupFirst.checked && !(await exportBackup())) { toast('Import przerwany: nie zapisano kopii obecnego harmonogramu'); return; }
+        go.disabled = true;
+        try { const r = await restoreBackup(p.ops, withCfg.checked ? p.config : null); dm.close(); toast(`Zaimportowano operacji: ${r.operations}` + (withCfg.checked ? ' i ustawienia' : '')); }
+        catch (e) { go.disabled = false; toast('Nie zaimportowano: ' + (e.code === 'permission-denied' ? 'brak uprawnień (tylko GOD)' : e.message || e)); }
+      });
+    });
+    document.body.append(fileIn); fileIn.click();
   }
 
   // ---------- rysowanie ----------

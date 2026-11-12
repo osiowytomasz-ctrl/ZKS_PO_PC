@@ -164,3 +164,14 @@ export async function saveSettings(stations, komisColors, holidays) {
     ...(holidays ? { holidays: holidays.map(({ date, name }) => (name ? { date, name } : { date })) } : {}),
   }, { merge: true });
 }
+
+/**
+ * Przywrócenie całego harmonogramu z kopii (tylko GOD): operacje zastępują całą zawartość harm_ops, [config] (gdy podany) –
+ * stanowiska, kolory komisów i święta. Lista cofania jest czyszczona (dotyczyła poprzedniego stanu).
+ */
+export async function restoreBackup(ops, config) {
+  const r = await importOps(Object.entries(ops).map(([lp, op]) => ({ lp, ...op })));
+  if (config) await saveSettings(config.stations || [], config.komisColors || [], config.holidays || []);
+  undoStack.length = 0; notifyUndo();
+  return r;
+}
