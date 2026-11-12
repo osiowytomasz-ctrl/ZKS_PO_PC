@@ -10,7 +10,7 @@ test('poziomy dostępu: uprawnienia', () => {
     ['11111', '11100', '11000', '10000', '00000']);
   assert.equal(normLevel('GOD'), 'god'); assert.equal(normLevel('---'), 'none'); assert.equal(normLevel('xyz'), null);
   assert.equal(harmAccess('xyz').level, 'none');
-  assert.equal(legacyLevel({ plan: 'write' }), 'god'); assert.equal(legacyLevel({ grafik: 'read' }), 'tourist'); assert.equal(legacyLevel({}), 'none');
+  assert.equal(legacyLevel({ plan: 'write' }), 'tourist'); assert.equal(legacyLevel({ grafik: 'read' }), 'tourist'); assert.equal(legacyLevel({}), 'none');
 });
 
 const ops = () => ({ 600: { element: 'Zespół', preds: [] }, '600a': { element: 'Cz.d', station: '2Un', hours: 5, preds: [] }, 700: { element: 'Inna', preds: [] } });
@@ -50,5 +50,5 @@ test('Firebase.gs: poziom z kolumny „Harmonogram” i domyślne', () => {
   assert.equal(lv('A@x.pl'), 'god'); assert.equal(lv('b@x.pl', { plan: 'write' }), 'clerik'); assert.equal(lv('c@x.pl', { plan: 'write' }), 'none');
   assert.equal(lv('d@x.pl', { plan: 'write' }), 'master'); assert.equal(lv('d@x.pl', { grafik: 'read' }), 'tourist'); assert.equal(lv('d@x.pl'), 'none');
   assert.equal(lv('e@x.pl', { plan: 'write' }), 'none'); assert.equal(lv('admin@x.pl'), 'god');
-  assert.ok(store.harm_levels_v1);   // pamięć podręczna
+  rows[2][6] = 'MASTER'; assert.equal(lv('b@x.pl'), 'master');   // zmiana w karcie działa od razu (bez pamięci podręcznej)
 });

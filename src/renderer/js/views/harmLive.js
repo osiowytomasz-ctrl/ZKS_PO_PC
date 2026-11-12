@@ -14,7 +14,7 @@ import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holid
 import { parseDateTime } from '../logic/harmImport.js';
 import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../logic/harmDay.js';
 import { shareDialog } from './harmShare.js';
-import { harmLevel, onHarmLevel } from '../fb.js';
+import { firebase, harmLevel, onHarmLevel } from '../fb.js';
 import { harmAccess, legacyLevel } from '../logic/harmAccess.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
@@ -124,6 +124,10 @@ export function mountHarmLive(el, appCtx) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
     try {
       if (stop) stop();
+      // przed wejściem: nowy token z aktualnym poziomem z karty Uzytkownicy (kolumna „Harmonogram”)
+      await firebase({ fresh: true });
+      if (harmLevel() == null) toast('Serwer nie podaje poziomu dostępu (wdróż nowy Firebase.gs) – tylko przeglądanie');
+      syncTools();
       loadGrafik();
       stop = await watchHarm((m) => { st.m = m; recompute(); },
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });

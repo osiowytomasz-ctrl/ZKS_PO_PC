@@ -5,13 +5,12 @@ rules_version = '2';
 //   clerik  – odczyt i dodawanie nowych operacji (bez zmiany i usuwania istniejących)
 //   tourist – tylko odczyt
 //   none    – brak dostępu
-// Token bez `harm` (stary Firebase.gs): zapis w Planie lub Grafiku = god, odczyt = tourist.
+// Token bez `harm` (stary Firebase.gs): tylko odczyt dla osób z dostępem do Planu lub Grafiku.
 service cloud.firestore {
   match /databases/{database}/documents {
     function tok() { return request.auth.token; }
     function legacy() {
-      return (tok().get('plan', 'none') == 'write' || tok().get('grafik', 'none') == 'write') ? 'god'
-        : ((tok().get('plan', 'none') == 'read' || tok().get('grafik', 'none') == 'read') ? 'tourist' : 'none');
+      return (tok().get('plan', 'none') in ['read', 'write'] || tok().get('grafik', 'none') in ['read', 'write']) ? 'tourist' : 'none';
     }
     function lvl() { return request.auth == null ? 'none' : tok().get('harm', legacy()); }
     function canView() { return lvl() in ['tourist', 'clerik', 'master', 'god']; }

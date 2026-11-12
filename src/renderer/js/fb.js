@@ -16,14 +16,15 @@ const harmListeners = new Set();
 
 async function load() { if (!sdk) sdk = await import('../vendor/firebase.js'); return sdk; }
 
-/** Loguje do Firebase (jeśli trzeba) i zwraca {sdk, db}. Token jest odnawiany przed końcem ważności. */
-export async function firebase() {
+/** Loguje do Firebase (jeśli trzeba) i zwraca {sdk, db}. Token jest odnawiany przed końcem ważności; [fresh] – zawsze nowy token (aktualny poziom z karty Uzytkownicy). */
+export async function firebase({ fresh = false } = {}) {
   const s = await load();
   if (!app) {
     app = s.initializeApp(FIREBASE_CONFIG);
     auth = s.getAuth(app);
     db = s.initializeFirestore(app, { localCache: s.persistentLocalCache({ tabManager: s.persistentSingleTabManager() }) });
   }
+  if (fresh && !signing) expiresAt = 0;
   if (!auth.currentUser || Date.now() > expiresAt - 5 * 60 * 1000) {
     signing = signing || (async () => {
       const t = await api('firebaseToken', []);

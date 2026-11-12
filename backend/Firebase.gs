@@ -19,6 +19,8 @@
  *   ---     – brak dostępu
  * Pusta komórka (albo brak kolumny): administrator (API_ADMIN_EMAIL) = GOD, „zapis” w Planie lub Grafiku = MASTER,
  * „odczyt” w Planie lub Grafiku = TOURIST, w pozostałych przypadkach brak dostępu.
+ * Poziom jest czytany z karty przy KAŻDYM wydaniu tokenu (bez pamięci podręcznej) – aplikacje pobierają nowy token
+ * przy każdym wejściu w Harmonogram, więc zmiana w karcie działa od razu.
  *
  * W Api.gs (API_FUNCS) musi być:
  *   firebaseToken: { run: function (a, ctx) { return api_firebaseToken_(ctx); } },
@@ -27,7 +29,6 @@
 
 var HARM_COLUMN = 'Harmonogram';
 var HARM_LEVELS = { 'GOD': 'god', 'MASTER': 'master', 'CLERIK': 'clerik', 'TOURIST': 'tourist', '---': 'none' };
-var HARM_CACHE_SECONDS = 300;   // zmiany w zakładce Uzytkownicy działają po max. 5 min (jak pozostałe uprawnienia)
 
 function api_b64url_(input) {
   var s = typeof input === 'string'
@@ -44,11 +45,8 @@ function api_parseHarmLevel_(text) {
   return HARM_LEVELS[t] || 'none';   // nieznany wpis = brak dostępu (bezpieczniej)
 }
 
-/** Mapa email → poziom z kolumny „Harmonogram” (tylko wypełnione komórki). Pamięć podręczna 5 min. */
+/** Mapa email → poziom z kolumny „Harmonogram” (tylko wypełnione komórki), czytana z karty za każdym razem. */
 function api_harmLevels_() {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('harm_levels_v1');
-  if (cached) return JSON.parse(cached);
   var map = {};
   var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
   if (sheet && sheet.getLastRow() >= 2) {
@@ -63,7 +61,6 @@ function api_harmLevels_() {
       });
     }
   }
-  cache.put('harm_levels_v1', JSON.stringify(map), HARM_CACHE_SECONDS);
   return map;
 }
 
@@ -72,6 +69,11 @@ function api_harmLevel_(ctx) {
   var email = String((ctx && ctx.email) || '').trim().toLowerCase();
   var level = api_harmLevels_()[email];
   if (level) return level;
+  return api_harmDefault_(ctx, email);
+}
+
+/** Poziom dla pustej komórki „Harmonogram”. */
+function api_harmDefault_(ctx, email) {
   if (typeof API_ADMIN_EMAIL !== 'undefined' && email === String(API_ADMIN_EMAIL).toLowerCase()) return 'god';
   var p = (ctx && ctx.permissions) || {};
   if (p.plan === 'write' || p.grafik === 'write') return 'master';
@@ -109,6 +111,12 @@ function api_firebaseToken_(ctx) {
   return { token: unsigned + '.' + sig, projectId: projectId, expiresAt: (now + 3600) * 1000, uid: uid, harm: harm };
 }
 
+/** Test z edytora: wpisz e-mail i uruchom – w dzienniku poziom, jaki dostanie ta osoba. */
+function testHarmonogramLevel() {
+  var email = 'wpisz@email.pl';
+  Logger.log(email + ' → ' + api_harmLevel_({ email: email, permissions: {} }) + ' (dla pustej komórki liczą się jeszcze uprawnienia Plan/Grafik)');
+}
+
 /**
  * Jednorazowo (z edytora): dodaje w zakładce Uzytkownicy kolumnę „Harmonogram” (jeśli jej nie ma) z listą wyboru
  * GOD / MASTER / CLERIK / TOURIST / ---. Nie wypełnia komórek – pusta komórka = poziom domyślny (opis na górze pliku).
@@ -123,6 +131,5 @@ function api_setupHarmonogramColumn() {
   var rows = Math.max(sheet.getMaxRows() - 1, 1);
   var rule = SpreadsheetApp.newDataValidation().requireValueInList(['GOD', 'MASTER', 'CLERIK', 'TOURIST', '---'], true).setAllowInvalid(false).build();
   sheet.getRange(2, col, rows, 1).setDataValidation(rule);
-  CacheService.getScriptCache().remove('harm_levels_v1');
   return 'Kolumna „' + HARM_COLUMN + '” w kolumnie ' + col + ' zakładki ' + API_USERS_SHEET;
 }

@@ -11,12 +11,10 @@ export function normLevel(x) {
   return HARM_LEVELS.includes(t) ? t : null;
 }
 
-/** Poziom, gdy serwer (stary Firebase.gs) nie podał `harm`: jak dotychczas – zapis w Planie lub Grafiku = pełny dostęp, odczyt = przeglądanie. */
+/** Poziom, gdy serwer (stary Firebase.gs) nie podał `harm`: tylko przeglądanie (bezpiecznie), dla osób z dostępem do Planu lub Grafiku. */
 export function legacyLevel(perms) {
   const p = perms || {};
-  if (p.plan === 'write' || p.grafik === 'write') return 'god';
-  if (p.plan === 'read' || p.grafik === 'read') return 'tourist';
-  return 'none';
+  return ['read', 'write'].includes(p.plan) || ['read', 'write'].includes(p.grafik) ? 'tourist' : 'none';
 }
 
 /** Uprawnienia dla poziomu. */
