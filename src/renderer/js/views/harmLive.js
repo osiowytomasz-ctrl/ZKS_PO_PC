@@ -1,7 +1,7 @@
 // Harmonogram (baza Firebase): widok klasyczny jak w arkuszu. Jedna tabela: z lewej dane (kolumny jak w pliku), z prawej oś czasu z paskami w tych samych wierszach.
 // Dane twarde edytujesz w komórkach; Start, Koniec i klucz liczy program. Przycisk „Ukryj dane” chowa kolumny z listy ukrywanych (domyślnie „czerwone”).
 import { h, clear, api, apiCached, modal, toast, columnFilterDialog, confirmBox } from '../ui.js';
-import { datePickerDialog } from './datePicker.js';
+import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
@@ -392,7 +392,7 @@ export function mountHarmLive(el, appCtx) {
       for (const r of hRows) {
         const dI = h('input', { type: 'text', value: r.text, placeholder: 'np. 11.11.2026', spellcheck: 'false', style: { width: '110px', border: 'none', padding: '3px 6px' }, oninput: () => { r.text = dI.value; } });
         const nI = h('input', { type: 'text', value: r.name, placeholder: 'np. Święto Niepodległości', style: { width: '240px', border: 'none', padding: '3px 6px' }, oninput: () => { r.name = nI.value; } });
-        tb.append(h('tr', {}, h('td', { style: { border: '1px solid #999', padding: 0 } }, dI), h('td', { style: { border: '1px solid #999', padding: 0 } }, nI),
+        tb.append(h('tr', {}, h('td', { style: { border: '1px solid #999', padding: 0, whiteSpace: 'nowrap' } }, dI, calendarButton(dI, { title: 'Wybierz datę święta z kalendarza', holidays: holidayMap(st.m && st.m.cfg && st.m.cfg.holidays) })), h('td', { style: { border: '1px solid #999', padding: 0 } }, nI),
           h('td', { style: { border: '1px solid #999', padding: '0 4px' } }, h('button', { class: 'btn small', onclick: () => { hRows.splice(hRows.indexOf(r), 1); hRender(); } }, 'Usuń'))));
       }
       table.append(tb); hBox.append(table);

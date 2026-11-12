@@ -6,7 +6,7 @@ const MONTHS = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'l
 const p2 = (n) => String(n).padStart(2, '0');
 
 /** [value] – ms albo null; [holidays] – Map 'RRRR-MM-DD' → nazwa; onPick(ms|null) – null = wyczyść. */
-export function datePickerDialog({ title = 'Wybierz datę', value = null, holidays = new Map(), defaultHour = 6, onPick }) {
+export function datePickerDialog({ title = 'Wybierz datę', value = null, holidays = new Map(), defaultHour = 6, withTime = true, onPick }) {
   const now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const init = value != null ? new Date(value) : null;
   let sel = init ? Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), init.getUTCDate()) : null;
@@ -34,7 +34,7 @@ export function datePickerDialog({ title = 'Wybierz datę', value = null, holida
         style: { height: '32px', border: isToday ? '2px solid #00b050' : '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', background: bg,
           color: isSel || hol ? '#fff' : wd === 6 ? '#c00000' : wd === 5 ? '#0070c0' : '#000', fontWeight: isSel || hol || isToday ? 700 : 400 } }, String(d)));
     }
-    shown.textContent = sel == null ? 'Nie wybrano dnia' : `Wybrano: ${new Date(sel).toISOString().slice(8, 10)}.${new Date(sel).toISOString().slice(5, 7)}.${new Date(sel).getUTCFullYear()} ${p2(+hourSel.value)}:${p2(+minSel.value)}`;
+    shown.textContent = sel == null ? 'Nie wybrano dnia' : `Wybrano: ${new Date(sel).toISOString().slice(8, 10)}.${new Date(sel).toISOString().slice(5, 7)}.${new Date(sel).getUTCFullYear()}` + (withTime ? ` ${p2(+hourSel.value)}:${p2(+minSel.value)}` : '');
   };
   hourSel.addEventListener('change', render); minSel.addEventListener('change', render);
   const move = (dm) => { viewM += dm; if (viewM < 0) { viewM = 11; viewY--; } if (viewM > 11) { viewM = 0; viewY++; } render(); };
@@ -42,12 +42,23 @@ export function datePickerDialog({ title = 'Wybierz datę', value = null, holida
     h('div', { class: 'row', style: { alignItems: 'center', justifyContent: 'space-between' } },
       h('button', { class: 'btn small', title: 'Poprzedni miesiąc', onclick: () => move(-1) }, '‹'), head, h('button', { class: 'btn small', title: 'Następny miesiąc', onclick: () => move(1) }, '›')),
     grid,
-    h('div', { class: 'row', style: { alignItems: 'center', gap: '6px', marginTop: '8px' } }, 'Godzina ', hourSel, ':', minSel,
+    h('div', { class: 'row', style: { alignItems: 'center', gap: '6px', marginTop: '8px' } }, ...(withTime ? ['Godzina ', hourSel, ':', minSel] : []),
       h('button', { class: 'btn small', onclick: () => { sel = today; viewY = new Date(today).getUTCFullYear(); viewM = new Date(today).getUTCMonth(); render(); } }, 'Dziś')),
     shown,
     h('div', { class: 'actions' },
       h('button', { class: 'btn', style: { marginRight: 'auto' }, title: 'Usuwa datę z tej komórki', onclick: () => { m.close(); onPick(null); } }, 'Wyczyść'),
       h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'),
-      h('button', { class: 'btn primary', onclick: () => { if (sel == null) return; m.close(); onPick(sel + (+hourSel.value) * 3600000 + (+minSel.value) * 60000); } }, 'OK'))));
+      h('button', { class: 'btn primary', onclick: () => { if (sel == null) return; m.close(); onPick(withTime ? sel + (+hourSel.value) * 3600000 + (+minSel.value) * 60000 : sel); } }, 'OK'))));
   render();
+}
+
+/**
+ * Przycisk z ikoną kalendarza do pola tekstowego z datą „dd.mm.rrrr”: otwiera kalendarz i wpisuje wybraną datę do pola
+ * (wywołuje zdarzenia input i change, więc pole działa jak przy ręcznym wpisaniu).
+ */
+export function calendarButton(input, { title = 'Wybierz datę z kalendarza', holidays = new Map(), withTime = false } = {}) {
+  const parse = (t) => { const m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})(?:\s+(\d{1,2})(?::(\d{2}))?)?$/.exec(String(t || '').trim()); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)) : null; };
+  const fmt = (ms) => { const d = new Date(ms); return `${p2(d.getUTCDate())}.${p2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}` + (withTime ? ` ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}` : ''); };
+  return h('button', { type: 'button', class: 'btn small', title, 'aria-label': title, style: { padding: '2px 6px' }, onclick: () => datePickerDialog({ title, value: parse(input.value), holidays, withTime,
+    onPick: (ms) => { input.value = ms == null ? '' : fmt(ms); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); } }) }, '📅');
 }

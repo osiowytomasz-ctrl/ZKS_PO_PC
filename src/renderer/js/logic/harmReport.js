@@ -128,25 +128,42 @@ export function reportSvg(model, { from = 0, to = model.rows.length, page = '' }
 }
 
 const PAGE_PX = { A4: [794, 1123], A3: [1123, 1587] };   // 96 dpi, pionowo
-const MARGIN = 38;                                        // ok. 10 mm
+const MM = 96 / 25.4;   // pikseli (96 dpi) na milimetr (marginesy strony)
 
-/** Strony do PDF i wydruku: SVG dopasowane do szerokości strony, wiersze podzielone na strony, nagłówek powtarzany na każdej. */
-export function reportPagesHtml(model, { pageSize = 'A4', landscape = true } = {}) {
+/**
+ * Strony do PDF i wydruku. Opcje strony: [fit] – 'width' dopasuj do szerokości (domyślnie; wąski raport powiększony najwyżej 2×),
+ * 'page' cały raport na jednej stronie, 'actual' 100% (zmniejszony, gdy nie mieści się w szerokości), 'custom' – skala [scalePct] %;
+ * [align] – 'left' | 'center' | 'right' (wyrównanie w poziomie); [marginMm] – margines strony w mm. Nagłówek tabeli powtarza się na każdej stronie.
+ */
+export function pagePlan(model, { pageSize = 'A4', landscape = true, fit = 'width', scalePct = 100, align = 'center', marginMm = 10 } = {}) {
   const [pw0, ph0] = PAGE_PX[pageSize] || PAGE_PX.A4;
   const [pw, ph] = landscape ? [ph0, pw0] : [pw0, ph0];
+  const margin = Math.max(0, Math.min(40, Number(marginMm) || 0)) * MM;
   const L = layout(model);
-  // dopasowanie do szerokości strony (także powiększenie wąskiego raportu, najwyżej 2×); strona wyśrodkowana
-  const scale = Math.min(2, (pw - 2 * MARGIN) / L.width);
-  const usable = (ph - 2 * MARGIN) / scale - L.titleH - L.headH - 2 * FRAME - 20;
-  const perPage = Math.max(1, Math.floor(usable / L.rowH));
-  const pages = [];
-  const total = Math.max(1, Math.ceil(model.rows.length / perPage));
-  for (let p = 0; p < total; p++) {
-    const { svg } = reportSvg(model, { from: p * perPage, to: Math.min(model.rows.length, (p + 1) * perPage), page: `Strona ${p + 1} z ${total}` });
-    pages.push(`<div class="page">${svg.replace('<svg ', `<svg style="display:block;margin:0 auto;width:${Math.round(L.width * scale)}px;height:auto" `)}</div>`);
+  const availW = pw - 2 * margin, availH = ph - 2 * margin;
+  const fixed = L.titleH + L.headH + 2 * FRAME + 20;
+  let scale;
+  if (fit === 'page') scale = Math.min(availW / L.width, availH / (fixed + model.rows.length * L.rowH));
+  else if (fit === 'actual') scale = Math.min(1, availW / L.width);
+  else if (fit === 'custom') scale = Math.max(0.1, Math.min(4, (Number(scalePct) || 100) / 100));
+  else scale = Math.min(2, availW / L.width);
+  const perPage = fit === 'page' ? Math.max(1, model.rows.length) : Math.max(1, Math.floor((availH / scale - fixed) / L.rowH));
+  const pages = Math.max(1, Math.ceil(model.rows.length / perPage));
+  const w = L.width * scale;
+  const left = margin + (align === 'left' ? 0 : align === 'right' ? availW - w : (availW - w) / 2);
+  return { pw, ph, margin, scale, perPage, pages, left, width: L.width, overflow: w > availW + 0.5 };
+}
+
+export function reportPagesHtml(model, opts = {}) {
+  const { pageSize = 'A4', landscape = true, marginMm = 10 } = opts;
+  const P = pagePlan(model, opts);
+  const out = [];
+  for (let p = 0; p < P.pages; p++) {
+    const { svg } = reportSvg(model, { from: p * P.perPage, to: Math.min(model.rows.length, (p + 1) * P.perPage), page: `Strona ${p + 1} z ${P.pages}` });
+    out.push(`<div class="page">${svg.replace('<svg ', `<svg style="display:block;margin-left:${(P.left - P.margin).toFixed(1)}px;width:${(P.width * P.scale).toFixed(1)}px;height:auto" `)}</div>`);
   }
-  const css = `@page { size: ${pageSize} ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; } html, body { margin: 0; padding: 0; background: #fff; } .page { page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; }`;
-  return { pw, ph, margin: MARGIN, width: L.width, html: `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>${pages.join('')}</body></html>`, pages: total, perPage, scale };
+  const css = `@page { size: ${pageSize} ${landscape ? 'landscape' : 'portrait'}; margin: ${Math.max(0, Math.min(40, Number(marginMm) || 0))}mm; } html, body { margin: 0; padding: 0; background: #fff; } .page { overflow: hidden; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; }`;
+  return { ...P, html: `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(model.title || 'Harmonogram')}</title><style>${css}</style></head><body>${out.join('')}</body></html>` };
 }
 
 /**

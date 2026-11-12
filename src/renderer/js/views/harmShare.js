@@ -1,11 +1,12 @@
 // Udostępnianie Harmonogramu: JPG (dobra jakość), obraz do schowka, Excel, PDF i wydruk. Na początku wybierasz, co ma być w raporcie:
 // kolumny, wiersze (jak na ekranie, wszystkie, gałąź zaznaczonej operacji), poziomy III/II/I, wykres (od – do, interwał), tytuł i stronę.
 import { h, clear, modal, toast } from '../ui.js';
-import { reportSvg, reportPagesHtml, reportXlsx, layout } from '../logic/harmReport.js';
+import { reportSvg, reportPagesHtml, reportXlsx, layout, pagePlan } from '../logic/harmReport.js';
 import { toBase64 } from '../logic/xlsx.js';
 import { INTERVALS, intervalOf, buildCells } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
 import { fmtDt } from '../logic/harmModel.js';
+import { calendarButton } from './datePicker.js';
 
 const LS_KEY = 'zks.harm.share';
 const lsGet = () => { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch { return {}; } };
@@ -50,6 +51,8 @@ export function shareDialog(ctx) {
     cols: new Set(ctx.shownKeys), chart: saved.chart !== false, interval: ctx.interval, title: saved.title || 'Harmonogram',
     pageSize: saved.pageSize || 'A4', landscape: saved.landscape !== false, scale: saved.scale || 2,
     inRange: saved.inRange !== false,
+    // strona PDF/wydruku: dopasowanie, skala własna [%], wyrównanie w poziomie, margines [mm]
+    fit: saved.fit || 'width', scalePct: saved.scalePct || 100, align: saved.align || 'center', marginMm: saved.marginMm ?? 10,
     openAfter: saved.openAfter !== false,   // otwórz gotowy dokument po zapisaniu   // wiersze tylko z operacjami trwającymi w zakresie dat
     // nagłówek firmowy (zapamiętany na tym komputerze); osoba udostępniająca = zalogowany użytkownik
     brand: saved.brand !== false, company: saved.company ?? 'ZKS Ferrum', dept: saved.dept ?? 'Wydział Obróbki Mechanicznej',
@@ -64,6 +67,8 @@ export function shareDialog(ctx) {
   const toI = h('input', { type: 'text', value: fmtDay(Math.min(ctx.maxEnd, ctx.axisStart + 30 * 86400000)), style: { width: '100px', padding: '3px' } });
   const titleI = h('input', { type: 'text', value: st.title, style: { width: '320px', padding: '3px' }, oninput: () => { st.title = titleI.value; schedule(); } });
   const info = h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap', margin: '6px 0' } });
+
+  const pageOpts = () => ({ pageSize: st.pageSize, landscape: st.landscape, fit: st.fit, scalePct: st.scalePct, align: st.align, marginMm: st.marginMm });
 
   // --- wybór wierszy, kolumn i osi → model raportu
   function pickRows() {
@@ -103,9 +108,9 @@ export function shareDialog(ctx) {
       const big = L.width * L.height > 60e6;
       info.className = 'muted';
       const paged = st.format === 'pdf' || st.format === 'print';
-      const pageScale = paged ? reportPagesHtml(m, { pageSize: st.pageSize, landscape: st.landscape }) : null;
+      const pageScale = paged ? pagePlan(m, pageOpts()) : null;
       info.textContent = `Wierszy: ${m.rows.length}, kolumn tabeli: ${m.columns.length}${m.chart ? `, kolumn osi: ${m.chart.cells.length}` : ''}. Rozmiar obrazu: ${L.width} × ${L.height} px`
-        + (pageScale ? `\nStrony: ${pageScale.pages}, skala na stronie: ${Math.round(pageScale.scale * 100)}%` + (pageScale.scale < 0.55 ? ' – mało czytelne: zawęź zakres dat, wybierz dłuższy interwał, mniej kolumn albo A3' : '') : '')
+        + (pageScale ? `\nStrony: ${pageScale.pages}, skala na stronie: ${Math.round(pageScale.scale * 100)}%` + (pageScale.overflow ? ' – raport szerszy niż strona, prawa część zostanie ucięta (zmniejsz skalę albo wybierz dopasowanie)' : '') + (pageScale.scale < 0.55 ? ' – mało czytelne: zawęź zakres dat, wybierz dłuższy interwał, mniej kolumn albo A3' : '') : '')
         + (big ? '\nUwaga: bardzo duży raport – zawęź zakres dat, wybierz dłuższy interwał albo mniej wierszy.' : '');
       renderPreview(m);
     } catch (e) { info.className = 'err'; info.textContent = e.message; clear(preview); }
@@ -114,14 +119,16 @@ export function shareDialog(ctx) {
   const preview = h('div', { style: { border: '1px solid #ccc', background: '#fff', maxHeight: '64vh', overflow: 'auto', margin: '6px 0' } });
   function renderPreview(m) {
     const paged = st.format === 'pdf' || st.format === 'print';
-    const P = paged ? reportPagesHtml(m, { pageSize: st.pageSize, landscape: st.landscape }) : null;
+    const P = paged ? pagePlan(m, pageOpts()) : null;
     const n = paged ? P.perPage : 40;
     const { svg } = reportSvg(m, { from: 0, to: Math.min(m.rows.length, n), page: paged ? `Strona 1 z ${P.pages}` : '' });
     if (paged) {
       // cała strona (format, marginesy), raport dopasowany do szerokości i wyśrodkowany – jak w PDF i na wydruku
       const pct = (v) => (v / P.pw * 100).toFixed(3) + '%';
-      preview.innerHTML = `<div style="background:#8a8a8a;padding:14px"><div style="background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.4);aspect-ratio:${P.pw}/${P.ph};padding:${pct(P.margin)};box-sizing:border-box;overflow:hidden">`
-        + svg.replace('<svg ', `<svg style="display:block;margin:0 auto;width:${(P.width * P.scale / (P.pw - 2 * P.margin) * 100).toFixed(3)}%;height:auto" `) + '</div></div>';
+      // strona z marginesami (przerywana linia), raport w miejscu i skali jak w PDF
+      preview.innerHTML = `<div style="background:#8a8a8a;padding:14px"><div style="position:relative;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.4);aspect-ratio:${P.pw}/${P.ph};overflow:hidden">`
+        + `<div style="position:absolute;left:${pct(P.margin)};right:${pct(P.margin)};top:${(P.margin / P.ph * 100).toFixed(3)}%;bottom:${(P.margin / P.ph * 100).toFixed(3)}%;outline:1px dashed #bbb"></div>`
+        + svg.replace('<svg ', `<svg style="position:absolute;left:${pct(P.left)};top:${(P.margin / P.ph * 100).toFixed(3)}%;width:${pct(P.width * P.scale)};height:auto" `) + '</div></div>';
       return;
     }
     preview.innerHTML = svg.replace('<svg ', '<svg style="width:100%;height:auto;display:block" ');
@@ -159,9 +166,14 @@ export function shareDialog(ctx) {
     for (const c of ctx.cols) colBox.append(h('label', {}, h('input', { type: 'checkbox', checked: st.cols.has(c.key), onchange: (e) => { if (e.target.checked) st.cols.add(c.key); else st.cols.delete(c.key); refreshInfo(); } }), ` ${c.title} (${c.letter})`));
     const paged = st.format === 'pdf' || st.format === 'print';
     pageBox.style.display = paged ? '' : 'none';
-    pageBox.append('Strona: ', ...['A4', 'A3'].map((p) => radio('ps', p, p, st.pageSize, (x) => { st.pageSize = x; })),
+    pageBox.style.border = '1px solid #cfd8e3'; pageBox.style.background = '#f5f8fc'; pageBox.style.padding = '6px'; pageBox.style.margin = '4px 0';
+    pageBox.append(h('b', {}, 'Strona (PDF i wydruk)'), h('br'), 'Format: ', ...['A4', 'A3'].map((p) => radio('ps', p, p, st.pageSize, (x) => { st.pageSize = x; })),
       radio('or', 'l', 'poziomo', st.landscape ? 'l' : 'p', () => { st.landscape = true; }), radio('or', 'p', 'pionowo', st.landscape ? 'l' : 'p', () => { st.landscape = false; }),
-      h('span', { class: 'muted' }, 'Raport jest dopasowany do szerokości strony; wiersze dzielą się na strony, nagłówek powtarza się na każdej.'));
+      h('div', { style: { marginTop: '4px' } }, 'Dopasowanie: ', ...[['width', 'do szerokości strony'], ['page', 'cały raport na jednej stronie'], ['actual', '100%'], ['custom', 'własna skala']].map(([v, l]) => radio('fit', v, l, st.fit, (x) => { st.fit = x; })),
+        st.fit === 'custom' ? h('input', { type: 'number', min: 10, max: 400, step: 5, value: st.scalePct, style: { width: '64px', padding: '2px' }, oninput: (e) => { st.scalePct = Math.max(10, Math.min(400, Number(e.target.value) || 100)); schedule(); } }) : null, st.fit === 'custom' ? ' %' : null),
+      h('div', { style: { marginTop: '4px' } }, 'Wyrównanie: ', ...[['left', 'do lewej'], ['center', 'do środka'], ['right', 'do prawej']].map(([v, l]) => radio('al', v, l, st.align, (x) => { st.align = x; }))),
+      h('div', { style: { marginTop: '4px' } }, 'Marginesy: ', ...[[0, 'brak'], [5, '5 mm'], [10, '10 mm'], [15, '15 mm'], [20, '20 mm'], [25, '25 mm']].map(([v, l]) => radio('mg', v, l, st.marginMm, (x) => { st.marginMm = x; }))),
+      h('div', { class: 'muted', style: { marginTop: '2px' } }, 'Wiersze dzielą się na strony, nagłówek tabeli powtarza się na każdej; przerywana linia w podglądzie to marginesy.'));
     imgBox.style.display = st.format === 'jpg' || st.format === 'clip' ? '' : 'none';
     imgBox.append('Jakość obrazu: ', ...[[1, 'standard (1×)'], [2, 'dobra (2×)'], [3, 'bardzo dobra (3×)']].map(([v, l]) => radio('sc', v, l, st.scale, (x) => { st.scale = x; })));
   }
@@ -176,7 +188,7 @@ export function shareDialog(ctx) {
     let model;
     try { model = buildModel(); } catch (e) { toast(e.message); return; }
     if (!model.rows.length) { toast('Brak wierszy do pokazania (sprawdź wiersze i poziomy)'); return; }
-    lsSet({ format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale, inRange: st.inRange, openAfter: st.openAfter, brand: st.brand, company: st.company, dept: st.dept, program: st.program, owner: st.owner });
+    lsSet({ format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale, inRange: st.inRange, fit: st.fit, scalePct: st.scalePct, align: st.align, marginMm: st.marginMm, openAfter: st.openAfter, brand: st.brand, company: st.company, dept: st.dept, program: st.program, owner: st.owner });
     const base = `harmonogram_${stamp()}`;
     go.disabled = true; go.textContent = 'Przygotowuję…';
     try {
@@ -184,7 +196,7 @@ export function shareDialog(ctx) {
         const ok = await window.zks.saveFile(base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', toBase64(reportXlsx(model)));
         if (ok) { toast('Zapisano plik Excel'); if (st.openAfter) await window.zks.openLastSaved?.(); }
       } else if (st.format === 'pdf' || st.format === 'print') {
-        const { html, pages } = reportPagesHtml(model, { pageSize: st.pageSize, landscape: st.landscape });
+        const { html, pages } = reportPagesHtml(model, pageOpts());
         const ok = st.format === 'pdf' ? await window.zks.savePdf(html, { name: base + '.pdf', pageSize: st.pageSize, landscape: st.landscape }) : await window.zks.printReport(html, { pageSize: st.pageSize, landscape: st.landscape });
         if (ok) toast(st.format === 'pdf' ? `Zapisano PDF (stron: ${pages})` : 'Wysłano do drukarki');
         if (ok && st.format === 'pdf' && st.openAfter) await window.zks.openLastSaved?.();
@@ -203,14 +215,14 @@ export function shareDialog(ctx) {
   // dwie kolumny: z lewej opcje, z prawej podgląd na żywo (cały czas widoczny)
   const m = modal('Udostępnij harmonogram', h('div', {}, h('div', { style: { display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' } }, h('div', { style: { flex: '1 1 460px', minWidth: '420px', maxHeight: '74vh', overflow: 'auto', paddingRight: '6px' } },
     section('Format', fmtBox),
+    pageBox, imgBox,
     section('Tytuł raportu', titleI),
     section('Wiersze', rowBox),
     section('Poziomy', lvlBox),
     section('Kolumny', colQuick, colBox),
-    section('Zakres dat', 'od ', fromI, ' do ', toI, h('label', { style: { marginLeft: '14px' } }, chartCb, ' pokaż wykres'), h('span', { style: { marginLeft: '14px' } }, 'interwał '), intervalSel,
+    section('Zakres dat', 'od ', fromI, calendarButton(fromI, { title: 'Początek zakresu – kalendarz', holidays: ctx.holidays }), ' do ', toI, calendarButton(toI, { title: 'Koniec zakresu – kalendarz', holidays: ctx.holidays }), h('label', { style: { marginLeft: '14px' } }, chartCb, ' pokaż wykres'), h('span', { style: { marginLeft: '14px' } }, 'interwał '), intervalSel,
       h('div', { style: { marginTop: '4px' } }, h('label', {}, inRangeCb, ' tylko operacje trwające w tym zakresie (bez zakończonych wcześniej i jeszcze nierozpoczętych)'))),
     section('Nagłówek raportu', h('label', {}, brandCb, ' logo, firma, wydział i osoba udostępniająca z lewej; program i twórca z prawej'), brandFields),
-    pageBox, imgBox,
     section('Po zapisaniu', h('label', {}, openCb, ' otwórz gotowy dokument (JPG, Excel, PDF) w domyślnym programie'))),
     h('div', { style: { flex: '1 1 520px', minWidth: '420px', position: 'sticky', top: 0 } }, h('b', {}, 'Podgląd na żywo'), info, preview)),
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), go)), { wide: true });

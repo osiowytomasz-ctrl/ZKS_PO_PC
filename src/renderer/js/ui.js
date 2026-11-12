@@ -1,6 +1,7 @@
 // Pomocnicze funkcje interfejsu: tworzenie elementów, dialogi, komunikaty, wywołania API.
 import { rangeFilter } from './logic/tableFilter.js';
 import { parseDate } from './logic/common.js';
+import { calendarButton } from './views/datePicker.js';
 
 /** Tworzy element: h('div', {class:'x', onclick: fn}, 'tekst', dziecko…). */
 export function h(tag, props, ...children) {
@@ -201,7 +202,7 @@ export function columnFilterDialog({ title, options, activeFilter, activeSort, o
     };
     rangeBox = h('div', { style: { border: '1px solid #ccc', padding: '6px', margin: '4px 0', background: isRange ? '#eef5ff' : '' } },
       h('div', { style: { fontWeight: 700, fontSize: '12px', marginBottom: '4px' } }, 'Zakres dat' + (isRange ? ' (aktywny)' : '')),
-      h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, fromI, '–', toI, h('button', { class: 'btn small primary', onclick: applyRange }, 'Filtruj zakresem')), err);
+      h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, fromI, calendarButton(fromI, { title: 'Od – kalendarz' }), '–', toI, calendarButton(toI, { title: 'Do – kalendarz' }), h('button', { class: 'btn small primary', onclick: applyRange }, 'Filtruj zakresem')), err);
     for (const i of [fromI, toI]) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyRange(); });
   }
   const content = h('div', {},
