@@ -656,8 +656,47 @@ export function mountHarmLive(el, appCtx) {
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setScale(st.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); } }, { passive: false });
   // przesunięcie początku osi względem dziś w dniach (ujemne = przeszłość, dodatnie = przyszłość)
   const setShift = (v) => { const n = Math.round(Number(v)); if (!Number.isFinite(n)) return; st.shift = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, n)); if (st.data) draw(); };
-  const shiftInput = h('input', { type: 'number', value: '-3', step: '1', title: 'Początek osi względem dziś [dni]: ujemne = przeszłość, dodatnie = przyszłość', style: { width: '64px', padding: '3px', textAlign: 'center' },
-    onchange: () => setShift(shiftInput.value), onkeydown: (e) => { if (e.key === 'Enter') { setShift(shiftInput.value); shiftInput.blur(); } } });
+  const shiftInput = h('input', { type: 'number', value: '-3', step: '1', title: 'Początek osi względem dziś [dni]: ujemne = cofnięte (przeszłość), dodatnie = przyszłość. Kliknij: suwak, dni albo data',
+    style: { width: '64px', padding: '3px', textAlign: 'center' },
+    onchange: () => setShift(shiftInput.value), onkeydown: (e) => { if (e.key === 'Enter') { setShift(shiftInput.value); shiftInput.blur(); } },
+    onclick: () => openShiftPopup() });
+  // Okienko przesunięcia: suwak (±365 dni), liczba dni albo data początku osi (z kalendarzem); w polu zostaje liczba dni od dziś
+  let shiftPopup = null;
+  function openShiftPopup() {
+    if (shiftPopup) return;
+    const DAY = 86400000, now = H.localNow(), today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const fmtD = (ms) => fmtDt(ms).slice(0, 10);
+    const range = h('input', { type: 'range', min: -365, max: 365, step: 1, value: st.shift, style: { width: '260px' } });
+    const days = h('input', { type: 'number', value: st.shift, step: 1, style: { width: '70px', padding: '3px' } });
+    const date = h('input', { type: 'text', value: fmtD(today + st.shift * DAY), placeholder: 'dd.mm.rrrr', style: { width: '100px', padding: '3px' } });
+    const label = h('div', { class: 'muted', style: { fontSize: '12px' } });
+    let timer = null;
+    const apply = (n, from) => {
+      n = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, Math.round(n)));
+      if (from !== 'range') range.value = String(Math.max(-365, Math.min(365, n)));
+      if (from !== 'days') days.value = String(n);
+      if (from !== 'date') date.value = fmtD(today + n * DAY);
+      label.textContent = n < 0 ? `Cofnięte o ${-n} dni (początek osi: ${fmtD(today + n * DAY)})` : n > 0 ? `Do przodu o ${n} dni (początek osi: ${fmtD(today + n * DAY)})` : 'Początek osi: dziś';
+      shiftInput.value = String(n);
+      clearTimeout(timer); timer = setTimeout(() => setShift(n), 120);   // rysowanie z opóźnieniem – płynny suwak
+    };
+    range.addEventListener('input', () => apply(+range.value, 'range'));
+    days.addEventListener('input', () => { if (days.value.trim() !== '' && Number.isFinite(+days.value)) apply(+days.value, 'days'); });
+    const fromDate = () => { const d = parseDateTime(date.value.trim()); if (d != null) apply((Math.floor(d / DAY) * DAY - today) / DAY, 'date'); };
+    date.addEventListener('change', fromDate); date.addEventListener('keydown', (e) => { if (e.key === 'Enter') fromDate(); });
+    const close = () => { if (!shiftPopup) return; shiftPopup.remove(); shiftPopup = null; document.removeEventListener('mousedown', outside, true); };
+    const outside = (e) => { if (shiftPopup && !shiftPopup.contains(e.target) && e.target !== shiftInput && !e.target.closest('.overlay')) close(); };
+    const r = shiftInput.getBoundingClientRect();
+    shiftPopup = h('div', { style: { position: 'fixed', left: Math.max(8, r.left) + 'px', top: r.bottom + 4 + 'px', zIndex: 60, background: '#fff', border: '1px solid #999', boxShadow: '0 4px 14px rgba(0,0,0,.25)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '6px' } },
+      h('b', {}, 'Przesunięcie harmonogramu'),
+      h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, h('span', { style: { fontSize: '12px' } }, '−365'), range, h('span', { style: { fontSize: '12px' } }, '+365')),
+      h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, 'Dni: ', days, h('span', { style: { marginLeft: '10px' } }, 'albo data: '), date, calendarButton(date, { title: 'Początek osi – kalendarz', holidays: holidayMap(st.m && st.m.cfg && st.m.cfg.holidays) })),
+      label,
+      h('div', { class: 'row', style: { gap: '6px' } }, ...[[-7, '−7'], [-3, '−3'], [0, 'Dziś'], [7, '+7']].map(([v, t]) => h('button', { class: 'btn small', onclick: () => apply(v) }, t)), h('span', { class: 'grow' }), h('button', { class: 'btn small primary', onclick: close }, 'Zamknij')));
+    document.body.append(shiftPopup);
+    document.addEventListener('mousedown', outside, true);
+    apply(st.shift);
+  }
   const intervalSel = h('select', { title: 'Interwał osi czasu: długość jednej kolumny', onchange: () => { st.interval = intervalOf(intervalSel.value).id; lsSet(LS.interval, st.interval); if (st.data) draw(); } },
     ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;

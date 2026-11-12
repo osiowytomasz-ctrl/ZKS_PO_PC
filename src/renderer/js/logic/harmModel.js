@@ -286,7 +286,7 @@ export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
       segs: chopped(o.lp) ? leafSegs(o.lp).sort((a, b) => a[0] - b[0]) : [], zak, state: r.state, stanowiskoBg: sl.bg || '#cccccc', stanowiskoColor: sl.color || '#000000',
     });
   }
-  return { rows, holidays: [], rapData: {}, result, komisRows: komisSummaries(rows, list, kids, result, up, look) };
+  return { rows, holidays: [], rapData: {}, result, komisRows: komisSummaries(rows, list, kids, result, up, look, nowMs) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -299,11 +299,19 @@ export const KOMIS_PREFIX = 'K:';
 export const isKomisId = (id) => typeof id === 'string' && id.startsWith(KOMIS_PREFIX);
 const KOMIS_DONE_BAR = '#93c47d';
 
-function komisSummaries(rows, list, kids, result, up, look) {
+/** Etap komisu: 0 – zakończony (wszystkie operacje „zak.”), 1 – w trakcie (coś zakończone albo start już minął), 2 – nierozpoczęty. */
+export function komisPhase(k, nowMs) {
+  if (k.leafCount && k.zakCount === k.leafCount) return 0;
+  if (k.zakCount > 0 || (k.ms && k.ms.start != null && k.ms.start <= nowMs)) return 1;
+  return 2;
+}
+
+function komisSummaries(rows, list, kids, result, up, look, nowMs = Date.now()) {
   const byKomis = new Map();
   for (const o of list) { const k = String(up(o.lp, 'komis') || '').trim(); if (!k) continue; if (!byKomis.has(k)) byKomis.set(k, []); byKomis.get(k).push(o); }
   const out = new Map();
   for (const [k, ops] of byKomis) {
+    if (ops.length < 2) continue;   // podsumowanie tylko dla komisów z więcej niż jedną operacją
     const leaves = ops.filter((o) => !kids.has(o.lp));
     const done = (o) => String(o.status || '').trim().toLowerCase() === 'zak.';
     const zak = leaves.filter(done).length;
@@ -333,10 +341,8 @@ function komisSummaries(rows, list, kids, result, up, look) {
       ms: { start, koniec: end, wysylka: wys, dostawa: dost }, segs, zak: status === 'zak.' ? 'zak.' : '', state: 'ok',
     });
   }
-  // kolejność: wg pierwszego wystąpienia komisu w harmonogramie (kolumna S)
-  const first = new Map();
-  rows.forEach((r, i) => { const k = String(r.komis || '').trim(); if (k && !first.has(k)) first.set(k, i); });
-  return new Map([...out].sort((a, b) => (first.get(a[0]) ?? 1e9) - (first.get(b[0]) ?? 1e9)));
+  // kolejność: u góry zakończone, potem w trakcie, na dole nierozpoczęte; w każdej grupie alfabetycznie wg komisu
+  return new Map([...out].sort((a, b) => komisPhase(a[1], nowMs) - komisPhase(b[1], nowMs) || a[0].localeCompare(b[0], 'pl', { numeric: true, sensitivity: 'base' })));
 }
 
 /**

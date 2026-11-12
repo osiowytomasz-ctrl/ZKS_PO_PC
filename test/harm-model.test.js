@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { computeSchedule, buildCapacity } from '../src/renderer/js/logic/schedule.js';
-import { reorderIds, reorderPlan, capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt, withKomisRows, isKomisId } from '../src/renderer/js/logic/harmModel.js';
+import { komisPhase, reorderIds, reorderPlan, capacityFrom, idError, renamePlan, lpCompare, isSyntheticId, isSubId, arrangeRows, blockedPredecessors, predError, predecessorChoices, validateNewOps, statKey, chunkId, parseGrafik, daysByKeyOf, buildHarmData, fmtDt, withKomisRows, isKomisId } from '../src/renderer/js/logic/harmModel.js';
 import { sortRows, filterOptions } from '../src/renderer/js/logic/tableFilter.js';
 import { importOperations, opsFromSheetRows, parseDelimited } from '../src/renderer/js/logic/harmImport.js';
 
@@ -299,12 +299,14 @@ test('podsumowanie komisu: pasek komisu – podsumowanie z operacji komisu, nie 
     '100a': { hours: 4, station: '1Si', status: 'zak.' }, '100b': { hours: 2, station: '2Un', wysylka: D(5, 12), dostawa: D(1, 8) },
     200: { startManual: D(2, 16), hours: 2, station: '1Si', komis: '300' },     // komis „300” nie myli się z operacją 300
     300: { startManual: D(4, 6), hours: 3, station: '3Co', komis: 'Z1', preds: [] },
+    500: { startManual: D(2, 6), hours: 1, station: '1Si', komis: '300' },     // drugi komisu „300”
+    600: { startManual: D(2, 6), hours: 1, station: '1Si', komis: 'Solo' },    // komis z jedną operacją: bez podsumowania
     400: { startManual: D(2, 6), hours: 1, station: '3Co' },                     // bez komisu: bez paska komisu
   };
   const without = buildHarmData(Object.fromEntries(Object.entries(ops).map(([k, o]) => [k, { ...o, komis: '' }])), days, null, D(2, 6));
   const d = buildHarmData(ops, days, null, D(2, 6));
   for (const r of without.rows) assert.equal(d.rows.find((x) => x.id === r.id).koniec, r.koniec);   // komisy nie zmieniają terminów
-  assert.equal(d.rows.length, 6);                                                                       // paski komisów nie są wierszami danych
+  assert.equal(d.rows.length, 8);   // paski komisów nie są wierszami danych
   const k = d.komisRows.get('Z1');
   assert.equal(k.id, 'K:Z1'); assert.ok(isKomisId(k.id)); assert.equal(k.lp, '');
   assert.equal(k.opCount, 4); assert.equal(k.leafCount, 3); assert.equal(k.zakCount, 1); assert.equal(k.status, '1/3');
@@ -312,10 +314,10 @@ test('podsumowanie komisu: pasek komisu – podsumowanie z operacji komisu, nie 
   assert.equal(k.ms.start, D(2, 6)); assert.equal(k.ms.koniec, D(4, 9)); assert.equal(k.ms.wysylka, D(3, 12)); assert.equal(k.ms.dostawa, D(1, 8));
   assert.equal(k.late, true);
   assert.deepEqual(k.segs.map((x) => x[2]), ['#93c47d', '#00b0f0', '#ffc000']);                         // zakończona operacja na zielono
-  assert.equal(d.komisRows.get('300').opCount, 1); assert.equal(d.komisRows.size, 2);
+  assert.equal(d.komisRows.get('300').opCount, 2); assert.equal(d.komisRows.size, 2); assert.equal(d.komisRows.has('Solo'), false);
   // kolejność pasków: wg pierwszego wystąpienia komisu w harmonogramie
   const firstIdx = (kk) => d.rows.findIndex((r) => r.komis === kk);
-  assert.deepEqual([...d.komisRows.keys()], ['Z1', '300'].sort((a, b) => firstIdx(a) - firstIdx(b)));
+  assert.deepEqual([...d.komisRows.keys()], ['300', 'Z1']);   // oba w trakcie – alfabetycznie
   const rows = arrangeRows(d.rows, new Set(), new Set());
   const sums = [...d.komisRows.values()];
   // domyślnie: wszystkie paski na samej górze
@@ -334,4 +336,15 @@ test('podsumowanie komisu: pasek komisu – podsumowanie z operacji komisu, nie 
   assert.deepEqual(col.filter((r) => String(r.komis) === 'Z1').map((r) => r.id), ['K:Z1']);
   assert.equal(withKomisRows(rows, [], new Set(['K:Z1'])).length, rows.length);
   assert.equal(k.level, 0);
+});
+
+test('podsumowania komisów: zakończone, w trakcie, nierozpoczęte – w każdej grupie alfabetycznie', () => {
+  const D = (d, h) => Date.UTC(2026, 10, d, h);
+  const days = {}; for (let i = 0; i < 20; i++) days[`2026-11-${String(2 + i).padStart(2, '0')}`] = { '1Si1': 'a8', '1Si2': 'b8' };
+  const op = (komis, day, status = '') => ({ startManual: D(day, 6), hours: 2, station: '1Si', komis, status });
+  const ops = { 1: op('B', 3, 'zak.'), 2: op('B', 3, 'zak.'), 3: op('A', 3, 'zak.'), 4: op('A', 3, 'zak.'), 5: op('D', 3), 6: op('D', 15), 7: op('C', 3, 'zak.'), 8: op('C', 15),
+    9: op('F', 15), 10: op('F', 16), 11: op('E', 15), 12: op('E', 16) };
+  const d = buildHarmData(ops, days, null, D(10, 6));
+  assert.deepEqual([...d.komisRows.keys()], ['A', 'B', 'C', 'D', 'E', 'F']);
+  assert.deepEqual([...d.komisRows.values()].map((k) => komisPhase(k, D(10, 6))), [0, 0, 1, 1, 2, 2]);
 });
