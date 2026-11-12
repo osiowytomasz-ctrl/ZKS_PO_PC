@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findIssues, issuesByOp } from '../src/renderer/js/logic/harmIssues.js';
+import { findIssues, issuesByOp, conflictPath } from '../src/renderer/js/logic/harmIssues.js';
 
 // mała kopia sytuacji z produkcji: 850a czeka na 202b, a 202b (przez 850b) czeka na 850a – pętla
 const ops = () => ({
@@ -23,4 +23,11 @@ test('konflikty: pętla z podpowiedzią, brak poprzednika, daty, rodzic, czas, s
   // po usunięciu powiązania pętla znika
   const o = ops(); o['850a'].preds = [];
   assert.equal(findIssues(o).filter((x) => x.kind === 'cycle').length, 0);
+});
+
+test('ścieżka konfliktu: łańcuch od powiązania z powrotem do operacji, z powodami', () => {
+  const p = conflictPath(ops(), '850a', '202b');
+  assert.deepEqual(p.map((s) => `${s.waiter}>${s.on}`), ['850a>202b', '202b>202a', '202a>850b', '850b>850a']);
+  assert.ok(p[0].closing); assert.equal(p[3].kind, 'order'); assert.match(p[3].why, /kolejność w 850/);
+  assert.deepEqual(conflictPath(ops(), '300', '999'), []);
 });

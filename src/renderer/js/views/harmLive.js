@@ -17,7 +17,7 @@ import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSe
 import { shareDialog } from './harmShare.js';
 import { firebase, harmLevel, onHarmLevel } from '../fb.js';
 import { harmAccess, legacyLevel } from '../logic/harmAccess.js';
-import { findIssues, issuesByOp } from '../logic/harmIssues.js';
+import { findIssues, issuesByOp, conflictPath } from '../logic/harmIssues.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
@@ -52,7 +52,8 @@ export function mountHarmLive(el, appCtx) {
     confirmChanges: lsGet(LS.confirm, true) !== false,
     // wykres: pola napisu na pasku (w tej kolejności), wielkość czcionki napisów [px przy 100%; 0 = jak w tabeli], kolor komisu na pasku
     chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, komisColor: false, ...lsGet(LS.chart, {}) },   // okno potwierdzenia przed zapisem zmiany komórki
-    issues: [], issueMap: new Map(), cursor: null,   // konflikty i błędy (liczone na bieżąco), aktywna komórka (nawigacja jak w Excelu)
+    issues: [], issueMap: new Map(), cursor: null, path: null,   // path – pokazywana ścieżka konfliktu (linie na wykresie)
+      // konflikty i błędy (liczone na bieżąco), aktywna komórka (nawigacja jak w Excelu)
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
@@ -149,6 +150,13 @@ export function mountHarmLive(el, appCtx) {
       st.issues = findIssues(st.m.opsByLp, { ends, noStart, stations: new Set(stationList(st.m.cfg).map((x) => x.name)) });
       st.issueMap = issuesByOp(st.issues);
       syncIssues();
+      // pokazywana ścieżka po zmianie danych: przeliczona albo – gdy pętla zniknęła – schowana
+      if (st.path) {
+        const still = st.issues.some((x) => x.lp === st.path.lp && x.pred === st.path.pred);
+        const p = st.path; st.path = null;
+        if (still || (!p.loop && (st.m.opsByLp[p.lp]?.preds || []).includes(p.pred))) showPath(p.lp, p.pred);
+        else { renderPathBar(); if (p.loop) toast(`Pętla przez ${p.lp} ← ${p.pred} rozwiązana`); }
+      }
       if (!st.editing) paintWindow();
     }, 250);
   }
@@ -180,7 +188,7 @@ export function mountHarmLive(el, appCtx) {
       clear(list);
       const items = st.issues.filter((x) => level === 'all' || x.level === level);
       if (!items.length) list.append(h('div', { class: 'muted', style: { padding: '8px' } }, 'Brak konfliktów i błędów.'));
-      for (const x of items) list.append(h('div', { title: 'Kliknij, aby przejść do komórki', onclick: () => { m.close(); goTo(x.lp, x.col); },
+      for (const x of items) list.append(h('div', { title: 'Kliknij, aby przejść do komórki' + (x.pred ? ' i pokazać ścieżkę konfliktu' : ''), onclick: () => { m.close(); goTo(x.lp, x.col); if (x.pred) showPath(x.lp, x.pred); else clearPath(); },
         style: { padding: '3px 6px', cursor: 'pointer', borderBottom: '1px solid #eee', color: x.level === 'error' ? '#c00000' : '#7a5a00', fontWeight: x.fix ? 700 : 400, background: x.fix ? '#fff2cc' : '' } },
         (x.level === 'error' ? '⛔ ' : '⚠ ') + x.text));
     };
@@ -191,6 +199,78 @@ export function mountHarmLive(el, appCtx) {
       h('div', { class: 'row', style: { gap: '4px', marginBottom: '6px' } }, tab('all', `Wszystkie (${st.issues.length})`), tab('error', `Błędy (${err})`), tab('warn', `Uwagi (${st.issues.length - err})`)),
       list, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
     render();
+  }
+
+  // ---------- ścieżka konfliktu: linie na wykresie od operacji, na którą się czeka, do operacji czekającej ----------
+  // Klik w konflikt na liście albo w operację z konfliktem pokazuje łańcuch pętli; pasek nad tabelą wypisuje ogniwa (klik – przejście).
+  const pathBar = h('div', { class: 'row panel', style: { display: 'none', flexWrap: 'wrap', gap: '4px', alignItems: 'center', fontSize: '13px', background: '#fff0f0', borderColor: '#e00000' } });
+  function showPath(lp, pred) {
+    if (!st.m) return;
+    let steps = conflictPath(st.m.opsByLp, lp, pred), loop = steps.length > 0;
+    if (!loop && st.m.opsByLp[pred]) steps = [{ waiter: lp, on: pred, kind: 'pred', why: `${lp} czeka na koniec ${pred} (poprzednik)`, from: 's', to: 'e', closing: true }];
+    if (!steps.length) { clearPath(); return; }
+    st.path = { lp, pred, loop, steps, ops: new Set(steps.flatMap((x) => [x.waiter, x.on])) };
+    renderPathBar(); paintWindow();
+  }
+  function clearPath() { if (!st.path) return; st.path = null; renderPathBar(); paintWindow(); }
+  // operacja kliknięta w tabeli albo na wykresie: jej pierwsza pętla (jeśli ma); klik poza ścieżką chowa ścieżkę
+  function autoPath(id) {
+    const own = st.issues.find((x) => x.lp === id && x.kind === 'cycle');
+    if (own) { if (!(st.path && st.path.ops.has(id))) showPath(own.lp, own.pred); return; }
+    if (st.path && !st.path.ops.has(id)) clearPath();
+  }
+  function renderPathBar() {
+    clear(pathBar);
+    if (!st.path) { pathBar.style.display = 'none'; return; }
+    pathBar.style.display = 'flex';
+    const p = st.path, hiddenN = [...p.ops].filter((id) => !st.rows.some((r) => r.id === id)).length;
+    const chip = (id, i) => h('button', { class: 'btn small', title: 'Przejdź do operacji', style: { padding: '0 6px', fontWeight: 700, borderColor: i === 0 ? '#c000c0' : '#e00000' }, onclick: () => goTo(id, 'lp') }, id);
+    pathBar.append(h('b', { style: { color: '#c00000' } }, p.loop ? `Pętla zależności (${p.steps.length} ogniw):` : 'Powiązanie:'));
+    const order = [p.steps[0].waiter, ...p.steps.map((x) => x.on)];
+    order.forEach((id, i) => { if (i) pathBar.append(h('span', { title: p.steps[i - 1].why }, '→')); pathBar.append(chip(id, i)); });
+    if (hiddenN) pathBar.append(h('span', { class: 'muted' }, `(${hiddenN} poza widokiem – filtr, poziom albo zwinięte)`));
+    pathBar.append(h('span', { class: 'muted', title: p.steps.map((x) => x.why).join('\n') }, 'ⓘ'), h('span', { class: 'grow' }),
+      h('button', { class: 'btn small', title: 'Ukryj ścieżkę (Esc)', onclick: clearPath }, '✕'));
+  }
+  // linie ścieżki na wykresie (w warstwie z paskami); brak terminu operacji (np. w pętli) – linia przy lewej krawędzi widoku wykresu
+  function drawPath(g, chart) {
+    if (!st.path || !st.data) return;
+    const idx = new Map(st.rows.map((r, i) => [r.id, i])), res = st.data.result || new Map();
+    const x0 = chart.axisStart.getTime(), X = (ms) => Math.max(0, (ms - x0) / 3600000) * g.HOUR;
+    const gutter = Math.max(14, body.scrollLeft - (st.compact ? 0 : g.LEFT) + 24);
+    const pos = (id, which) => { const v = res.get(id); const ms = v ? (which === 's' ? v.start : v.end) : null; return ms == null ? gutter : X(ms); };
+    const H2 = g.ROW / 2, parts = [];
+    for (const id of st.path.ops) { const i = idx.get(id); if (i != null) g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 0, pointerEvents: 'none', left: 0, top: i * g.ROW + 'px', width: g.chartW + 'px', height: g.ROW + 'px', background: 'rgba(224,0,0,.10)' } })); }
+    st.path.steps.forEach((s, k) => {
+      const ia = idx.get(s.waiter), ib = idx.get(s.on); if (ia == null || ib == null) return;
+      const xa = pos(s.waiter, s.from), ya = ia * g.ROW + H2, xb = pos(s.on, s.to), yb = ib * g.ROW + H2;
+      const c = s.closing && st.path.loop ? '#c000c0' : '#e00000', bend = Math.max(30, Math.abs(ya - yb) / 4);
+      parts.push(`<path d="M${xb},${yb} C${xb + bend},${yb} ${xa - bend},${ya} ${xa},${ya}" fill="none" stroke="${c}" stroke-width="2.5"${s.closing ? ' stroke-dasharray="7 4"' : ''} marker-end="url(#harmArrow${s.closing ? 'C' : ''})"><title>${s.why.replace(/</g, '&lt;')}</title></path>`);
+      parts.push(`<circle cx="${xb}" cy="${yb}" r="4" fill="${c}"/>`);
+      parts.push(`<text x="${xa + 4}" y="${ya - 4}" font-size="11" font-weight="700" fill="${c}">${k + 1}</text>`);
+    });
+    const svg = h('div', { style: { position: 'absolute', zIndex: 4, pointerEvents: 'none', left: 0, top: 0, width: g.chartW + 'px', height: st.rows.length * g.ROW + 'px' } });
+    svg.innerHTML = `<svg width="${g.chartW}" height="${st.rows.length * g.ROW}" style="overflow:visible"><defs>`
+      + '<marker id="harmArrow" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e00000"/></marker>'
+      + '<marker id="harmArrowC" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c000c0"/></marker></defs>'
+      + parts.join('') + '</svg>';
+    svg.querySelectorAll('path[stroke]').forEach((p) => { p.style.pointerEvents = 'stroke'; });
+    g.dyn.append(svg);
+    // łuki przy kolumnie lp. w tabeli – widać je także wtedy, gdy wykres jest poza ekranem
+    const lpCol = g.cols.find((c) => c.key === 'lp');
+    if (lpCol) {
+      const lx = g.colW(lpCol) - 6, arcs = [];
+      st.path.steps.forEach((s, k) => {
+        const ia = idx.get(s.waiter), ib = idx.get(s.on); if (ia == null || ib == null) return;
+        const ya = ia * g.ROW + H2, yb = ib * g.ROW + H2, w = 16 + (k % 5) * 7, c = s.closing && st.path.loop ? '#c000c0' : '#e00000';
+        arcs.push(`<path d="M${lx},${yb} C${lx + w},${yb} ${lx + w},${ya} ${lx},${ya}" fill="none" stroke="${c}" stroke-width="2"${s.closing ? ' stroke-dasharray="6 3"' : ''} marker-end="url(#harmArrowL${s.closing && st.path.loop ? 'C' : ''})" opacity=".9"/>`);
+      });
+      const ov = h('div', { style: { position: 'absolute', zIndex: 4, pointerEvents: 'none', left: 0, top: 0, width: g.LEFT + 'px', height: st.rows.length * g.ROW + 'px' } });
+      ov.innerHTML = `<svg width="${g.LEFT}" height="${st.rows.length * g.ROW}" style="overflow:visible"><defs>`
+        + '<marker id="harmArrowL" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#e00000"/></marker>'
+        + '<marker id="harmArrowLC" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#c000c0"/></marker></defs>' + arcs.join('') + '</svg>';
+      g.leftRows.append(ov);
+    }
   }
 
   // ---------- nawigacja po tabeli jak w Excelu ----------
@@ -207,7 +287,7 @@ export function mountHarmLive(el, appCtx) {
   };
   function setCursor(id, key, { scroll = true } = {}) {
     st.cursor = { id, key };
-    st.selected = id;
+    st.selected = id; autoPath(id);
     if (scroll) ensureVisible();
     paintWindow();
   }
@@ -271,6 +351,7 @@ export function mountHarmLive(el, appCtx) {
   }
   const onNavKey = (e) => {
     if (!el.isConnected) { document.removeEventListener('keydown', onNavKey); return; }
+    if (e.key === 'Escape' && st.path && !document.querySelector('.overlay') && !st.editing) { clearPath(); }
     if (!st.cursor || st.editing || document.querySelector('.overlay')) return;
     const a = document.activeElement;
     if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
@@ -360,7 +441,7 @@ export function mountHarmLive(el, appCtx) {
       els.chart.style.background = c ? `rgba(${c}, .14)` : '';
     }
   };
-  const selectRow = (id) => { st.selected = id; applySelection(); };
+  const selectRow = (id) => { st.selected = id; autoPath(id); applySelection(); };
 
   // Zmiana kolejności dzieci (przeciągnij i upuść): operacja główna – suboperacje i subsuboperacje, suboperacja – jej subsuboperacje.
   // Przeciągać można tylko w obrębie jednego rodzica; litery się zamieniają, a powiązania (także z innych operacji) poprawiają się same.
@@ -847,6 +928,7 @@ export function mountHarmLive(el, appCtx) {
             ...(issLevel && col.key === 'lp' ? { boxShadow: `inset 4px 0 0 ${issLevel === 'error' ? '#c00000' : '#e0a800'}` } : {}),
             ...(st.cursor && st.cursor.id === r.id && st.cursor.key === col.key ? { outline: '2px solid #1a73e8', outlineOffset: '-2px' } : {}) } }, text);
         cell.dataset.cid = r.id; cell.dataset.ckey = col.key;
+        if (col.key === 'lp' && st.path && st.path.ops.has(r.id)) Object.assign(cell.style, { background: '#ffc7c7', fontWeight: 700 });
         if (col.key === 'lp' && r.subCount && !issLevel) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje';
         // jak w Excelu: klik zaznacza komórkę, dwuklik edytuje (daty – kalendarz, Z1–Z4 – lista), pisanie zaczyna edycję
         cell.addEventListener('click', (ev) => {
@@ -898,6 +980,7 @@ export function mountHarmLive(el, appCtx) {
       if (a === b || b < from || a >= to) continue;
       g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 3, pointerEvents: 'none', left: d.x * HOUR + 'px', top: a * ROW + ROW / 2 + 'px', width: 0, height: (b - a) * ROW + 'px', borderLeft: '1px dashed #555' } }));
     }
+    drawPath(g, chart);
     applySelection();
   }
   body.addEventListener('scroll', () => requestAnimationFrame(paintWindow));
@@ -1018,7 +1101,7 @@ export function mountHarmLive(el, appCtx) {
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
     h('span', { class: 'grow' }),
-    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
+    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), pathBar, body);
   syncTools(); syncIssues();
   load();
 }

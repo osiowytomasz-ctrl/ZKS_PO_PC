@@ -1,7 +1,7 @@
 // Konflikty i błędy harmonogramu liczone na bieżąco (po każdej zmianie w bazie): pętle zależności, brakujący poprzednicy,
 // suboperacje bez operacji nadrzędnej, koniec ręczny przed startem ręcznym, brak startu, brak czasu, nieznane stanowisko, koniec po wysyłce.
 // Ten sam zestaw reguł ma Android (harmfb/HarmIssues.kt).
-import { predError, subParent, isSyntheticId } from './harmModel.js';
+import { predError, subParent, isSyntheticId, lpCompare } from './harmModel.js';
 
 const fmt = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; };
 const isDone = (op) => String(op.status || '').trim().toLowerCase() === 'zak.';
@@ -29,7 +29,7 @@ export function findIssues(opsByLp, extra = {}) {
       const err = predError(without(ops, lp, p), lp, i, p);
       if (err) {
         if (isCycleMsg(err)) cycleLinks.push([lp, p, col]);
-        else push(lp, 'error', 'pred', `${lp} ← ${p}: ${err}`, col);
+        else { push(lp, 'error', 'pred', `${lp} ← ${p}: ${err}`, col); out[out.length - 1].pred = p; }
       }
     });
     if (op.startManual != null && op.endManual != null && op.endManual < op.startManual) push(lp, 'error', 'dates', `${lp}: koniec ręczny ${fmt(op.endManual)} jest przed startem ręcznym ${fmt(op.startManual)}`, 'endManual');
@@ -52,6 +52,7 @@ export function findIssues(opsByLp, extra = {}) {
     for (const [lp, p, col] of cycleLinks) {
       const fix = fixes.has(lp + '|' + p);
       push(lp, 'error', 'cycle', `${lp} ← ${p}: pętla zależności` + (fix ? ' – usunięcie tego powiązania rozwiązuje wszystkie pętle' : ''), col);
+      out[out.length - 1].pred = p;
     }
     out.forEach((x) => { if (x.kind === 'cycle' && /rozwiązuje/.test(x.text)) x.fix = true; });
   }
@@ -70,4 +71,59 @@ export function issuesByOp(issues) {
     e.texts.push(x.text);
   }
   return m;
+}
+
+/**
+ * Graf zależności jak w silniku (start/koniec każdej operacji) z opisem każdego powiązania – do pokazania ścieżki konfliktu.
+ * Węzły: 's:lp' (start) i 'e:lp' (koniec); deps: węzeł → [[węzeł, od którego zależy, rodzaj, opis]].
+ */
+function depGraph(ops) {
+  const kids = new Map();
+  for (const lp of Object.keys(ops)) { const p = subParent(lp); if (p && ops[p]) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
+  for (const l of kids.values()) l.sort(lpCompare);
+  const memo = new Map();
+  const own = (lp) => {
+    if (memo.has(lp)) return memo.get(lp);
+    memo.set(lp, false);
+    const o = ops[lp], par = subParent(lp);
+    let v = o.startManual != null || (o.preds || []).length > 0;
+    if (!v && par && ops[par]) v = kids.get(par).indexOf(lp) > 0 || own(par);
+    memo.set(lp, v); return v;
+  };
+  const deps = new Map();
+  const add = (n, d, kind, why) => { if (!deps.has(n)) deps.set(n, []); deps.get(n).push([d, kind, why]); };
+  for (const [lp, op] of Object.entries(ops)) {
+    for (const p of op.preds || []) if (ops[p]) add('s:' + lp, 'e:' + p, 'pred', `${lp} czeka na koniec ${p} (poprzednik)`);
+    const par = subParent(lp);
+    if (par && ops[par]) {
+      const sibs = kids.get(par), i = sibs.indexOf(lp);
+      if (i > 0) add('s:' + lp, 'e:' + sibs[i - 1], 'order', `${lp} startuje po końcu ${sibs[i - 1]} (kolejność w ${par})`);
+      else if (own(par)) add('s:' + lp, 's:' + par, 'parent', `${lp} startuje ze startem ${par}`);
+    }
+    if (kids.has(lp) && !own(lp)) add('s:' + lp, 's:' + kids.get(lp)[0], 'first', `${lp} bierze start od ${kids.get(lp)[0]}`);
+    add('e:' + lp, 's:' + lp, 'self', null);
+    if (kids.has(lp) && !(op.hours > 0)) for (const k of kids.get(lp)) add('e:' + lp, 'e:' + k, 'child', `koniec ${lp} zależy od końca ${k}`);
+  }
+  return deps;
+}
+
+/**
+ * Ścieżka pętli dla powiązania [lp] ← [pred]: kolejne kroki { waiter, on, kind, why, from: 's'|'e', to: 's'|'e' }
+ * (waiter czeka na on), od samego powiązania, dalej łańcuchem z powrotem do [lp]. Pusta lista – brak pętli.
+ */
+export function conflictPath(opsByLp, lp, pred) {
+  const ops = opsByLp || {};
+  if (!ops[lp] || !ops[pred]) return [];
+  const deps = depGraph(without(ops, lp, pred));
+  const start = 'e:' + pred, goal = 's:' + lp;
+  const prev = new Map([[start, null]]), q = [start];
+  while (q.length) {
+    const n = q.shift(); if (n === goal) break;
+    for (const [d, kind, why] of deps.get(n) || []) if (!prev.has(d)) { prev.set(d, [n, kind, why]); q.push(d); }
+  }
+  if (!prev.has(goal)) return [];
+  const chain = [];
+  for (let n = goal; prev.get(n); n = prev.get(n)[0]) { const [from, kind, why] = prev.get(n); if (kind !== 'self') chain.push({ waiter: from.slice(2), on: n.slice(2), kind, why, from: from[0], to: n[0] }); }
+  chain.reverse();
+  return [{ waiter: lp, on: pred, kind: 'pred', why: `${lp} czeka na koniec ${pred} (to powiązanie zamyka pętlę)`, from: 's', to: 'e', closing: true }, ...chain];
 }
