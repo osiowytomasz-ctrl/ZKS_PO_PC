@@ -17,6 +17,7 @@ import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSe
 import { shareDialog } from './harmShare.js';
 import { firebase, harmLevel, onHarmLevel } from '../fb.js';
 import { harmAccess, legacyLevel } from '../logic/harmAccess.js';
+import { findIssues, issuesByOp } from '../logic/harmIssues.js';
 
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
@@ -51,6 +52,7 @@ export function mountHarmLive(el, appCtx) {
     confirmChanges: lsGet(LS.confirm, true) !== false,
     // wykres: pola napisu na pasku (w tej kolejności), wielkość czcionki napisów [px przy 100%; 0 = jak w tabeli], kolor komisu na pasku
     chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, komisColor: false, ...lsGet(LS.chart, {}) },   // okno potwierdzenia przed zapisem zmiany komórki
+    issues: [], issueMap: new Map(), cursor: null,   // konflikty i błędy (liczone na bieżąco), aktywna komórka (nawigacja jak w Excelu)
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
@@ -103,6 +105,7 @@ export function mountHarmLive(el, appCtx) {
     if (!st.m) return;
     if (!acc().view) { st.data = null; clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Brak dostępu do Harmonogramu (poziom ---). Poziom ustawia administrator w zakładce Uzytkownicy, kolumna „Harmonogram”.')); return; }
     st.data = buildHarmData(st.m.opsByLp, st.days || {}, st.m.cfg, H.localNow().getTime());
+    scheduleIssues();
     if (st.editing) { st.pending = true; return; }
     draw();
   };
@@ -134,6 +137,168 @@ export function mountHarmLive(el, appCtx) {
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
+  // ---------- konflikty i błędy (na bieżąco, po każdej zmianie w bazie) ----------
+  let issuesTimer = null;
+  function scheduleIssues() {
+    clearTimeout(issuesTimer);
+    issuesTimer = setTimeout(() => {
+      if (!st.m || !st.data) return;
+      const res = st.data.result || new Map(), ends = new Map(), noStart = new Set();
+      for (const [id, v] of res) if (v && v.end != null) ends.set(id, v.end);
+      for (const r of st.data.rows) if (r.state === 'no-start') noStart.add(r.id);
+      st.issues = findIssues(st.m.opsByLp, { ends, noStart, stations: new Set(stationList(st.m.cfg).map((x) => x.name)) });
+      st.issueMap = issuesByOp(st.issues);
+      syncIssues();
+      if (!st.editing) paintWindow();
+    }, 250);
+  }
+  const issuesBtn = h('button', { class: 'btn small', style: { height: '30px', padding: '0 8px', fontWeight: 700 }, onclick: () => issuesDialog() });
+  function syncIssues() {
+    const err = st.issues.filter((x) => x.level === 'error').length, warn = st.issues.length - err;
+    issuesBtn.textContent = err || warn ? `⚠ ${err}${warn ? ' / ' + warn : ''}` : '✓';
+    issuesBtn.style.background = err ? '#c00000' : warn ? '#ffd966' : '#d9ead3';
+    issuesBtn.style.color = err ? '#fff' : '#000'; issuesBtn.style.borderColor = err ? '#c00000' : '';
+    issuesBtn.title = err || warn ? `Konflikty i błędy: ${err} błędów, ${warn} uwag. Kliknij: lista` : 'Brak konfliktów i błędów';
+  }
+  // przejście do komórki z problemem: rozwija i pokazuje operację, ustawia kursor
+  function goTo(lp, colKey) {
+    let i = st.rows.findIndex((r) => r.id === lp);
+    if (i < 0) {
+      let p = subParent(lp), changed = false;
+      while (p) { if (st.collapsed.delete(p)) changed = true; p = subParent(p); }
+      if (changed) draw();
+      i = st.rows.findIndex((r) => r.id === lp);
+    }
+    if (i < 0) { toast(`Operacja ${lp} jest ukryta (filtr albo poziom) – wyczyść filtry, aby ją zobaczyć`); return; }
+    const cols = st.geom.cols, key = cols.some((c) => c.key === colKey) ? colKey : 'lp';
+    setCursor(lp, key);
+  }
+  function issuesDialog() {
+    let level = 'all';
+    const list = h('div', { style: { maxHeight: '60vh', overflow: 'auto', fontSize: '13px' } });
+    const render = () => {
+      clear(list);
+      const items = st.issues.filter((x) => level === 'all' || x.level === level);
+      if (!items.length) list.append(h('div', { class: 'muted', style: { padding: '8px' } }, 'Brak konfliktów i błędów.'));
+      for (const x of items) list.append(h('div', { title: 'Kliknij, aby przejść do komórki', onclick: () => { m.close(); goTo(x.lp, x.col); },
+        style: { padding: '3px 6px', cursor: 'pointer', borderBottom: '1px solid #eee', color: x.level === 'error' ? '#c00000' : '#7a5a00', fontWeight: x.fix ? 700 : 400, background: x.fix ? '#fff2cc' : '' } },
+        (x.level === 'error' ? '⛔ ' : '⚠ ') + x.text));
+    };
+    const tab = (v, t) => h('button', { class: 'btn small' + (level === v ? ' primary' : ''), onclick: (e) => { level = v; [...e.target.parentNode.children].forEach((b) => b.classList.remove('primary')); e.target.classList.add('primary'); render(); } }, t);
+    const err = st.issues.filter((x) => x.level === 'error').length;
+    const m = modal('Konflikty i błędy harmonogramu', h('div', {},
+      h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Sprawdzane na bieżąco po każdej zmianie. Błędy: pętle zależności, brakujący poprzednicy, suboperacja bez operacji nadrzędnej, koniec ręczny przed startem. Uwagi: brak startu, brak czasu, nieznane stanowisko, koniec po wysyłce. Pogrubione na żółto – powiązanie, którego usunięcie rozwiązuje wszystkie pętle. Kliknij pozycję, aby przejść do komórki.'),
+      h('div', { class: 'row', style: { gap: '4px', marginBottom: '6px' } }, tab('all', `Wszystkie (${st.issues.length})`), tab('error', `Błędy (${err})`), tab('warn', `Uwagi (${st.issues.length - err})`)),
+      list, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+    render();
+  }
+
+  // ---------- nawigacja po tabeli jak w Excelu ----------
+  // Klik zaznacza komórkę; strzałki, Enter (w dół), Tab (w prawo), Shift+Enter/Shift+Tab (wstecz), Home/End, PageUp/PageDown, Ctrl+Home/End.
+  // Pisanie albo F2 zaczyna edycję w komórce (daty i poprzedników też z klawiatury), dwuklik / Alt+↓ – kalendarz albo lista poprzedników,
+  // Delete – czyści komórkę, Ctrl+C / Ctrl+V – kopiuje / wkleja wartość komórki.
+  const cellValueForEdit = (r, col) => {
+    const op = (st.m && st.m.opsByLp[r.id]) || {};
+    if (col.key === 'lp') return r.lp;
+    if (col.date) return fmtDt(op[col.key]);
+    if (col.key === 'hours') return op.hours == null ? '' : String(op.hours).replace('.', ',');
+    if (col.pred !== undefined) return (op.preds || [])[col.pred] || '';
+    return String(op[col.key] ?? '');
+  };
+  function setCursor(id, key, { scroll = true } = {}) {
+    st.cursor = { id, key };
+    st.selected = id;
+    if (scroll) ensureVisible();
+    paintWindow();
+  }
+  function ensureVisible() {
+    const g = st.geom; if (!g || !st.cursor) return;
+    const i = st.rows.findIndex((r) => r.id === st.cursor.id); if (i < 0) return;
+    const { ROW, HEAD, cols, colW } = g;
+    const top = i * ROW, vh = body.clientHeight - HEAD;
+    if (top < body.scrollTop) body.scrollTop = top;
+    else if (top + ROW > body.scrollTop + vh) body.scrollTop = top + ROW - vh;
+    let x = 0; for (const c of cols) { if (c.key === st.cursor.key) break; x += colW(c); }
+    const w = colW(cols.find((c) => c.key === st.cursor.key) || cols[0]);
+    if (!st.compact) { if (x < body.scrollLeft) body.scrollLeft = x; else if (x + w > body.scrollLeft + body.clientWidth) body.scrollLeft = x + w - body.clientWidth; }
+  }
+  function moveCursor(dr, dc, { abs } = {}) {
+    const g = st.geom; if (!g || !st.rows.length) return;
+    const cols = g.cols;
+    let i = st.cursor ? st.rows.findIndex((r) => r.id === st.cursor.id) : 0, j = st.cursor ? cols.findIndex((c) => c.key === st.cursor.key) : 0;
+    if (i < 0) i = 0; if (j < 0) j = 0;
+    if (abs) { if (abs.row != null) i = abs.row < 0 ? st.rows.length - 1 : abs.row; if (abs.col != null) j = abs.col < 0 ? cols.length - 1 : abs.col; }
+    i = Math.max(0, Math.min(st.rows.length - 1, i + dr)); j = Math.max(0, Math.min(cols.length - 1, j + dc));
+    setCursor(st.rows[i].id, cols[j].key);
+  }
+  const cursorRow = () => (st.cursor ? st.rows.find((r) => r.id === st.cursor.id) : null);
+  const cursorCol = () => (st.cursor && st.geom ? st.geom.cols.find((c) => c.key === st.cursor.key) : null);
+  const editableCell = (r, col, quiet) => {
+    if (!r || !col) return false;
+    if (r.komisRow || col.ro) { if (!quiet) toast('Ta komórka jest liczona przez program'); return false; }
+    if (!acc().edit) { if (!quiet) toast(`Poziom ${acc().label}: edycja jest zablokowana`); return false; }
+    return true;
+  };
+  const cellEl = () => (st.geom && st.geom.leftRows ? st.geom.leftRows.querySelector(`[data-cid="${CSS.escape(st.cursor.id)}"][data-ckey="${st.cursor.key}"]`) : null);
+  function beginEdit(initial, typed) {
+    const r = cursorRow(), col = cursorCol();
+    if (!editableCell(r, col)) return;
+    ensureVisible(); paintWindow();
+    const el = cellEl(); if (!el) return;
+    startEdit(el, r.id, col, typed ? initial : cellValueForEdit(r, col), { typed: !!typed, old: cellValueForEdit(r, col) });
+  }
+  function openPicker() {
+    const r = cursorRow(), col = cursorCol();
+    if (!editableCell(r, col)) return;
+    const op = st.m.opsByLp[r.id] || {};
+    if (col.pred !== undefined) { predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveWithConfirm(r.id, col, cellValueForEdit(r, col), lp)); return; }
+    if (col.date) { datePickerDialog({ title: `${col.title} · operacja ${r.lp || r.id}`, value: op[col.key] ?? null, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays), onPick: (ms) => saveWithConfirm(r.id, col, fmtDt(op[col.key]), ms == null ? '' : fmtDt(ms)) }); return; }
+    beginEdit();
+  }
+  async function pasteCell() {
+    const r = cursorRow(), col = cursorCol();
+    if (!editableCell(r, col)) return;
+    let t = '';
+    try { t = await navigator.clipboard.readText(); } catch { toast('Brak dostępu do schowka'); return; }
+    t = String(t || '').split(/\r?\n/)[0].split('\t')[0].trim();
+    if (!t) return;
+    await saveWithConfirm(r.id, col, cellValueForEdit(r, col), t);
+  }
+  async function copyCell() {
+    const r = cursorRow(), col = cursorCol(); if (!r || !col) return;
+    const t = r.komisRow ? val(r, col) : col.ro ? val(r, col) : cellValueForEdit(r, col);
+    try { await navigator.clipboard.writeText(t); toast('Skopiowano: ' + (t || '(puste)')); } catch { toast('Brak dostępu do schowka'); }
+  }
+  const onNavKey = (e) => {
+    if (!el.isConnected) { document.removeEventListener('keydown', onNavKey); return; }
+    if (!st.cursor || st.editing || document.querySelector('.overlay')) return;
+    const a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+    const nav = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (k === 'ArrowDown' && e.altKey) { e.preventDefault(); openPicker(); return; }
+    if (nav[k] && !ctrl) { e.preventDefault(); moveCursor(...nav[k]); return; }
+    if (nav[k] && ctrl) { e.preventDefault(); const [dr, dc] = nav[k]; moveCursor(0, 0, { abs: { row: dr ? (dr < 0 ? 0 : -1) : null, col: dc ? (dc < 0 ? 0 : -1) : null } }); return; }
+    if (k === 'Enter') { e.preventDefault(); moveCursor(e.shiftKey ? -1 : 1, 0); return; }
+    if (k === 'Tab') { e.preventDefault(); moveCursor(0, e.shiftKey ? -1 : 1); return; }
+    if (k === 'Home') { e.preventDefault(); moveCursor(0, 0, { abs: ctrl ? { row: 0, col: 0 } : { col: 0 } }); return; }
+    if (k === 'End') { e.preventDefault(); moveCursor(0, 0, { abs: ctrl ? { row: -1, col: -1 } : { col: -1 } }); return; }
+    if (k === 'PageDown' || k === 'PageUp') { e.preventDefault(); const n = Math.max(1, Math.floor((body.clientHeight - (st.geom ? st.geom.HEAD : 0)) / (st.geom ? st.geom.ROW : 20)) - 1); moveCursor(k === 'PageDown' ? n : -n, 0); return; }
+    if (k === 'F2') { e.preventDefault(); beginEdit(); return; }
+    if (k === 'Escape') { st.cursor = null; paintWindow(); return; }
+    if (ctrl && k.toLowerCase() === 'c') { e.preventDefault(); copyCell(); return; }
+    if (ctrl && k.toLowerCase() === 'v') { e.preventDefault(); pasteCell(); return; }
+    if (k === 'Delete' || k === 'Backspace') {
+      e.preventDefault();
+      const r = cursorRow(), col = cursorCol();
+      if (col && col.key === 'lp') { toast('Numer operacji nie może być pusty'); return; }
+      if (editableCell(r, col)) saveWithConfirm(r.id, col, cellValueForEdit(r, col), '');
+      return;
+    }
+    if (k.length === 1 && !ctrl && !e.altKey) { e.preventDefault(); beginEdit(k, true); }
+  };
+  document.addEventListener('keydown', onNavKey);
+
   // ---------- filtry / kolumny ----------
   const sortLabel = (key) => { const i = st.sorts.findIndex((s) => s.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
   function openFilter(c) {
@@ -642,6 +807,9 @@ export function mountHarmLive(el, appCtx) {
         const cell = h('div', { title: late ? 'Koniec ostatniej operacji jest po najbliższej wysyłce komisu' : col.key === 'lp' ? 'Kliknij strzałkę, aby zwinąć lub rozwinąć operacje komisu' : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW - 2 + 'px', lineHeight: ROW - 3 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c', cursor: col.key === 'lp' ? 'pointer' : 'default', ...(late ? { background: '#ff0000', color: '#fff' } : {}) } }, text);
         if (col.key === 'lp') cell.addEventListener('click', () => toggleCollapse(r.id));
+        else cell.addEventListener('click', () => setCursor(r.id, col.key, { scroll: false }));
+        cell.dataset.cid = r.id; cell.dataset.ckey = col.key;
+        if (st.cursor && st.cursor.id === r.id && st.cursor.key === col.key) Object.assign(cell.style, { outline: '2px solid #1a73e8', outlineOffset: '-2px' });
         line.append(cell);
       }
       line.addEventListener('mousedown', () => selectRow(r.id));
@@ -670,26 +838,25 @@ export function mountHarmLive(el, appCtx) {
         let text = val(r, col);
         if (col.key === 'lp') text = '\u00a0\u00a0\u00a0\u00a0'.repeat(r.depth || 0) + (r.subCount ? (st.collapsed.has(r.id) ? '▸ ' : '▾ ') : r.sub ? '↳ ' : '\u00a0\u00a0\u00a0') + text;   // wcięcie wg poziomu: operacja › suboperacja › subsuboperacja
         const predMissing = col.pred !== undefined && text && !(st.m && st.m.opsByLp[text]);
-        const cell = h('div', { title: predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
+        const iss = st.issueMap.get(r.id), issLevel = iss && (iss.cols.get(col.key) || (col.key === 'lp' ? iss.level : null));
+        const cell = h('div', { title: issLevel ? iss.texts.join('\n') : predMissing ? 'Brak operacji o tym numerze' : col.key === 'start' && !text && r.state === 'no-start' ? 'Brak startu: ustaw start ręcznie albo uzupełnij poprzedników' : col.key === 'key' ? text : '',
           style: { width: colW(col) + 'px', flex: 'none', height: ROW + 'px', lineHeight: ROW - 2 + 'px', padding: '0 3px', boxSizing: 'border-box', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: FONT + 'px', borderRight: '1px solid #8c8c8c',
-            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: col.ro || !acc().edit ? 'default' : 'text',
-            ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}) } }, text);
-        if (col.key === 'lp' && r.subCount) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje; resztę komórki, aby zmienić numer';
-        if (!col.ro) cell.addEventListener('click', (ev) => {
+            background: col.ro ? 'rgba(0,0,0,.04)' : predMissing ? '#ffd6d6' : 'transparent', cursor: 'cell',
+            ...(col.key === 'station' && text ? { background: parseSheetColor(r.stanowiskoBg, '#cccccc'), color: parseSheetColor(r.stanowiskoColor, '#000000'), fontStyle: 'italic', fontWeight: 700 } : {}),
+            ...(issLevel && col.key !== 'lp' ? { background: issLevel === 'error' ? '#ff9b9b' : '#ffe699' } : {}),
+            ...(issLevel && col.key === 'lp' ? { boxShadow: `inset 4px 0 0 ${issLevel === 'error' ? '#c00000' : '#e0a800'}` } : {}),
+            ...(st.cursor && st.cursor.id === r.id && st.cursor.key === col.key ? { outline: '2px solid #1a73e8', outlineOffset: '-2px' } : {}) } }, text);
+        cell.dataset.cid = r.id; cell.dataset.ckey = col.key;
+        if (col.key === 'lp' && r.subCount && !issLevel) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje';
+        // jak w Excelu: klik zaznacza komórkę, dwuklik edytuje (daty – kalendarz, Z1–Z4 – lista), pisanie zaczyna edycję
+        cell.addEventListener('click', (ev) => {
           if (col.key === 'lp' && r.subCount && ev.offsetX < (20 + 26 * (r.depth || 0)) * st.scale) { toggleCollapse(r.id); return; }
-          if (!acc().edit) return;   // CLERIK, TOURIST: bez edycji komórek
-          if (col.pred !== undefined) {
-            predPicker(st.m.opsByLp, r.id, col.pred, (lp) => saveWithConfirm(r.id, col, text, lp));
-            return;
-          }
-          const op = st.m.opsByLp[r.id] || {};
-          if (col.date) {   // komórka z datą: okno z kalendarzem
-            datePickerDialog({ title: `${col.title} · operacja ${r.lp || r.id}`, value: op[col.key] ?? null, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
-              onPick: (ms) => saveWithConfirm(r.id, col, fmtDt(op[col.key]), ms == null ? '' : fmtDt(ms)) });
-            return;
-          }
-          const initial = col.key === 'lp' ? r.lp : col.date ? fmtDt(op[col.key]) : col.key === 'hours' ? (op.hours == null ? '' : String(op.hours)) : text;
-          startEdit(cell, r.id, col, initial);
+          setCursor(r.id, col.key, { scroll: false });
+        });
+        if (!col.ro) cell.addEventListener('dblclick', (ev) => {
+          if (col.key === 'lp' && r.subCount && ev.offsetX < (20 + 26 * (r.depth || 0)) * st.scale) return;
+          st.cursor = { id: r.id, key: col.key };
+          if (col.pred !== undefined || col.date) openPicker(); else beginEdit();
         });
         line.append(cell);
       }
@@ -736,21 +903,27 @@ export function mountHarmLive(el, appCtx) {
   body.addEventListener('scroll', () => requestAnimationFrame(paintWindow));
 
   // ---------- edycja w komórce ----------
-  function startEdit(cell, id, col, text) {
+  // [typed] – edycja zaczęta pisaniem (strzałki ↑ ↓ zatwierdzają i przechodzą jak w Excelu); [old] – wartość w bazie (do porównania)
+  function startEdit(cell, id, col, text, { typed = false, old = text } = {}) {
     if (st.editing) return;
     st.editing = true;
     const { ROW, FONT } = st.geom;
-    const input = h('input', { type: 'text', value: text, spellcheck: 'false', style: { width: '100%', height: ROW - 2 + 'px', boxSizing: 'border-box', border: '2px solid #1a73e8', padding: '0 3px', fontSize: FONT + 'px' } });
-    clear(cell); cell.style.padding = '0'; cell.append(input); input.focus(); input.select();
+    const input = h('input', { type: 'text', value: text, spellcheck: 'false', placeholder: col.date ? 'dd.mm.rrrr gg:mm' : '', style: { width: '100%', height: ROW - 2 + 'px', boxSizing: 'border-box', border: '2px solid #1a73e8', padding: '0 3px', fontSize: FONT + 'px' } });
+    clear(cell); cell.style.padding = '0'; cell.append(input); input.focus();
+    if (typed) input.setSelectionRange(input.value.length, input.value.length); else input.select();
     let done = false;
-    const finish = async (commit) => {
+    const finish = async (commit, move) => {
       if (done) return; done = true;
-      if (commit && input.value.trim() !== text.trim()) await saveWithConfirm(id, col, text, input.value.trim());
+      if (commit && input.value.trim() !== String(old).trim()) await saveWithConfirm(id, col, old, input.value.trim());
       st.editing = false;
       if (st.pending) { st.pending = false; recompute(); } else paintWindow();
+      if (move) moveCursor(...move);
     };
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finish(true); }
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true, [e.shiftKey ? -1 : 1, 0]); }
+      else if (e.key === 'Tab') { e.preventDefault(); finish(true, [0, e.shiftKey ? -1 : 1]); }
+      else if (typed && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); finish(true, [e.key === 'ArrowDown' ? 1 : -1, 0]); }
       else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     });
     input.addEventListener('blur', () => finish(true));
@@ -845,7 +1018,7 @@ export function mountHarmLive(el, appCtx) {
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
     h('span', { class: 'grow' }),
-    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
-  syncTools();
+    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), body);
+  syncTools(); syncIssues();
   load();
 }
