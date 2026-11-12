@@ -17,21 +17,32 @@ import { shareDialog } from './harmShare.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const LS = { filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
 const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
 const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
 
+// Filtry i sortowanie kolumn zapamiętane na tym komputerze (wartości filtra jako listy; tylko znane kolumny)
+function loadFilters() {
+  const saved = lsGet(LS.filters, {}) || {};
+  const keys = new Set(COLS.map((c) => c.key));
+  const filters = {};
+  for (const [k, v] of Object.entries(saved.filters || {})) if (keys.has(k) && Array.isArray(v)) filters[k] = new Set(v.map(String));
+  const sorts = (Array.isArray(saved.sorts) ? saved.sorts : []).filter((x) => x && keys.has(x.key)).map((x) => ({ key: x.key, ascending: x.ascending !== false }));
+  return { filters, sorts };
+}
+
 export function mountHarmLive(el) {
   const st = {
-    m: null, days: null, data: null, filters: {}, sorts: [], shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
+    m: null, days: null, data: null, ...loadFilters(), shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
     // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
+  const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
   let syncTools = () => {};   // stan ikon paska (ustawiany niżej)
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'auto' } });
   const noMin = (t) => String(t ?? '').replace(/^(\d{2}\.\d{2}\.\d{4} \d{2}):\d{2}$/, '$1');   // wyświetlanie „dd.mm.rrrr hh” (bez minut)
@@ -88,6 +99,7 @@ export function mountHarmLive(el) {
       onApply: (filter, sort) => {
         if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
         st.sorts = st.sorts.filter((s) => s.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
+        saveFilters();
         draw();
       },
     });
@@ -631,7 +643,7 @@ export function mountHarmLive(el) {
   const setIcon = (b, icon) => { b.replaceChildren(iconSvg(icon)); };
   const komisBtn = iconBtn('sigma', 'Podsumowanie komisów – paski komisów (tylko informacja, nie wpływają na harmonogram). Położenie i filtrowanie: Ustawienia', () => { st.komisOpt.show = !st.komisOpt.show; lsSet(LS.komis, st.komisOpt); if (st.data) draw(); });
   const hideBtn = iconBtn('eye', 'Ukryj dane – chowa kolumny z listy „Które dane ukrywać” (Ustawienia)', () => { st.compact = !st.compact; lsSet(LS.mode, st.compact); if (st.data) draw(); });
-  const broomBtn = iconBtn('broom', 'Wyczyść filtry i sortowanie', () => { st.filters = {}; st.sorts = []; if (st.data) draw(); });
+  const broomBtn = iconBtn('broom', 'Wyczyść filtry i sortowanie', () => { st.filters = {}; st.sorts = []; saveFilters(); if (st.data) draw(); });
   const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg) })));
   const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
   const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, które dane ukrywać, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
