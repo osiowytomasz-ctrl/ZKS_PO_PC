@@ -298,3 +298,13 @@ ${body}
 <footer>Wierszy: ${model.rows.length}${generated ? ' · ' + esc(generated) : ''}</footer>
 <script>${js}</script></body></html>`;
 }
+
+/**
+ * Interaktywny plik HTML („mini-program”): dane [payload] w <script type="application/json" id="zks-data"> i skrypt [runtime]
+ * (report/runtime.js zbudowany przez npm run runtime). Ten sam format tworzy Android (HarmReport.kt: interactiveHtml).
+ */
+export function interactiveHtml(payload, runtime) {
+  const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+  return `<!doctype html>\n<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(payload.title || 'Harmonogram')}</title></head>`
+    + `<body><div id="app"></div><script type="application/json" id="zks-data">${json}</script><script>${runtime}</script></body></html>`;
+}

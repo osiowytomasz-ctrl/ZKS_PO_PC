@@ -1,7 +1,7 @@
 {
   "name": "zks-po-pc",
   "productName": "ZKS PO",
-  "version": "1.11.1",
+  "version": "1.12.0",
   "description": "ZKS PO na komputer: odpowiednik aplikacji na Androida (Electron).",
   "main": "src/main/main.cjs",
   "type": "module",
@@ -9,7 +9,8 @@
     "start": "electron .",
     "test": "node --test",
     "dist": "electron-builder",
-    "vendor": "esbuild src/renderer/vendor-src/firebase-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/firebase.js"
+    "vendor": "esbuild src/renderer/vendor-src/firebase-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/firebase.js",
+    "runtime": "node scripts/build-runtime.mjs"
   },
   "build": {
     "appId": "pl.zks.po.pc",
