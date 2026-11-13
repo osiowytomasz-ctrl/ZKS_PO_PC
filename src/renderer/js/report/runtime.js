@@ -12,6 +12,19 @@ import { parseDateTime, parseNumber } from '../logic/harmImport.js';
 import { findIssues } from '../logic/harmIssues.js';
 
 export const PREF_KEY = 'zks-harmonogram-html';
+/** Funkcje zależne: bez symulacji nie ma jej dodatków. */
+export const FEATURE_NEEDS = { simAdd: 'sim', compare: 'sim', simSave: 'sim' };
+/**
+ * Funkcje dostępne w pliku: [allowed] – wybór autora przy udostępnianiu ({klucz: false} = wyłączona na stałe, nie da się jej włączyć w pliku),
+ * [saved] – ustawienia oglądającego (może tylko wyłączać dostępne). Zwraca {klucz: true/false}.
+ */
+export function effectiveFeatures(allowed, saved) {
+  const F = {};
+  for (const [k] of FEATURES) F[k] = !(allowed && allowed[k] === false) && (saved && k in saved ? !!saved[k] : true);
+  for (const [k, need] of Object.entries(FEATURE_NEEDS)) if (allowed && allowed[need] === false) F[k] = false;
+  return F;
+}
+export const featureLocked = (allowed, k) => !!(allowed && (allowed[k] === false || (FEATURE_NEEDS[k] && allowed[FEATURE_NEEDS[k]] === false)));
 export const FEATURES = [
   ['search', 'Szukaj w wierszach', 'Pole „Szukaj”: zostają wiersze z wpisanym tekstem; trafienia podświetlone'],
   ['filters', 'Filtry kolumn jak w Excelu', 'Klik w nagłówek: lista wartości z polami wyboru, szukanie, zakres dat'],
@@ -166,8 +179,8 @@ function boot() {
   const style = document.createElement('style'); style.textContent = STYLE; document.head.append(style);
   const store = (() => { try { return window.localStorage; } catch { return null; } })();
   const saved = (store && loadPrefs(store)) || {};
-  const F = Object.fromEntries(FEATURES.map(([k]) => [k, true]));
-  Object.assign(F, saved.features || {});
+  const allowed = D.features || null;   // wybór funkcji przy udostępnianiu (wyłączone – na stałe)
+  const F = effectiveFeatures(allowed, saved.features);
   const cfg = D.cfg || {}, stations = stationList(cfg), stationNames = stations.map((s) => s.name), look = Object.fromEntries(stations.map((s) => [s.name, s]));
   const holidays = holidayMap(cfg.holidays), nowMs = D.nowMs || Date.now();
   const komisStyle = (k) => (cfg.komisColors || []).find((x) => x.komis === String(k || '').trim()) || null;
@@ -431,9 +444,9 @@ function boot() {
     openPop(anchor, el('div', {}, el('h3', {}, 'Kolumny'), ...boxes, el('div', {}, el('button', { onclick: () => { S.hidden.clear(); remember(); closePop(); render(); } }, 'Wszystkie'), el('button', { onclick: () => { S.colW = {}; remember(); render(); } }, 'Domyślne szerokości'))));
   }
   function featuresPop(anchor) {
-    const boxes = FEATURES.map(([k, label, tip]) => { const cb = el('input', { type: 'checkbox' }); cb.checked = !!F[k]; cb.onchange = () => { F[k] = cb.checked; if (k === 'remember' && !cb.checked && store) { try { store.removeItem(PREF_KEY); } catch { /* */ } } remember(); render(); }; return el('label', { title: tip }, cb, ' ' + label); });
+    const boxes = FEATURES.filter(([k]) => !featureLocked(allowed, k)).map(([k, label, tip]) => { const cb = el('input', { type: 'checkbox' }); cb.checked = !!F[k]; cb.onchange = () => { F[k] = cb.checked; if (k === 'remember' && !cb.checked && store) { try { store.removeItem(PREF_KEY); } catch { /* */ } } remember(); render(); }; return el('label', { title: tip }, cb, ' ' + label); });
     openPop(anchor, el('div', {}, el('h3', {}, 'Funkcje pliku'), el('div', { class: 'muted', style: 'white-space:normal;max-width:360px' }, 'Wyłączone funkcje znikają z paska. Ustawienia zapisują się w jednym wpisie przeglądarki, wspólnym dla wszystkich plików z programu ZKS PO (nowy plik nadpisuje stary wpis – nic się nie gromadzi).'), ...boxes,
-      el('div', {}, el('button', { onclick: () => { FEATURES.forEach(([k]) => { F[k] = true; }); remember(); closePop(); render(); } }, 'Wszystkie włączone'),
+      el('div', {}, el('button', { onclick: () => { FEATURES.forEach(([k]) => { F[k] = !featureLocked(allowed, k); }); remember(); closePop(); render(); } }, 'Wszystkie włączone'),
         el('button', { title: 'Usuwa zapisane ustawienia z przeglądarki', onclick: () => { try { store && store.removeItem(PREF_KEY); } catch { /* */ } alert('Usunięto zapisane ustawienia. Odśwież stronę, aby wrócić do ustawień z pliku.'); } }, 'Wyczyść zapisane ustawienia'))));
   }
   function conflictsPop(anchor) {

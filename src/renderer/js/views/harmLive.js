@@ -471,6 +471,7 @@ export function mountHarmLive(el, appCtx) {
       user: appCtx && appCtx.user ? (appCtx.user.name || appCtx.user.email || '') : '',
       version: appCtx && appCtx.version ? appCtx.version : '',
       // dane do interaktywnego HTML: cały harmonogram (symulacja liczy obsadę maszyn), dni grafiku, ustawienia i wykres jak na ekranie
+      canAdvanced: acc().style,   // HTML interaktywny – tylko GOD
       interactive: () => ({ ops: st.m.opsByLp, days: st.days || {}, cfg: { stations: (st.m.cfg && st.m.cfg.stations) || [], komisColors: (st.m.cfg && st.m.cfg.komisColors) || [], holidays: (st.m.cfg && st.m.cfg.holidays) || [] }, chartFields: st.chartOpt.fields, chartFont: st.chartOpt.font, komisColor: st.chartOpt.komisColor, komisInline: st.komisOpt.inline }),
       cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), komisSummaryList(), new Set(), { inline: st.komisOpt.inline }), komisShown: st.komisOpt.show, selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),

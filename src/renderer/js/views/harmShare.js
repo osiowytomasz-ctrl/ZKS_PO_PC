@@ -3,6 +3,7 @@
 import { h, clear, modal, toast } from '../ui.js';
 import { reportSvg, reportPagesHtml, reportXlsx, reportHtml, interactiveHtml, layout, pagePlan } from '../logic/harmReport.js';
 import { RUNTIME } from '../report/runtime.bundle.js';
+import { FEATURES, FEATURE_NEEDS } from '../report/runtime.js';
 import { toBase64 } from '../logic/xlsx.js';
 import { INTERVALS, intervalOf, buildCells } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
@@ -54,6 +55,8 @@ export function shareDialog(ctx) {
     inRange: saved.inRange !== false,
     // strona PDF/wydruku: dopasowanie, skala własna [%], wyrównanie w poziomie, margines [mm]
     fit: saved.fit || 'width', scalePct: saved.scalePct || 100, align: saved.align || 'center', marginMm: saved.marginMm ?? 10,
+    // funkcje interaktywnego HTML (wybór autora – w pliku wyłączone na stałe); domyślnie wszystkie
+    features: { ...Object.fromEntries(FEATURES.map(([k]) => [k, true])), ...(saved.features || {}) },
     openAfter: saved.openAfter !== false,   // otwórz gotowy dokument po zapisaniu   // wiersze tylko z operacjami trwającymi w zakresie dat
     // nagłówek firmowy (zapamiętany na tym komputerze); osoba udostępniająca = zalogowany użytkownik
     brand: saved.brand !== false, company: saved.company ?? 'ZKS Ferrum', dept: saved.dept ?? 'Wydział Obróbki Mechanicznej',
@@ -142,7 +145,7 @@ export function shareDialog(ctx) {
   const radio = (name, value, label, cur, onchange, disabled) => h('label', { style: { marginRight: '12px', opacity: disabled ? 0.5 : 1 } },
     h('input', { type: 'radio', name, checked: cur === value, disabled, onchange: () => { onchange(value); refreshInfo(); renderParts(); } }), ' ' + label);
   const fmtBox = h('div', {}), rowBox = h('div', {}), lvlBox = h('div', {}), colBox = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 14px', maxHeight: '140px', overflow: 'auto', border: '1px solid #ddd', padding: '4px' } });
-  const pageBox = h('div', {}), imgBox = h('div', {});
+  const pageBox = h('div', {}), imgBox = h('div', {}), featBox = h('div', {});
   const intervalSel = h('select', { onchange: () => { st.interval = intervalSel.value; refreshInfo(); } }, ...INTERVALS.map((i) => h('option', { value: i.id }, i.label)));
   intervalSel.value = st.interval;
   const chartCb = h('input', { type: 'checkbox', checked: st.chart, onchange: () => { st.chart = chartCb.checked; refreshInfo(); } });
@@ -156,8 +159,9 @@ export function shareDialog(ctx) {
     bf('company', 'Firma', 'ZKS Ferrum'), bf('dept', 'Wydział', 'Wydział Obróbki Mechanicznej'), bf('sharer', 'Udostępnia', 'imię i nazwisko'),
     bf('program', 'Program', 'nazwa programu'), bf('owner', 'Twórca programu', 'imię i nazwisko'));
   function renderParts() {
-    clear(fmtBox); clear(rowBox); clear(lvlBox); clear(colBox); clear(pageBox); clear(imgBox);
-    fmtBox.append(...[['jpg', 'JPG (dobra jakość)'], ['clip', 'Obraz do schowka'], ['xlsx', 'Excel'], ['htmlx', 'HTML interaktywny (filtry, symulacja)'], ['html', 'HTML prosty'], ['pdf', 'PDF'], ['print', 'Wydruk']].map(([v, l]) => radio('fmt', v, l, st.format, (x) => { st.format = x; })));
+    clear(fmtBox); clear(rowBox); clear(lvlBox); clear(colBox); clear(pageBox); clear(imgBox); clear(featBox);
+    if (st.format === 'htmlx' && !ctx.canAdvanced) st.format = 'html';   // HTML interaktywny – tylko GOD
+    fmtBox.append(...[['jpg', 'JPG (dobra jakość)'], ['clip', 'Obraz do schowka'], ['xlsx', 'Excel'], ...(ctx.canAdvanced ? [['htmlx', 'HTML interaktywny (filtry, symulacja)']] : []), ['html', 'HTML prosty'], ['pdf', 'PDF'], ['print', 'Wydruk']].map(([v, l]) => radio('fmt', v, l, st.format, (x) => { st.format = x; })));
     rowBox.append(radio('rows', 'screen', 'Jak na ekranie (filtry, zwinięte)', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'all', 'Wszystkie operacje', st.rows, (x) => { st.rows = x; }),
       radio('rows', 'branch', ctx.selectedId ? (ctx.selectedId.startsWith('K:') ? `Zaznaczony komis ${ctx.selectedId.slice(2)} (wszystkie jego operacje)` : `Zaznaczona operacja ${ctx.selectedId} z gałęzią`) : 'Zaznaczona operacja z gałęzią (zaznacz linię)', st.rows, (x) => { st.rows = x; }, !ctx.selectedId));
@@ -176,6 +180,20 @@ export function shareDialog(ctx) {
       h('div', { style: { marginTop: '4px' } }, 'Marginesy: ', ...[[0, 'brak'], [5, '5 mm'], [10, '10 mm'], [15, '15 mm'], [20, '20 mm'], [25, '25 mm']].map(([v, l]) => radio('mg', v, l, st.marginMm, (x) => { st.marginMm = x; }))),
       h('div', { class: 'muted', style: { marginTop: '2px' } }, 'Wiersze dzielą się na strony, nagłówek tabeli powtarza się na każdej; przerywana linia w podglądzie to marginesy.'));
     imgBox.style.display = st.format === 'jpg' || st.format === 'clip' ? '' : 'none';
+    // HTML interaktywny: które funkcje udostępnić (odznaczone są w pliku wyłączone na stałe – odbiorca nie może ich włączyć)
+    featBox.style.display = st.format === 'htmlx' ? '' : 'none';
+    if (st.format === 'htmlx') {
+      const set = (k, v) => { st.features[k] = v; for (const [d, need] of Object.entries(FEATURE_NEEDS)) if (need === k && !v) st.features[d] = false; renderParts(); };
+      featBox.append(h('div', { class: 'muted', style: { margin: '2px 0 4px' } }, 'Funkcje w pliku (odznaczone – wyłączone na stałe, odbiorca nie może ich włączyć):'),
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0 12px' } }, ...FEATURES.map(([k, label, tip]) => {
+          const off = FEATURE_NEEDS[k] && !st.features[FEATURE_NEEDS[k]];
+          return h('label', { title: tip, style: { opacity: off ? 0.45 : 1 } }, h('input', { type: 'checkbox', checked: !!st.features[k] && !off, disabled: off, onchange: (e) => set(k, e.target.checked) }), ' ' + label);
+        })),
+        h('div', { class: 'row', style: { gap: '4px', marginTop: '4px' } },
+          h('button', { class: 'btn small', onclick: () => { FEATURES.forEach(([k]) => { st.features[k] = true; }); renderParts(); } }, 'Wszystkie'),
+          h('button', { class: 'btn small', title: 'Tylko przeglądanie: bez symulacji, eksportu i konfliktów', onclick: () => { FEATURES.forEach(([k]) => { st.features[k] = !['sim', 'simAdd', 'compare', 'simSave', 'csv', 'xlsx', 'conflicts'].includes(k); }); renderParts(); } }, 'Tylko przeglądanie'),
+          h('button', { class: 'btn small', title: 'Dla handlowca: przeglądanie, filtry i symulacja; bez eksportu danych i konfliktów', onclick: () => { FEATURES.forEach(([k]) => { st.features[k] = !['csv', 'xlsx', 'conflicts'].includes(k); }); renderParts(); } }, 'Dla handlowca')));
+    }
     imgBox.append('Jakość obrazu: ', ...[[1, 'standard (1×)'], [2, 'dobra (2×)'], [3, 'bardzo dobra (3×)']].map(([v, l]) => radio('sc', v, l, st.scale, (x) => { st.scale = x; })));
   }
   renderParts();
@@ -189,7 +207,7 @@ export function shareDialog(ctx) {
     let model;
     try { model = buildModel(); } catch (e) { toast(e.message); return; }
     if (!model.rows.length) { toast('Brak wierszy do pokazania (sprawdź wiersze i poziomy)'); return; }
-    lsSet({ format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale, inRange: st.inRange, fit: st.fit, scalePct: st.scalePct, align: st.align, marginMm: st.marginMm, openAfter: st.openAfter, brand: st.brand, company: st.company, dept: st.dept, program: st.program, owner: st.owner });
+    lsSet({ features: st.features, format: st.format, chart: st.chart, title: st.title, pageSize: st.pageSize, landscape: st.landscape, scale: st.scale, inRange: st.inRange, fit: st.fit, scalePct: st.scalePct, align: st.align, marginMm: st.marginMm, openAfter: st.openAfter, brand: st.brand, company: st.company, dept: st.dept, program: st.program, owner: st.owner });
     const base = `harmonogram_${stamp()}`;
     go.disabled = true; go.textContent = 'Przygotowuję…';
     try {
@@ -197,12 +215,13 @@ export function shareDialog(ctx) {
         const ok = await window.zks.saveFile(base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', toBase64(reportXlsx(model)));
         if (ok) { toast('Zapisano plik Excel'); if (st.openAfter) await window.zks.openLastSaved?.(); }
       } else if (st.format === 'htmlx') {
+        if (!ctx.canAdvanced) { toast('HTML interaktywny może udostępniać tylko poziom GOD'); return; }
         // interaktywny plik: cały harmonogram (potrzebny do symulacji – obsada maszyn), na starcie widać wybrane wiersze i kolumny
         const x = ctx.interactive();
         const from = st.chart || st.inRange ? parseDateTime(fromI.value.trim()) : null, to = st.chart || st.inRange ? parseDateTime(toI.value.trim()) : null;
         const ids = pickRows().filter((r) => !r.komisRow).map((r) => r.id);
         const payload = {
-          v: 1, title: model.title, generated: `${ctx.user ? 'Udostępnił: ' + ctx.user + ' · ' : ''}ZKS PO (PC) ${ctx.version || ''}`.trim(), brand: model.brand, nowMs: ctx.nowMs,
+          v: 1, features: Object.fromEntries(FEATURES.map(([k]) => [k, !!st.features[k] && !(FEATURE_NEEDS[k] && !st.features[FEATURE_NEEDS[k]])])), title: model.title, generated: `${ctx.user ? 'Udostępnił: ' + ctx.user + ' · ' : ''}ZKS PO (PC) ${ctx.version || ''}`.trim(), brand: model.brand, nowMs: ctx.nowMs,
           ops: x.ops, days: x.days, cfg: x.cfg,
           view: { cols: [...st.cols], interval: st.interval, axisStart: from, axisEnd: to != null ? to + 86400000 : null, rowIds: st.rows === 'all' ? null : ids,
             levelsHidden: [1, 2, 3].filter((l) => !st.levels.has(l)), komisShow: st.komis, komisInline: !!x.komisInline, chartFields: x.chartFields, chartFontPx: x.chartFont || 0, komisColor: !!x.komisColor },
@@ -236,7 +255,7 @@ export function shareDialog(ctx) {
   // dwie kolumny: z lewej opcje, z prawej podgląd na żywo (cały czas widoczny)
   const m = modal('Udostępnij harmonogram', h('div', {}, h('div', { style: { display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' } }, h('div', { style: { flex: '1 1 460px', minWidth: '420px', maxHeight: '74vh', overflow: 'auto', paddingRight: '6px' } },
     section('Format', fmtBox),
-    pageBox, imgBox,
+    pageBox, imgBox, featBox,
     section('Tytuł raportu', titleI),
     section('Wiersze', rowBox),
     section('Poziomy', lvlBox),

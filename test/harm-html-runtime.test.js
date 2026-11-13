@@ -36,3 +36,12 @@ test('plik HTML: dane bezpieczne w <script>, skrypt dołączony, bez „</script
   assert.ok(html.includes('id="zks-data"')); assert.ok(html.includes('\\u003c/script>')); assert.ok(html.includes('<title>T &lt;b&gt;</title>'));
   assert.ok(RUNTIME.length > 20000 && !/<\/script/i.test(RUNTIME));
 });
+
+test('funkcje pliku: wybór autora blokuje na stałe, oglądający może tylko wyłączać, dodatki symulacji idą za symulacją', async () => {
+  const { effectiveFeatures, featureLocked } = await import('../src/renderer/js/report/runtime.js');
+  const all = effectiveFeatures(null, null);
+  assert.ok(Object.values(all).every(Boolean));
+  const f = effectiveFeatures({ csv: false, sim: false }, { csv: true, zoom: false, sim: true });
+  assert.equal(f.csv, false); assert.equal(f.sim, false); assert.equal(f.simAdd, false); assert.equal(f.compare, false); assert.equal(f.zoom, false); assert.equal(f.search, true);
+  assert.ok(featureLocked({ sim: false }, 'simSave')); assert.ok(!featureLocked({ sim: false }, 'search')); assert.ok(!featureLocked(null, 'csv'));
+});
