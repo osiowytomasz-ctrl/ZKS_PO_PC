@@ -157,7 +157,7 @@ td.ch{padding:0;overflow:visible}.lane{position:relative;height:calc(var(--rowh)
 tr.sel td{box-shadow:inset 0 2px 0 var(--sel),inset 0 -2px 0 var(--sel)}tr.sub td:first-child{font-style:italic}
 td.cur{outline:2px solid var(--accent);outline-offset:-2px}td.chg{outline:2px solid #e65100;outline-offset:-2px;font-weight:700}td.late{background:#ff0000!important;color:#fff!important;font-weight:700}
 td.ed{cursor:cell}mark{background:#ffeb3b;color:#000;padding:0}
-tr.komis td{font-weight:700;border-top:2px solid #000}
+tr.komis td{font-weight:700;box-shadow:inset 0 2px 0 #000}
 .tot{display:flex;gap:14px;flex-wrap:wrap;padding:4px 8px;border-top:1px solid var(--line);background:var(--panel);font-size:12px}
 .pop{position:fixed;z-index:20;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:8px;max-height:80vh;overflow:auto;min-width:240px}
 .pop h3{margin:0 0 6px;font-size:13px}.pop label{display:block;margin:2px 0;white-space:nowrap}.pop .opts{max-height:46vh;overflow:auto;border:1px solid var(--line);padding:4px;margin:4px 0}
@@ -171,10 +171,22 @@ tr.komis td{font-weight:700;border-top:2px solid #000}
 @media print{.bar,.tot,.side,.pop{display:none!important}.wrap{overflow:visible}#app{height:auto}th{position:static}}
 `;
 
-function boot() {
+/** Dane pliku: JSON albo (data-enc="gzip64") JSON skompresowany gzipem w base64 – rozpakowany wbudowanym DecompressionStream. */
+export async function readPayload(el) {
+  if (el.dataset && el.dataset.enc === 'gzip64') {
+    if (typeof DecompressionStream === 'undefined') throw new Error('Ta przeglądarka jest za stara, aby otworzyć ten plik (brak DecompressionStream). Otwórz go w aktualnym Chrome, Edge, Firefox albo Safari.');
+    const bin = Uint8Array.from(atob(el.textContent.trim()), (c) => c.charCodeAt(0));
+    const text = await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return JSON.parse(text);
+  }
+  return JSON.parse(el.textContent);
+}
+
+async function boot() {
   const shell = '<!doctype html>\n' + document.documentElement.outerHTML;   // do zapisu kopii z symulacją (przed rysowaniem)
   const dataEl = document.getElementById('zks-data');
-  const D = JSON.parse(dataEl.textContent);
+  let D;
+  try { D = await readPayload(dataEl); } catch (e) { document.getElementById('app').innerHTML = `<p style="padding:20px;color:#c00000;font:14px Arial">${esc(e.message || e)}</p>`; return; }
   const app = document.getElementById('app');
   const style = document.createElement('style'); style.textContent = STYLE; document.head.append(style);
   const store = (() => { try { return window.localStorage; } catch { return null; } })();
@@ -264,7 +276,9 @@ function boot() {
       if (F.today && nowMs > A.start) parts.push(`<rect x="${A.X(nowMs) - 1}" width="2" height="10" fill="#ff6600"/>`);
       laneBg = `url('data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${A.W}" height="10" preserveAspectRatio="none">${parts.join('')}</svg>`).replace(/'/g, '%27')}')`;   // apostrofy: wewnątrz atrybutu style="…"
     }
-    rows.forEach((r, i) => {
+    V = { rows, cols, A, laneBg, changed, hi, from: -1, to: -1 };
+    const rowHtml = (r, i) => {
+      let h = '';
       const ks = komisStyle(r.komis), done = isDone(r);
       const bg = r.komisRow ? (ks ? ks.bg : '#fff2cc') : ks ? ks.bg : done ? '#e6f2e0' : '';
       const fg = ks ? ks.color : '';
@@ -286,14 +300,46 @@ function boot() {
       }
       if (A) h += `<td class="ch"><div class="lane" style="width:${A.W}px;background-image:${laneBg}">${lane(r, A, done)}</div></td>`;
       h += '</tr>';
-    });
+      return h;
+    };
+    V.rowHtml = rowHtml;
     h += '</tbody></table>';
     const sy = wrap.scrollTop, sx = wrap.scrollLeft;
     wrap.innerHTML = h;
     wrap.scrollTop = sy; wrap.scrollLeft = sx;
-    if (A && F.deps && S.deps) drawDeps(rows, A);
+    renderBody(true);
     renderTotals(rows);
     syncBar();
+  }
+  // Tylko widoczne wiersze (z zapasem) – przy 10 000 pozycji strona ma kilka tysięcy elementów zamiast ćwierć miliona.
+  // Wysokość wiersza mierzona z pierwszego narysowanego; nad i pod oknem puste wiersze o wysokości pominiętych.
+  let V = null, rowPx = 0;
+  function renderBody(force = false) {
+    if (!V) return;
+    const tb = wrap.querySelector('tbody'); if (!tb) return;
+    const n = V.rows.length, span = (V.cols.length + (V.A ? 1 : 0));
+    if (!rowPx) { tb.innerHTML = n ? V.rowHtml(V.rows[0], 0) : ''; const tr = tb.rows[0]; rowPx = tr ? tr.getBoundingClientRect().height / S.zoom : S.rowH; if (!rowPx) rowPx = S.rowH; }
+    const head = (wrap.querySelector('thead') || { getBoundingClientRect: () => ({ height: 0 }) }).getBoundingClientRect().height;
+    const top = Math.max(0, wrap.scrollTop - head) / S.zoom, vh = (wrap.clientHeight || 800) / S.zoom;
+    const from = Math.max(0, Math.floor(top / rowPx) - 15), to = Math.min(n, Math.ceil((top + vh) / rowPx) + 15);
+    if (!force && from === V.from && to === V.to) return;
+    V.from = from; V.to = to;
+    let h = from ? `<tr class="pad"><td colspan="${span}" style="height:${from * rowPx}px;padding:0;border:none"></td></tr>` : '';
+    for (let i = from; i < to; i++) h += V.rowHtml(V.rows[i], i);
+    if (to < n) h += `<tr class="pad"><td colspan="${span}" style="height:${(n - to) * rowPx}px;padding:0;border:none"></td></tr>`;
+    tb.innerHTML = h;
+    for (const s0 of wrap.querySelectorAll('.svgdeps')) s0.remove();
+    if (V.A && F.deps && S.deps) drawDeps(V.rows, V.A);
+  }
+  wrap.addEventListener('scroll', () => { if (!V || V.raf) return; V.raf = requestAnimationFrame(() => { V.raf = 0; renderBody(); }); });
+  /** Przewija tak, żeby wiersz [i] był widoczny (także gdy jeszcze nie jest narysowany). */
+  function scrollToRow(i, center = true) {
+    const head = (wrap.querySelector('thead') || { getBoundingClientRect: () => ({ height: 0 }) }).getBoundingClientRect().height;
+    const y = i * rowPx * S.zoom, vh = wrap.clientHeight - head;
+    if (center) wrap.scrollTop = Math.max(0, y - vh / 2);
+    else if (y < wrap.scrollTop) wrap.scrollTop = y;
+    else if (y + rowPx * S.zoom > wrap.scrollTop + vh) wrap.scrollTop = y + rowPx * S.zoom - vh;
+    renderBody();
   }
   function lane(r, A, done) {
     const label = esc(r.komisRow ? [r.komisName, r.hoursShown, r.status].filter(Boolean).join(' · ') : (view.chartFields || ['komis', 'element', 'hours']).map((k) => (k === 'hours' ? r.godziny : k === 'station' ? r.stanowisko : ['start', 'koniec', 'wysylka'].includes(k) ? noMin(r[k]) : r[k])).map((v) => String(v ?? '').trim()).filter(Boolean).join(' - '));
@@ -321,13 +367,13 @@ function boot() {
   }
   function drawDeps(rows, A) {
     const tb = wrap.querySelector('tbody'); if (!tb) return;
-    const idx = new Map(rows.map((r, i) => [r.id, i])), trs = tb.rows, lanes = wrap.querySelectorAll('td.ch');
+    const idx = new Map(rows.map((r, i) => [r.id, i])), lanes = wrap.querySelectorAll('td.ch');
     if (!lanes.length) return;
     const wb = wrap.getBoundingClientRect(), lb = lanes[0].getBoundingClientRect();
-    const ox = lb.left - wb.left + wrap.scrollLeft, oy0 = trs[0].getBoundingClientRect().top - wb.top + wrap.scrollTop;
-    const rh = trs[0].getBoundingClientRect().height;
+    const ox = lb.left - wb.left + wrap.scrollLeft, oy0 = tb.getBoundingClientRect().top - wb.top + wrap.scrollTop;
+    const rh = rowPx * S.zoom;
     let p = '';
-    for (const r of rows) {
+    for (const r of rows.slice(V ? V.from : 0, V ? V.to : rows.length)) {
       if (r.komisRow) continue;
       const me = data.result.get(r.id); if (!me || me.start == null) continue;
       for (const pr of (S.ops[r.id] || {}).preds || []) {
@@ -468,7 +514,7 @@ function boot() {
   function goTo(id) {
     let p = subParent(id); while (p) { S.collapsed.delete(p); p = subParent(p); }
     S.selected = id; render();
-    const tr = wrap.querySelector(`tr[data-id="${CSS.escape(id)}"]`); if (tr) tr.scrollIntoView({ block: 'center' });
+    const i = lastRows.findIndex((r) => r.id === id); if (i >= 0) scrollToRow(i, true);
     if (F.details) showDetails(id);
   }
 
@@ -560,10 +606,15 @@ function boot() {
     const t = changesCsv(S.changes, base.result, data.result).replace(/^﻿/, '').replace(/"/g, '').replace(/;/g, '\t');
     (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => alert('Skopiowano listę zmian.'), () => prompt('Skopiuj listę zmian:', t));
   }
-  function saveSimCopy() {
+  async function saveSimCopy() {
     const payload = { ...D, ops: S.ops, baseOps: S.baseOps, changes: S.changes, generated: (D.generated || '') + ' · symulacja ' + new Date().toLocaleString('pl-PL') };
-    const json = JSON.stringify(payload).replace(/</g, '\\u003c');
-    const html = shell.replace(/(<script type="application\/json" id="zks-data">)[\s\S]*?(<\/script>)/, (m, a, b) => a + json + b);
+    let tag = '<script type="application/json" id="zks-data">' + JSON.stringify(payload).replace(/</g, '\\u003c') + '<\/script>';
+    if (typeof CompressionStream !== 'undefined') {   // jak plik z programu: dane skompresowane (ok. 3× mniejszy plik)
+      const buf = new Uint8Array(await new Response(new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+      let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      tag = '<script type="application/octet-stream" id="zks-data" data-enc="gzip64">' + btoa(bin) + '<\/script>';
+    }
+    const html = shell.replace(/<script[^>]*id="zks-data"[^>]*>[\s\S]*?<\/script>/, () => tag);
     download('harmonogram_symulacja.html', 'text/html;charset=utf-8', html);
   }
   function download(name, mime, content) {
@@ -623,7 +674,7 @@ function boot() {
     let i = S.cursor ? lastRows.findIndex((r) => r.id === S.cursor.id) : 0, j = S.cursor ? cols.findIndex((c) => c.key === S.cursor.key) : 0;
     i = Math.max(0, Math.min(lastRows.length - 1, (i < 0 ? 0 : i) + dr)); j = Math.max(0, Math.min(cols.length - 1, (j < 0 ? 0 : j) + dc));
     S.cursor = { id: lastRows[i].id, key: cols[j].key }; S.selected = lastRows[i].id; render();
-    const td = wrap.querySelector('td.cur'); if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    scrollToRow(i, false); const td = wrap.querySelector('td.cur'); if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closePop(); if (side) { side.remove(); side = null; } return; }

@@ -1,8 +1,19 @@
 // Dane Harmonogramu i Grafiku w Firestore: nasłuch na żywo, import z plików, zmiana pojedynczych pól.
 import { firebase } from './fb.js';
 import { chunkId } from './logic/harmModel.js';
+import { toast } from './ui.js';
 
 const BATCH = 400;
+// Dokument Firestore mieści najwyżej 1 MB; paczka (50 numerów operacji z suboperacjami) ma zwykle 10–20 KB. Ostrzeżenie, gdyby urosła.
+const CHUNK_WARN = 700 * 1024;
+/** Po zapisie: czy paczki z operacjami [lps] nie zbliżają się do limitu dokumentu (np. bardzo długie opisy albo setki suboperacji). */
+export function chunkSizeWarning(lps, ops = opsSource() || {}) {
+  const ids = new Set(lps.map(chunkId)), size = new Map();
+  for (const [lp, op] of Object.entries(ops)) { const c = chunkId(lp); if (ids.has(c)) size.set(c, (size.get(c) || 0) + JSON.stringify(op).length + lp.length + 4); }
+  const big = [...size].filter(([, v]) => v > CHUNK_WARN);
+  return big.length ? `Uwaga: paczka danych ${big.map(([c, v]) => `${c} (${Math.round(v / 1024)} KB)`).join(', ')} zbliża się do limitu 1 MB dokumentu bazy – skróć opisy albo rozdziel operacje na inne numery.` : null;
+}
+const checkChunks = (lps) => { try { const w = chunkSizeWarning(lps); if (w) toast(w); } catch { /* tylko ostrzeżenie */ } };
 
 /** Nasłuch zmian operacji i konfiguracji: onChange({opsByLp, cfg, fromCache}). Zwraca funkcję kończącą nasłuch. */
 export async function watchHarm(onChange, onError) {
@@ -86,6 +97,7 @@ export async function saveOp(lp, op) {
   const { sdk, db } = await firebase();
   await sdk.setDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { ops: { [lp]: clean(op) } }, { merge: true });
   pushUndo(`Zapis operacji ${lp}`, before);
+  checkChunks([lp]);
 }
 
 /** Wiele nowych operacji naraz (jeden zapis wsadowy; operacje z jednego dokumentu scalane). */
@@ -98,6 +110,7 @@ export async function saveOps(entries) {
   for (const [id, ops] of chunks) b.set(sdk.doc(db, 'harm_ops', id), { ops }, { merge: true });
   await b.commit();
   pushUndo(`Dodanie operacji: ${entries.length}`, before);
+  try { const w = chunkSizeWarning(entries.map(([lp]) => lp), { ...(opsSource() || {}), ...Object.fromEntries(entries) }); if (w) toast(w); } catch { /* tylko ostrzeżenie */ }
 }
 
 /** Zmiana numeru operacji (plan z renamePlan): nowe klucze, usunięcie starych (także suboperacji) i poprawa poprzedników – jednym zapisem wsadowym. */
@@ -122,6 +135,7 @@ export async function applyTree(plan, label = 'Edycja gałęzi') {
   const before = snapshot([...plan.remove, ...plan.sets.map(([lp]) => lp)]);
   await writeTree(plan);
   pushUndo(label, before);
+  try { const w = chunkSizeWarning(plan.sets.map(([lp]) => lp), { ...(opsSource() || {}), ...Object.fromEntries(plan.sets) }); if (w) toast(w); } catch { /* tylko ostrzeżenie */ }
 }
 async function writeTree(plan) {
   const { sdk, db } = await firebase();
@@ -174,4 +188,42 @@ export async function restoreBackup(ops, config) {
   if (config) await saveSettings(config.stations || [], config.komisColors || [], config.holidays || []);
   undoStack.length = 0; notifyUndo();
   return r;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Archiwum zakończonych operacji (tylko GOD): harm_archive/{paczka} { ops: { lp: operacja + archivedAt, archivedBy } }
+// ---------------------------------------------------------------------------------------------------------------------
+/** Przenosi operacje [lps] do archiwum (jeden zapis wsadowy na paczkę: kopia w archiwum + usunięcie z harmonogramu). */
+export async function archiveOps(lps, user = '') {
+  const ops = opsSource() || {};
+  const { sdk, db } = await firebase();
+  const now = Date.now(), writes = [];
+  for (const lp of lps) {
+    const op = ops[lp]; if (!op) continue;
+    writes.push((b) => b.set(sdk.doc(db, 'harm_archive', chunkId(lp)), { ops: { [lp]: { ...clean(op), archivedAt: now, archivedBy: user } } }, { merge: true }));
+    writes.push((b) => b.update(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() }));
+  }
+  await commit(sdk, db, writes);
+  undoStack.length = 0; notifyUndo();   // cofanie dotyczyło stanu sprzed archiwizacji
+  return lps.length;
+}
+/** Wszystkie operacje z archiwum: { lp: operacja } (odczyt na żądanie – archiwum nie jest nasłuchiwane). */
+export async function loadArchive() {
+  const { sdk, db } = await firebase();
+  const snap = await sdk.getDocs(sdk.collection(db, 'harm_archive'));
+  const out = {}; snap.forEach((d) => Object.assign(out, (d.data() || {}).ops || {}));
+  return out;
+}
+/** Przywraca operacje [lps] z archiwum do harmonogramu (bez pól archiwum). */
+export async function restoreFromArchive(archived, lps) {
+  const { sdk, db } = await firebase();
+  const writes = [];
+  for (const lp of lps) {
+    const a = archived[lp]; if (!a) continue;
+    const { archivedAt, archivedBy, ...op } = a; void archivedAt; void archivedBy;
+    writes.push((b) => b.set(sdk.doc(db, 'harm_ops', chunkId(lp)), { ops: { [lp]: clean(op) } }, { merge: true }));
+    writes.push((b) => b.update(sdk.doc(db, 'harm_archive', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() }));
+  }
+  await commit(sdk, db, writes);
+  return lps.length;
 }

@@ -1,7 +1,7 @@
 // Udostępnianie Harmonogramu: JPG (dobra jakość), obraz do schowka, Excel, PDF i wydruk. Na początku wybierasz, co ma być w raporcie:
 // kolumny, wiersze (jak na ekranie, wszystkie, gałąź zaznaczonej operacji), poziomy III/II/I, wykres (od – do, interwał), tytuł i stronę.
 import { h, clear, modal, toast } from '../ui.js';
-import { reportSvg, reportPagesHtml, reportXlsx, reportHtml, interactiveHtml, layout, pagePlan } from '../logic/harmReport.js';
+import { reportSvg, reportPagesHtml, reportXlsx, reportHtml, interactiveHtml, gzipBase64, layout, pagePlan } from '../logic/harmReport.js';
 import { RUNTIME } from '../report/runtime.bundle.js';
 import { FEATURES, FEATURE_NEEDS } from '../report/runtime.js';
 import { toBase64 } from '../logic/xlsx.js';
@@ -226,7 +226,7 @@ export function shareDialog(ctx) {
           view: { cols: [...st.cols], interval: st.interval, axisStart: from, axisEnd: to != null ? to + 86400000 : null, rowIds: st.rows === 'all' ? null : ids,
             levelsHidden: [1, 2, 3].filter((l) => !st.levels.has(l)), komisShow: st.komis, komisInline: !!x.komisInline, chartFields: x.chartFields, chartFontPx: x.chartFont || 0, komisColor: !!x.komisColor },
         };
-        const html = interactiveHtml(payload, RUNTIME);
+        const html = interactiveHtml(payload, RUNTIME, { gzip64: await gzipBase64(payload) });
         const bytes = new TextEncoder().encode(html); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         const ok = await window.zks.saveFile(base + '.html', 'text/html', btoa(bin));
         if (ok) { toast('Zapisano interaktywny plik HTML (filtry, wykres, symulacja – w przeglądarce)'); if (st.openAfter) await window.zks.openLastSaved?.(); }

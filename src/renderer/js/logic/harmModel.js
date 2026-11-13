@@ -24,14 +24,20 @@ const levelGen = (id) => ['operacji', 'suboperacji', 'subsuboperacji'][depthOf(i
 const levelIns = (id) => ['operacją', 'suboperacją', 'subsuboperacją'][depthOf(id)] || 'operacją';     // „jest suboperacją”
 
 /** Porządek numerów: liczba rosnąco, przy tej samej liczbie najpierw operacja, potem jej suboperacje i subsuboperacje (a, aa, ab, b, …); techniczne „s…” na końcu. */
+const LP_COLL = new Intl.Collator('pl', { numeric: true, sensitivity: 'base' });
+const lpParsed = new Map();   // pamięć rozbioru numerów (sortowanie 10 000 pozycji porównuje je setki tysięcy razy)
+const lpParse = (x) => {
+  let v = lpParsed.get(x);
+  if (v === undefined) { const m = /^(\d+)(\p{L}*)$/u.exec(x); v = m ? { n: m[1].length <= 15 ? Number(m[1]) : BigInt(m[1]), suf: m[2] } : null; if (lpParsed.size > 100000) lpParsed.clear(); lpParsed.set(x, v); }
+  return v;
+};
 export function lpCompare(a, b) {
   a = String(a); b = String(b);
-  const parse = (x) => { const m = /^(\d+)(\p{L}*)$/u.exec(x); return m ? { n: BigInt(m[1]), suf: m[2] } : null; };
-  const pa = parse(a), pb = parse(b);
-  if (pa && pb) return pa.n === pb.n ? pa.suf.localeCompare(pb.suf, 'pl', { numeric: true, sensitivity: 'base' }) : (pa.n < pb.n ? -1 : 1);
+  const pa = lpParse(a), pb = lpParse(b);
+  if (pa && pb) return pa.n == pb.n ? (pa.suf === pb.suf ? 0 : LP_COLL.compare(pa.suf, pb.suf)) : (pa.n < pb.n ? -1 : 1);   // eslint-disable-line eqeqeq
   if (pa) return -1;
   if (pb) return 1;
-  return a.localeCompare(b, 'pl', { numeric: true, sensitivity: 'base' });
+  return LP_COLL.compare(a, b);
 }
 
 /**
@@ -238,12 +244,21 @@ export function arrangeRows(rows, collapsed, hiddenLevels) {
   return rows.filter((r) => !hiddenByCollapse(r) && !(hiddenLevels && hiddenLevels.has(r.level)));
 }
 
+// Obsada maszyn zmienia się tylko z grafikiem: pamiętana dla tego samego obiektu dni i tej samej listy stanowisk (zmiana operacji nie liczy jej od nowa)
+const capCache = new WeakMap();
+function cachedCapacity(daysByKey, names, sumSet) {
+  if (!daysByKey || typeof daysByKey !== 'object') return capacityFrom(daysByKey || {}, names, sumSet);
+  const key = names.join('|') + '#' + [...sumSet].sort().join('|');
+  let m = capCache.get(daysByKey); if (!m) { m = new Map(); capCache.set(daysByKey, m); }
+  if (!m.has(key)) { if (m.size > 8) m.clear(); m.set(key, capacityFrom(daysByKey, names, sumSet)); }
+  return m.get(key);
+}
 export function buildHarmData(opsByLp, daysByKey, cfg, nowMs) {
   const stations = stationList(cfg);
   const look = Object.fromEntries(stations.map((s) => [s.name, s]));
   const list = Object.entries(opsByLp).map(([lp, o]) => ({ lp, ...o })).sort((a, b) => lpCompare(a.lp, b.lp));
   const names = [...new Set([...stations.map((s) => s.name), ...list.map((o) => o.station).filter(Boolean)])];
-  const capacity = capacityFrom(daysByKey, names, new Set(stations.filter((x) => x.sum).map((x) => x.name)));
+  const capacity = cachedCapacity(daysByKey, names, new Set(stations.filter((x) => x.sum).map((x) => x.name)));
   const result = computeSchedule(list, capacity);
   const parentOf = (lp) => { const p = subParent(lp); return p && opsByLp[p] ? p : null; };
   const kids = new Map();

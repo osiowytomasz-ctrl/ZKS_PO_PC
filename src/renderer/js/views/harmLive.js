@@ -4,8 +4,9 @@ import { h, clear, api, apiCached, modal, toast, columnFilterDialog, confirmBox 
 import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
-import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree } from '../harmStore.js';
+import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX, lpCompare } from '../logic/harmModel.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive } from '../harmStore.js';
+import { archiveCandidates } from '../logic/harmArchive.js';
 import { backupData, backupText, parseBackup, backupDiff, backupFileName } from '../logic/harmBackup.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
@@ -28,6 +29,7 @@ const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czci
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
+const GRAFIK_REFRESH_MS = 60000;   // odświeżanie grafiku z arkusza (było 20 s – zbędne obciążenie Apps Script)
 
 // Filtry i sortowanie kolumn zapamiętane na tym komputerze (wartości filtra jako listy; tylko znane kolumny)
 function loadFilters() {
@@ -110,6 +112,9 @@ export function mountHarmLive(el, appCtx) {
     if (st.editing) { st.pending = true; return; }
     draw();
   };
+  // seria zmian z bazy (np. kilka paczek naraz) liczona i rysowana raz
+  let recomputeTimer = null;
+  const recomputeSoon = () => { if (recomputeTimer) return; recomputeTimer = setTimeout(() => { recomputeTimer = null; recompute(); }, 30); };
   const applyGrafik = (g, quiet) => {
     const j = JSON.stringify(g);
     if (j === grJson) return;
@@ -119,11 +124,15 @@ export function mountHarmLive(el, appCtx) {
   async function loadGrafik() {
     try { await apiCached('getGrafNorm', [], (g) => applyGrafik(g, true), { timeoutMs: 180000, maxAge: 0, force: true, callArgs: ['fresh'] }); } catch (e) { toast('Grafik: ' + e.message); }
     if (grTimer) clearInterval(grTimer);
-    grTimer = setInterval(async () => {
-      if (!el.isConnected) { clearInterval(grTimer); if (stop) stop(); return; }
-      if (document.hidden) return;
-      try { applyGrafik(await api('getGrafNorm', ['fresh'], { timeoutMs: 60000 }), false); } catch { /* następna próba za 20 s */ }
-    }, 20000);
+    // grafik z arkusza (Apps Script): co 60 s i tylko przy widocznym oknie; po powrocie do okna – od razu (gdy minęła minuta)
+    let lastFetch = Date.now();
+    const pull = async () => { lastFetch = Date.now(); try { applyGrafik(await api('getGrafNorm', ['fresh'], { timeoutMs: 60000 }), false); } catch { /* następna próba za minutę */ } };
+    grTimer = setInterval(() => {
+      if (!el.isConnected) { clearInterval(grTimer); document.removeEventListener('visibilitychange', onVisible); if (stop) stop(); return; }
+      if (!document.hidden) pull();
+    }, GRAFIK_REFRESH_MS);
+    const onVisible = () => { if (!el.isConnected) { document.removeEventListener('visibilitychange', onVisible); return; } if (!document.hidden && Date.now() - lastFetch > GRAFIK_REFRESH_MS) pull(); };
+    document.addEventListener('visibilitychange', onVisible);
   }
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
@@ -134,7 +143,7 @@ export function mountHarmLive(el, appCtx) {
       if (harmLevel() == null) toast('Serwer nie podaje poziomu dostępu (wdróż nowy Firebase.gs) – tylko przeglądanie');
       syncTools();
       loadGrafik();
-      stop = await watchHarm((m) => { st.m = m; recompute(); },
+      stop = await watchHarm((m) => { st.m = m; recomputeSoon(); },
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
@@ -143,22 +152,36 @@ export function mountHarmLive(el, appCtx) {
   function scheduleIssues() {
     clearTimeout(issuesTimer);
     issuesTimer = setTimeout(() => {
+      if (!el.isConnected) { if (worker0) worker0.terminate(); worker0 = null; return; }
       if (!st.m || !st.data) return;
       const res = st.data.result || new Map(), ends = new Map(), noStart = new Set();
       for (const [id, v] of res) if (v && v.end != null) ends.set(id, v.end);
       for (const r of st.data.rows) if (r.state === 'no-start') noStart.add(r.id);
-      st.issues = findIssues(st.m.opsByLp, { ends, noStart, stations: new Set(stationList(st.m.cfg).map((x) => x.name)) });
-      st.issueMap = issuesByOp(st.issues);
-      syncIssues();
-      // pokazywana ścieżka po zmianie danych: przeliczona albo – gdy pętla zniknęła – schowana
-      if (st.path) {
-        const still = st.issues.some((x) => x.lp === st.path.lp && x.pred === st.path.pred);
-        const p = st.path; st.path = null;
-        if (still || (!p.loop && (st.m.opsByLp[p.lp]?.preds || []).includes(p.pred))) showPath(p.lp, p.pred);
-        else { renderPathBar(); if (p.loop) toast(`Pętla przez ${p.lp} ← ${p.pred} rozwiązana`); }
-      }
-      if (!st.editing) paintWindow();
+      const stations = stationList(st.m.cfg).map((x) => x.name);
+      const apply = (issues) => {
+        st.issues = issues; st.issueMap = issuesByOp(st.issues);
+        syncIssues();
+        // pokazywana ścieżka po zmianie danych: przeliczona albo – gdy pętla zniknęła – schowana
+        if (st.path) {
+          const still = st.issues.some((x) => x.lp === st.path.lp && x.pred === st.path.pred);
+          const p = st.path; st.path = null;
+          if (still || (!p.loop && (st.m.opsByLp[p.lp]?.preds || []).includes(p.pred))) showPath(p.lp, p.pred);
+          else { renderPathBar(); if (p.loop) toast(`Pętla przez ${p.lp} ← ${p.pred} rozwiązana`); }
+        }
+        if (!st.editing) paintWindow();
+      };
+      // w osobnym wątku (Web Worker), gdy dostępny; inaczej tutaj (liczenie jest liniowe – 10 000 pozycji ok. 60 ms)
+      const worker = issuesWorker();
+      if (worker) { const id = ++issuesReq; worker.onmessage = ({ data: r }) => { if (r.id === issuesReq) apply(r.issues); }; worker.postMessage({ id, ops: st.m.opsByLp, ends: [...ends], noStart: [...noStart], stations }); }
+      else apply(findIssues(st.m.opsByLp, { ends, noStart, stations: new Set(stations) }));
     }, 250);
+  }
+  let issuesReq = 0, worker0 = undefined;
+  function issuesWorker() {
+    if (worker0 !== undefined) return worker0;
+    try { worker0 = new Worker(new URL('../issuesWorker.js', import.meta.url), { type: 'module' }); worker0.onerror = () => { worker0 = null; scheduleIssues(); }; }
+    catch { worker0 = null; }
+    return worker0;
   }
   const issuesBtn = h('button', { class: 'btn small', style: { height: '30px', padding: '0 8px', fontWeight: 700 }, onclick: () => issuesDialog() });
   function syncIssues() {
@@ -762,8 +785,60 @@ export function mountHarmLive(el, appCtx) {
       h('p', { class: 'muted' }, 'Eksport zapisuje wszystkie operacje i ustawienia (stanowiska, kolory komisów, święta) do pliku .json. Import zastępuje cały harmonogram zawartością pliku – przed zapisem pokazuje zmiany i może najpierw zapisać kopię obecnego stanu. Tylko poziom GOD.'),
       h('div', { class: 'row', style: { gap: '6px' } },
         h('button', { class: 'btn small', onclick: () => exportBackup() }, 'Eksport do pliku…'),
-        h('button', { class: 'btn small', onclick: () => { m.close(); importBackup(); } }, 'Import z pliku…'))] : [h('p', { class: 'muted', style: { marginTop: '14px' } }, `Kolory i czcionki wykresu, stanowiska, kolory komisów i święta zmienia tylko poziom GOD (Twój: ${acc().label}).`)]),
+        h('button', { class: 'btn small', onclick: () => { m.close(); importBackup(); } }, 'Import z pliku…')),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Archiwum zakończonych'),
+      h('p', { class: 'muted' }, 'Stare, zakończone zlecenia przenosi do archiwum (kolekcja harm_archive) – bieżący harmonogram zostaje mały i szybki niezależnie od historii. Przenoszone są całe operacje z suboperacjami, gdy wszystkie są „zak.”, skończyły się przed wybraną datą i nic, co zostaje, od nich nie zależy. Archiwum można przeglądać i przywracać.'),
+      (() => {
+        const sel = h('select', {}, ...[[1, '1 miesiąc'], [3, '3 miesiące'], [6, '6 miesięcy'], [12, '12 miesięcy']].map(([v, t]) => h('option', { value: v }, 'starsze niż ' + t)));
+        sel.value = '3';
+        const info = h('span', { class: 'muted' });
+        const cands = () => { const ends = new Map(); if (st.data) for (const [k, v] of st.data.result) if (v && v.end != null) ends.set(k, v.end); return archiveCandidates(st.m.opsByLp, ends, H.localNow().getTime() - Number(sel.value) * 30.44 * 86400000); };
+        const upd = () => { const c = cands(); info.textContent = `do przeniesienia: ${c.length} zleceń, ${c.reduce((a, x) => a + x.lps.length, 0)} operacji`; };
+        sel.addEventListener('change', upd); upd();
+        return h('div', { class: 'row', style: { gap: '6px', alignItems: 'center', flexWrap: 'wrap' } }, sel, info,
+          h('button', { class: 'btn small', onclick: async () => {
+            const c = cands(), lps = c.flatMap((x) => x.lps);
+            if (!lps.length) { toast('Nie ma czego archiwizować'); return; }
+            if (!(await confirmBox('Archiwum zakończonych', `Przenieść do archiwum ${c.length} zleceń (${lps.length} operacji)?\nNajstarsze: ${c.slice(0, 8).map((x) => x.root + (x.komis ? ' ' + x.komis : '')).join(', ')}${c.length > 8 ? ' …' : ''}\n\nMożna je potem przywrócić z „Przeglądaj archiwum…”. Lista cofania (↶) zostanie wyczyszczona.`, 'Przenieś'))) return;
+            try { await archiveOps(lps, (appCtx && appCtx.user && (appCtx.user.name || appCtx.user.email)) || ''); toast(`Przeniesiono do archiwum operacji: ${lps.length}`); upd(); }
+            catch (e) { toast('Nie przeniesiono: ' + (e.code === 'permission-denied' ? 'brak uprawnień (tylko GOD; opublikuj reguły z harm_archive)' : e.message || e)); }
+          } }, 'Przenieś do archiwum…'),
+          h('button', { class: 'btn small', onclick: () => { m.close(); archiveDialog(); } }, 'Przeglądaj archiwum…'));
+      })()] : [h('p', { class: 'muted', style: { marginTop: '14px' } }, `Kolory i czcionki wykresu, stanowiska, kolory komisów i święta zmienia tylko poziom GOD (Twój: ${acc().label}).`)]),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: save }, 'Zapisz'))));
+  }
+
+  // ---------- archiwum zakończonych: przeglądanie i przywracanie (przywracanie – GOD) ----------
+  async function archiveDialog() {
+    let arch;
+    try { arch = await loadArchive(); } catch (e) { toast('Archiwum: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły z harm_archive)' : e.message || e)); return; }
+    const all = Object.entries(arch).sort((a, b) => lpCompare(a[0], b[0]));
+    const q = h('input', { type: 'search', placeholder: 'Szukaj: numer, komis, klient, opis…', style: { width: '320px', padding: '4px' } });
+    const list = h('div', { style: { maxHeight: '55vh', overflow: 'auto', border: '1px solid #ddd' } });
+    const picked = new Set();
+    const render = () => {
+      clear(list);
+      const t = q.value.trim().toLowerCase();
+      const rows = all.filter(([lp, o]) => !t || [lp, o.komis, o.client, o.element, o.station].some((v) => String(v || '').toLowerCase().includes(t))).slice(0, 1000);
+      const tb = h('tbody', {}, ...rows.map(([lp, o]) => h('tr', {},
+        h('td', {}, acc().style ? h('input', { type: 'checkbox', checked: picked.has(lp), onchange: (e) => { if (e.target.checked) picked.add(lp); else picked.delete(lp); } }) : null),
+        h('td', {}, lp), h('td', {}, o.komis || ''), h('td', {}, o.client || ''), h('td', {}, o.element || ''), h('td', {}, o.station || ''), h('td', {}, o.hours ?? ''),
+        h('td', {}, fmtDt(o.startManual)), h('td', {}, fmtDt(o.endManual)), h('td', { class: 'muted' }, o.archivedAt ? new Date(o.archivedAt).toLocaleDateString('pl-PL') : ''))));
+      list.append(h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...['', 'lp.', 'Komis', 'Klient', 'Opis', 'Stan.', 'Czas', 'Start ręcznie', 'Koniec ręcznie', 'Zarchiwizowano'].map((x) => h('th', {}, x)))), tb));
+      if (!rows.length) list.append(h('div', { class: 'muted', style: { padding: '8px' } }, all.length ? 'Brak wyników.' : 'Archiwum jest puste.'));
+    };
+    q.addEventListener('input', render); render();
+    const m = modal(`Archiwum zakończonych (${all.length} operacji)`, h('div', {}, h('div', { class: 'row', style: { gap: '6px', marginBottom: '6px' } }, q),
+      list,
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'),
+        acc().style ? h('button', { class: 'btn primary', onclick: async () => {
+          // z całymi drzewami: zaznaczona operacja przywracana razem z operacją główną i suboperacjami z archiwum
+          const roots = new Set([...picked].map((lp) => { let r = lp; for (let p = subParent(r); p; p = subParent(r)) r = p; return r; }));
+          const lps = all.map(([lp]) => lp).filter((lp) => { let r = lp; for (let p = subParent(r); p; p = subParent(r)) r = p; return roots.has(r); });
+          if (!lps.length) { toast('Zaznacz operacje do przywrócenia'); return; }
+          try { await restoreFromArchive(arch, lps); m.close(); toast(`Przywrócono operacji: ${lps.length}`); }
+          catch (e) { toast('Nie przywrócono: ' + (e.code === 'permission-denied' ? 'brak uprawnień (tylko GOD)' : e.message || e)); }
+        } }, 'Przywróć zaznaczone') : null)), { wide: true });
   }
 
   // ---------- kopia całego harmonogramu (tylko GOD) ----------
@@ -854,25 +929,18 @@ export function mountHarmLive(el, appCtx) {
     const chartEl = h('div', { style: { position: 'relative', width: chartW + 'px', flex: 'none' } });
     const head = h('div', { style: { position: 'sticky', top: 0, zIndex: 5, height: HEAD + 'px', width: chartW + 'px', overflow: 'hidden' } });
     const rowsEl = h('div', { style: { position: 'relative', height: n * ROW + 'px', width: chartW + 'px', background: '#f2f2f2' } });
-    // kolumny osi: dzień roboczy zielony, sobota niebieska, niedziela czerwona, święto bordowe (biała pogrubiona czcionka); tygodnie i miesiące zielone
-    let x = 0;
-    for (const c of cells) {
-      const w = c.hours * HOUR, isNow = now.getTime() >= c.start && now.getTime() < c.end, off = c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday';
-      const bg = c.kind === 'holiday' ? HOLIDAY_BG : c.kind === 'sun' ? '#ff0000' : c.kind === 'sat' ? '#00b0f0' : '#00b050';
-      const cellMs = (e) => { const b = e.currentTarget.getBoundingClientRect(); return c.start + Math.max(0, Math.min(1, (e.clientX - b.left) / Math.max(1, b.width))) * (c.end - c.start); };
-      head.append(h('div', { title: (c.kind === 'holiday' ? 'Święto' + (c.holidayName ? ': ' + c.holidayName : '') + '\n' : '') + 'Prawy przycisk: informacje o dniu (obsada, pracownicy, zadania)',
-        oncontextmenu: (e) => { e.preventDefault(); dayDialog(cellMs(e)); }, style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: HEAD + 'px', background: bg, borderRight: '1px solid #999', borderBottom: '1px solid #999', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
-        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isNow || c.kind === 'holiday' ? 700 : 400, color: c.kind === 'sat' ? '#000' : '#fff' } }, c.label)));
-      if (off) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 0, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: '#ffffff' } }));   // weekend i święta: białe tło
-      if (isNow) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 2, pointerEvents: 'none', left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: 'rgba(0,176,80,.18)' } }));
-      x += w;
-    }
+    // kolumny osi: dzień roboczy zielony, sobota niebieska, niedziela czerwona, święto bordowe (biała pogrubiona czcionka); tygodnie i miesiące zielone.
+    // Rysowane tylko w widocznym (poziomo) fragmencie osi – paintAxis() przy przewijaniu; przy interwale 1–2 h to tysiące kolumn.
+    const axisCells = []; let ax = 0;
+    for (const c of cells) { const w = c.hours * HOUR; axisCells.push({ x: ax, w, c, isNow: now.getTime() >= c.start && now.getTime() < c.end, off: c.kind === 'sat' || c.kind === 'sun' || c.kind === 'holiday' }); ax += w; }
+    const axisBg = h('div', { style: { position: 'absolute', left: 0, top: 0, width: chartW + 'px', height: n * ROW + 'px', pointerEvents: 'none' } });
+    rowsEl.append(axisBg);
     const nowX = (now.getTime() - chart.axisStart.getTime()) / 3600000 * HOUR;
     if (nowX > 0) rowsEl.append(h('div', { style: { position: 'absolute', zIndex: 3, pointerEvents: 'none', left: nowX + 'px', top: 0, width: 0, height: n * ROW + 'px', borderLeft: '2px dashed #ff6600' } }));
     const dyn = h('div', { style: { position: 'absolute', left: 0, top: 0, width: chartW + 'px', height: n * ROW + 'px' } });   // paski i zależności tylko dla widocznych wierszy
     rowsEl.append(dyn);
     chartEl.append(head, rowsEl);
-    st.geom.leftRows = leftRows; st.geom.dyn = dyn;
+    st.geom.leftRows = leftRows; st.geom.dyn = dyn; st.geom.axis = { cells: axisCells, head, bg: axisBg, key: '' };
 
     const sy = body.scrollTop, sx = body.scrollLeft;
     clear(body);
@@ -881,8 +949,29 @@ export function mountHarmLive(el, appCtx) {
     paintWindow();
   }
 
+  // oś czasu tylko w widocznym fragmencie (z zapasem): nagłówek dni i białe tło weekendów i świąt
+  function paintAxis() {
+    const g = st.geom; if (!g || !g.axis) return;
+    const A = g.axis, n = st.chart ? st.chart.items.length : 0, vw = body.clientWidth || 1500;
+    const x0 = Math.max(0, body.scrollLeft - g.LEFT - 1200), x1 = body.scrollLeft - g.LEFT + vw + 1200;
+    const key = Math.floor(x0 / 600) + ':' + Math.floor(x1 / 600) + ':' + n;
+    if (A.key === key) return;
+    A.key = key; clear(A.head); clear(A.bg);
+    const { HEAD, FONT, ROW } = g;
+    for (const { x, w, c, isNow, off } of A.cells) {
+      if (x + w < x0 || x > x1) continue;
+      const bg = c.kind === 'holiday' ? HOLIDAY_BG : c.kind === 'sun' ? '#ff0000' : c.kind === 'sat' ? '#00b0f0' : '#00b050';
+      const cellMs = (e) => { const b = e.currentTarget.getBoundingClientRect(); return c.start + Math.max(0, Math.min(1, (e.clientX - b.left) / Math.max(1, b.width))) * (c.end - c.start); };
+      A.head.append(h('div', { title: (c.kind === 'holiday' ? 'Święto' + (c.holidayName ? ': ' + c.holidayName : '') + '\n' : '') + 'Prawy przycisk: informacje o dniu (obsada, pracownicy, zadania)',
+        oncontextmenu: (e) => { e.preventDefault(); dayDialog(cellMs(e)); }, style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: HEAD + 'px', background: bg, borderRight: '1px solid #999', borderBottom: '1px solid #999', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
+        h('span', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', fontSize: FONT + 'px', fontWeight: isNow || c.kind === 'holiday' ? 700 : 400, color: c.kind === 'sat' ? '#000' : '#fff' } }, c.label)));
+      if (off) A.bg.append(h('div', { style: { position: 'absolute', zIndex: 0, left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: '#ffffff' } }));   // weekend i święta: białe tło
+      if (isNow) A.bg.append(h('div', { style: { position: 'absolute', zIndex: 2, left: x + 'px', top: 0, width: w + 'px', height: n * ROW + 'px', background: 'rgba(0,176,80,.18)' } }));
+    }
+  }
   function paintWindow() {
     const g = st.geom; if (!g || !g.leftRows || st.editing) return;
+    paintAxis();
     const { ROW, FONT, HEAD, HOUR, cols, colW, LEFT } = g, chart = st.chart, n = chart.items.length;
     const top = Math.max(0, body.scrollTop - HEAD - ROW * 3), vh = body.clientHeight || 700;
     const from = Math.max(0, Math.floor(top / ROW)), to = Math.min(n, Math.ceil((top + vh + 6 * ROW) / ROW));

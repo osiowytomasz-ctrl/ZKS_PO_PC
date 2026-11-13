@@ -108,6 +108,7 @@ export function computeEnd(startMs, hours, cap) {
  *  - rodzic bez własnego czasu trwa do końca ostatniego dziecka (czas = suma czasów dzieci, możliwe przerwy);
  *  - puste stanowisko dziedziczy się po rodzicu.
  */
+const SCHED_COLL = new Intl.Collator('pl', { numeric: true, sensitivity: 'base' });
 export function computeSchedule(ops, capacity) {
   const byLp = new Map();
   for (const op of ops) if (!byLp.has(String(op.lp))) byLp.set(String(op.lp), op);
@@ -115,7 +116,7 @@ export function computeSchedule(ops, capacity) {
   const isSub = (lp) => { const p = subParent(lp); return p != null && byLp.has(p); };
   const children = new Map();
   for (const op of byLp.values()) if (isSub(op.lp)) { const p = subParent(op.lp); if (!children.has(p)) children.set(p, []); children.get(p).push(op); }
-  for (const list of children.values()) list.sort((x, y) => String(x.lp).localeCompare(String(y.lp), 'pl', { numeric: true, sensitivity: 'base' }));
+  for (const list of children.values()) list.sort((x, y) => SCHED_COLL.compare(String(x.lp), String(y.lp)));
   const kidsOf = (op) => children.get(String(op.lp));
   const hasPreds = (op) => (op.preds || []).some((x) => String(x ?? '').trim());
   // własne źródło startu: ręczny start, poprzednicy albo miejsce w kolejności rodzeństwa (start od rodzica z własnym startem albo po poprzednim)

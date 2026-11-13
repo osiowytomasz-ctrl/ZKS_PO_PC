@@ -34,6 +34,12 @@ service cloud.firestore {
       allow delete: if isGod();
     }
 
+    // archiwum zakończonych operacji: przeglądanie jak harmonogram, przenoszenie i przywracanie – tylko GOD
+    match /harm_archive/{chunk} {
+      allow read: if canView();
+      allow write: if isGod();
+    }
+
     // ustawienia harmonogramu: stanowiska, kolory komisów, święta
     match /config/{doc} {
       allow read: if canView();

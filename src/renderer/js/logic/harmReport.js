@@ -303,8 +303,18 @@ ${body}
  * Interaktywny plik HTML („mini-program”): dane [payload] w <script type="application/json" id="zks-data"> i skrypt [runtime]
  * (report/runtime.js zbudowany przez npm run runtime). Ten sam format tworzy Android (HarmReport.kt: interactiveHtml).
  */
-export function interactiveHtml(payload, runtime) {
-  const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+export function interactiveHtml(payload, runtime, { gzip64 = null } = {}) {
+  // [gzip64] – dane skompresowane (gzip + base64, gzipBase64 poniżej): plik ok. 3× mniejszy; skrypt rozpakowuje je w przeglądarce
+  const data = gzip64 ? `<script type="application/octet-stream" id="zks-data" data-enc="gzip64">${gzip64}</script>`
+    : `<script type="application/json" id="zks-data">${JSON.stringify(payload).replace(/</g, '\\u003c')}</script>`;
   return `<!doctype html>\n<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(payload.title || 'Harmonogram')}</title></head>`
-    + `<body><div id="app"></div><script type="application/json" id="zks-data">${json}</script><script>${runtime}</script></body></html>`;
+    + `<body><div id="app"></div>${data}<script>${runtime}</script></body></html>`;
+}
+
+/** JSON danych skompresowany gzipem w base64 (CompressionStream – przeglądarka / Electron); null, gdy niedostępne. */
+export async function gzipBase64(payload) {
+  if (typeof CompressionStream === 'undefined') return null;
+  const buf = new Uint8Array(await new Response(new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
 }

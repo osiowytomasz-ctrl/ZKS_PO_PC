@@ -45,3 +45,15 @@ test('funkcje pliku: wybór autora blokuje na stałe, oglądający może tylko w
   assert.equal(f.csv, false); assert.equal(f.sim, false); assert.equal(f.simAdd, false); assert.equal(f.compare, false); assert.equal(f.zoom, false); assert.equal(f.search, true);
   assert.ok(featureLocked({ sim: false }, 'simSave')); assert.ok(!featureLocked({ sim: false }, 'search')); assert.ok(!featureLocked(null, 'csv'));
 });
+
+test('plik HTML: dane skompresowane (gzip + base64) – mniejszy plik, ten sam wynik po rozpakowaniu', async () => {
+  const { gzipBase64 } = await import('../src/renderer/js/logic/harmReport.js');
+  const { readPayload } = await import('../src/renderer/js/report/runtime.js');
+  const payload = { title: 'T', ops: Object.fromEntries(Array.from({ length: 500 }, (_, i) => [String(100 + i), { preds: [], element: 'Element ' + i, station: '2Un', hours: 8 }])) };
+  const gz = await gzipBase64(payload);
+  assert.ok(gz.length < JSON.stringify(payload).length / 3);
+  const html = interactiveHtml(payload, RUNTIME, { gzip64: gz });
+  assert.ok(html.includes('data-enc="gzip64"'));
+  assert.deepEqual(await readPayload({ dataset: { enc: 'gzip64' }, textContent: gz }), payload);
+  assert.deepEqual(await readPayload({ dataset: {}, textContent: JSON.stringify(payload) }), payload);
+});
