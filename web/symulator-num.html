@@ -4925,6 +4925,82 @@ c2.fillStyle='#e0a634'; c2.fill();
       return {v:acc, err:err};
     }
 
+  /* ── Szybkie liczenie wyrażenia z samych liczb (+ − * / % **, nawiasy) – zamiast kompilowania nowej funkcji przy każdym bloku.
+     Wynik jak w JavaScripcie; przy zapisie spoza prostej składni zwraca undefined i liczymy jak dotąd. ── */
+  /* ── Wyrażenia regularne budowane z tekstu (adres osi, etykieta) – zapamiętane, a nie tworzone od nowa w każdej linii programu.
+     Wszystkie bez flag (bez stanu lastIndex), więc ponowne użycie daje ten sam wynik. ── */
+  var _reCache=new Map();
+  function _re(src){ var r=_reCache.get(src); if(!r){ if(_reCache.size>4000) _reCache.clear(); r=new RegExp(src); _reCache.set(src,r); } return r; }
+  function fastArith(s){
+    var i=0, n=s.length, FAIL={};
+    if (s.indexOf('--')>=0 || s.indexOf('++')>=0) return undefined;
+    function ws(){ while(i<n && s.charCodeAt(i)===32) i++; }
+    function isD(c){ return c>=48 && c<=57; }
+    function num(){
+      var a=i, c=s.charCodeAt(i);
+      if (c===46) { i++; if (!isD(s.charCodeAt(i))) return FAIL; while(isD(s.charCodeAt(i))) i++; }
+      else if (isD(c)) {
+        if (c===48 && isD(s.charCodeAt(i+1))) return FAIL;          /* 08, 012 – w trybie ścisłym błąd składni */
+        while(isD(s.charCodeAt(i))) i++;
+        if (s.charCodeAt(i)===46) { i++; while(isD(s.charCodeAt(i))) i++; }
+      } else return FAIL;
+      c=s.charCodeAt(i);
+      if (c===101 || c===69) {                                       /* wykładnik e/E */
+        i++; c=s.charCodeAt(i);
+        if (c===43 || c===45) i++;
+        if (!isD(s.charCodeAt(i))) return FAIL;
+        while(isD(s.charCodeAt(i))) i++;
+      }
+      c=s.charCodeAt(i);
+      if (isD(c) || c===46 || c===101 || c===69) return FAIL;
+      return Number(s.substring(a,i));
+    }
+    function primary(){
+      ws();
+      if (s.charCodeAt(i)===40) { i++; var v=add(); if (v===FAIL) return FAIL; ws(); if (s.charCodeAt(i)!==41) return FAIL; i++; return v; }
+      return num();
+    }
+    function unary(){
+      ws(); var c=s.charCodeAt(i);
+      if (c===43 || c===45) { i++; var v=unary(); if (v===FAIL) return FAIL; return c===45 ? -v : +v; }
+      return primary();
+    }
+    function power(){
+      ws(); var c=s.charCodeAt(i);
+      if (c===43 || c===45) {                                        /* -2**2 – w JavaScripcie błąd składni */
+        var u=unary(); if (u===FAIL) return FAIL; ws();
+        if (s.charCodeAt(i)===42 && s.charCodeAt(i+1)===42) return FAIL;
+        return u;
+      }
+      var b=primary(); if (b===FAIL) return FAIL; ws();
+      if (s.charCodeAt(i)===42 && s.charCodeAt(i+1)===42) { i+=2; var e=power(); if (e===FAIL) return FAIL; return b**e; }
+      return b;
+    }
+    function mul(){
+      var v=power(); if (v===FAIL) return FAIL;
+      for(;;){
+        ws(); var c=s.charCodeAt(i);
+        if (c!==42 && c!==47 && c!==37) return v;
+        if (c===47 && (s.charCodeAt(i+1)===47 || s.charCodeAt(i+1)===42)) return FAIL;   /* // i /* – komentarze */
+        i++; var r=power(); if (r===FAIL) return FAIL;
+        v = c===42 ? v*r : c===47 ? v/r : v%r;
+      }
+    }
+    function add(){
+      var v=mul(); if (v===FAIL) return FAIL;
+      for(;;){
+        ws(); var c=s.charCodeAt(i);
+        if (c!==43 && c!==45) return v;
+        i++; var r=mul(); if (r===FAIL) return FAIL;
+        v = c===43 ? v+r : v-r;
+      }
+    }
+    var v=add(); if (v===FAIL) return undefined;
+    ws(); if (i!==n) return undefined;
+    return parseFloat(v);
+  }
+  /* nazwy funkcji i słowa kluczowe nie są zmiennymi (stała – wcześniej tablica tworzona przy każdym dopasowaniu) */
+  var EXPR_KW=['SIN','COS','TAN','ASIN','ACOS','ATAN','ATAN2','SQRT','ABS','POT','TRUNC','ROUND','LN','EXP','DIV','MOD','IC','AC','IF','WHILE','FOR','GOTO','G','M','T','D','F','S'];
   function evalExpr(s) {
       if (s===undefined||s===null) return NaN;
       s=String(s).trim().toUpperCase();
@@ -4935,8 +5011,7 @@ c2.fillStyle='#e0a634'; c2.fill();
       s=s.replace(/\bR(\d+)\b/g,function(m,n){return vars[n]!==undefined?String(vars[n]):'0';});
       /* ── Zmienne nazwane (PAR, MOJAZMIEN itp.) ── */
       s=s.replace(/\b([A-Z_][A-Z0-9_]{1,})\b/g,function(m,n){
-        var gkw2=['SIN','COS','TAN','ASIN','ACOS','ATAN','ATAN2','SQRT','ABS','POT','TRUNC','ROUND','LN','EXP','DIV','MOD','IC','AC','IF','WHILE','FOR','GOTO','G','M','T','D','F','S'];
-        if (gkw2.indexOf(n)>=0) return m;
+        if (EXPR_KW.indexOf(n)>=0) return m;
         return vars['$'+n]!==undefined?String(vars['$'+n]):m;
       });
       s=s.replace(/ATAN2\s*\(([^,)]+),([^)]+)\)/g,function(m,a,b){
@@ -4960,11 +5035,11 @@ c2.fillStyle='#e0a634'; c2.fill();
   /* Iteracyjne wyszukiwanie funkcji z poprawnym dopasowaniem ZAGNIEŻDŻONYCH nawiasów */
   var fnNames = Object.keys(fns).sort(function(a,b){return b.length-a.length;});
   var fnGuard = 0;
-  while (fnGuard++ < 500) {
+  while (s.indexOf('(')>=0 && fnGuard++ < 500) {   /* bez nawiasu nie ma wywołań funkcji – pomijamy 13 wyszukiwań */
     var foundAny = false;
     for (var fi=0; fi<fnNames.length; fi++) {
       var fn = fnNames[fi];
-      var re = new RegExp('\\b'+fn+'\\s*\\(');
+      var re = _re('\\b'+fn+'\\s*\\(');
       var mm = re.exec(s);
       if (!mm) continue;
       var openPos = mm.index + mm[0].length - 1; // pozycja '('
@@ -4987,8 +5062,11 @@ c2.fillStyle='#e0a634'; c2.fill();
       s=s.replace(/\bDIV\b/g,'/').replace(/\bMOD\b/g,'%');
       s=s.replace(/\bIC\s*\(([^)]+)\)/g,'$1').replace(/\bAC\s*\(([^)]+)\)/g,'$1');
       try {
-        if (/^[\d\s()+\-*/.%eE\^]+$/.test(s))
+        if (/^[\d\s()+\-*/.%eE\^]+$/.test(s)) {
+          var _fa=fastArith(s);               /* szybko: bez kompilowania nowej funkcji */
+          if (_fa!==undefined) return _fa;
           return parseFloat(Function('"use strict";return('+s+')')());
+        }
       } catch(e){}
   return parseFloat(s);
     }
@@ -5292,18 +5370,18 @@ _curSnap = (function(){          /* stan L/E przy wejściu w blok */
       line=line.replace(/\x01(\d+)\x01/g, function(_,i){ return _idStore[+i]; });
 
   function getN(c) {
-        var mt=new RegExp('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
-              ||new RegExp(c+'([+-]?[\\d.]+)').exec(line);
+        var mt=_re('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
+              ||_re(c+'([+-]?[\\d.]+)').exec(line);
         return mt ? parseFloat(mt[1]) : null;
       }
   function getAddr(c) {
         /* NUM: adres = litera[±]liczba (XL5 zostało już podstawione na liczbę) */
-        var mtEq=new RegExp('\\b'+c+'\\s*=').exec(line);
+        var mtEq=_re('\\b'+c+'\\s*=').exec(line);
         if (mtEq) {
           log.push({ln:idx+1,msg:'❌ '+c+'= – składnia Sinumerik! W NUM: '+c+'wartość lub '+c+'L1 (obliczenia tylko w L..=)',t:'err'}); errs++;
         }
-        var mt2=new RegExp('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
-              ||new RegExp(c+'([+-]?[\\d.]+)').exec(line);
+        var mt2=_re('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
+              ||_re(c+'([+-]?[\\d.]+)').exec(line);
         if (mt2) return {v:parseFloat(mt2[1]), ic:false, ac:false};
         return null;
       }
@@ -5314,7 +5392,7 @@ _curSnap = (function(){          /* stan L/E przy wejściu w blok */
         return absolute?a.v:cur+a.v;
       }
   function getParam(name) {
-        var mt=new RegExp(name+'=([^\\s,;]+)').exec(line);
+        var mt=_re(name+'=([^\\s,;]+)').exec(line);
         return mt ? evalExpr(mt[1]) : null;
       }
       /* obsługuje RPL=45, RPL45, Z=-10, Z-10 */
@@ -6676,6 +6754,28 @@ var N = (moveIdx!==undefined) ? moveIdx : paths.length;
     var niceF = f<1.5 ? 1 : (f<3.5 ? 2 : (f<7.5 ? 5 : 10));
     return niceF*base;
   }
+  /* ── Warstwy 2D w pamięci: ślad wykonanych ruchów rysowany raz i dorysowywany przyrostowo w animacji.
+     Przerysowanie od zera tylko po zmianie widoku (przesunięcie, powiększenie, rozmiar), ustawień, narzędzia, programu albo cofnięciu. ── */
+  var _L2 = {key:null, src:null, sh:null, ln:null, n:{sh:0, ln:0}};
+  function _layer2Key(key, src){
+    if (_L2.key===key && _L2.src===src && _L2.sh && _L2.sh.width===canvas.width && _L2.sh.height===canvas.height) return;
+    _L2.key=key; _L2.src=src;
+    ['sh','ln'].forEach(function(k){
+      if (!_L2[k]) _L2[k]=document.createElement('canvas');
+      _L2[k].width=canvas.width; _L2[k].height=canvas.height;   /* zmiana rozmiaru czyści warstwę */
+      _L2.n[k]=0;
+    });
+  }
+  function _layer2Sync(n, drawRange, k){
+    var c=_L2[k];
+    if (n < _L2.n[k]) { c.getContext('2d').clearRect(0,0,c.width,c.height); _L2.n[k]=0; }
+    if (n > _L2.n[k]) {
+      var main=ctx; ctx=c.getContext('2d');
+      ctx.save();
+      try { drawRange(_L2.n[k], n); } finally { ctx.restore(); ctx=main; }
+      _L2.n[k]=n;
+    }
+  }
   function draw2D(N, mc, moveIdx, t) {
     var td=parseFloat(document.getElementById('toolDiam').value)*vScale/2;
     var lw=Math.max(0.5, vScale*0.001);
@@ -6834,10 +6934,17 @@ function shInsVec(lx,ly){        /* insVec z drawTool, przeliczony z ekranu (Y w
       if (hullP.length>=3) fillHull(hullP);
     }
 
+    /* klucz warstw w pamięci: widok, kolory, narzędzie (kształt cienia) */
+    var _nDone=Math.min(N, paths.length);
+    _layer2Key([canvas.width, canvas.height, vScale, vOff.x, vOff.y, mc.feed, mc.rapid, mc.arc, document.getElementById('toolDiam').value, lw,
+      shShapeCode, shSizeCode, shDirCode, shCompCode, shRadiusCode, (document.getElementById('toolAngleVal')||{}).value, SHADOW_MIR.X, SHADOW_MIR.Y,
+      JSON.stringify(toolHolderDims)].join('|'), paths);
     ctx.save();
     ctx.globalAlpha=0.035;
     ctx.fillStyle='#000000';
-    for(var trI=0; trI<N; trI++){
+    /* cień wykonanych ruchów: warstwa w pamięci, dorysowywana przyrostowo; bieżący ruch na żywo */
+    _layer2Sync(_nDone, function(from, to){ ctx.globalAlpha=0.035; ctx.fillStyle='#000000';
+    for(var trI=from; trI<to; trI++){
       var trM=paths[trI];
       if(trM.type==='feed'){
         drawShadowSeg(trM.x0,trM.y0,trM.x1,trM.y1);
@@ -6846,6 +6953,8 @@ function shInsVec(lx,ly){        /* insVec z drawTool, przeliczony z ekranu (Y w
       }
       /* rapid / drill nie zostawiają cienia (nie skrawają) */
     }
+    }, 'sh');
+    ctx.save(); ctx.globalAlpha=1; ctx.drawImage(_L2.sh,0,0); ctx.restore();
     /* fragment bieżącego (trwającego) ruchu */
     if(moveIdx!==undefined && moveIdx<paths.length && t>0){
       var trCM=paths[moveIdx];
@@ -6874,8 +6983,11 @@ function shInsVec(lx,ly){        /* insVec z drawTool, przeliczony z ekranu (Y w
     /* rysuj ukończone ruchy */
 
 
-    /* rysuj ukończone ruchy */
-    for(var i=0;i<N;i++){
+    /* rysuj ukończone ruchy – do warstwy w pamięci; w kolejnych klatkach dorysowywane są tylko nowe */
+    _layer2Sync(_nDone, _drawMoves, 'ln');
+    ctx.save(); ctx.globalAlpha=1; ctx.drawImage(_L2.ln,0,0); ctx.restore();
+    function _drawMoves(from, to){
+    for(var i=from;i<to;i++){
       var m=paths[i];ctx.globalAlpha=1;
   if(m.type==='rapid'){
         var a=w2s(m.x0,m.y0),b=w2s(m.x1,m.y1);
@@ -6928,6 +7040,7 @@ function shInsVec(lx,ly){        /* insVec z drawTool, przeliczony z ekranu (Y w
         for(var j=1;j<m.pts.length;j++){var s=w2s(m.pts[j].x,m.pts[j].y); ctx.lineTo(s.x,s.y);}
         ctx.stroke();
   }
+    }
     }
     /* ── Gabaryt docelowy cyklu (kontur nominalny do uzyskania) ── */
     ctx.save();

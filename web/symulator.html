@@ -1909,6 +1909,82 @@ function undefinedParams(s){
   }
   return out;
 }
+/* ── Szybkie liczenie wyrażenia z samych liczb (+ − * / % **, nawiasy) – zamiast kompilowania nowej funkcji przy każdym bloku.
+   Wynik jak w JavaScripcie; przy zapisie spoza prostej składni zwraca undefined i liczymy jak dotąd. ── */
+/* ── Wyrażenia regularne budowane z tekstu (adres osi, etykieta) – zapamiętane, a nie tworzone od nowa w każdej linii programu.
+   Wszystkie bez flag (bez stanu lastIndex), więc ponowne użycie daje ten sam wynik. ── */
+var _reCache=new Map();
+function _re(src){ var r=_reCache.get(src); if(!r){ if(_reCache.size>4000) _reCache.clear(); r=new RegExp(src); _reCache.set(src,r); } return r; }
+function fastArith(s){
+  var i=0, n=s.length, FAIL={};
+  if (s.indexOf('--')>=0 || s.indexOf('++')>=0) return undefined;
+  function ws(){ while(i<n && s.charCodeAt(i)===32) i++; }
+  function isD(c){ return c>=48 && c<=57; }
+  function num(){
+    var a=i, c=s.charCodeAt(i);
+    if (c===46) { i++; if (!isD(s.charCodeAt(i))) return FAIL; while(isD(s.charCodeAt(i))) i++; }
+    else if (isD(c)) {
+      if (c===48 && isD(s.charCodeAt(i+1))) return FAIL;          /* 08, 012 – w trybie ścisłym błąd składni */
+      while(isD(s.charCodeAt(i))) i++;
+      if (s.charCodeAt(i)===46) { i++; while(isD(s.charCodeAt(i))) i++; }
+    } else return FAIL;
+    c=s.charCodeAt(i);
+    if (c===101 || c===69) {                                       /* wykładnik e/E */
+      i++; c=s.charCodeAt(i);
+      if (c===43 || c===45) i++;
+      if (!isD(s.charCodeAt(i))) return FAIL;
+      while(isD(s.charCodeAt(i))) i++;
+    }
+    c=s.charCodeAt(i);
+    if (isD(c) || c===46 || c===101 || c===69) return FAIL;
+    return Number(s.substring(a,i));
+  }
+  function primary(){
+    ws();
+    if (s.charCodeAt(i)===40) { i++; var v=add(); if (v===FAIL) return FAIL; ws(); if (s.charCodeAt(i)!==41) return FAIL; i++; return v; }
+    return num();
+  }
+  function unary(){
+    ws(); var c=s.charCodeAt(i);
+    if (c===43 || c===45) { i++; var v=unary(); if (v===FAIL) return FAIL; return c===45 ? -v : +v; }
+    return primary();
+  }
+  function power(){
+    ws(); var c=s.charCodeAt(i);
+    if (c===43 || c===45) {                                        /* -2**2 – w JavaScripcie błąd składni */
+      var u=unary(); if (u===FAIL) return FAIL; ws();
+      if (s.charCodeAt(i)===42 && s.charCodeAt(i+1)===42) return FAIL;
+      return u;
+    }
+    var b=primary(); if (b===FAIL) return FAIL; ws();
+    if (s.charCodeAt(i)===42 && s.charCodeAt(i+1)===42) { i+=2; var e=power(); if (e===FAIL) return FAIL; return b**e; }
+    return b;
+  }
+  function mul(){
+    var v=power(); if (v===FAIL) return FAIL;
+    for(;;){
+      ws(); var c=s.charCodeAt(i);
+      if (c!==42 && c!==47 && c!==37) return v;
+      if (c===47 && (s.charCodeAt(i+1)===47 || s.charCodeAt(i+1)===42)) return FAIL;   /* // i /* – komentarze */
+      i++; var r=power(); if (r===FAIL) return FAIL;
+      v = c===42 ? v*r : c===47 ? v/r : v%r;
+    }
+  }
+  function add(){
+    var v=mul(); if (v===FAIL) return FAIL;
+    for(;;){
+      ws(); var c=s.charCodeAt(i);
+      if (c!==43 && c!==45) return v;
+      i++; var r=mul(); if (r===FAIL) return FAIL;
+      v = c===43 ? v+r : v-r;
+    }
+  }
+  var v=add(); if (v===FAIL) return undefined;
+  ws(); if (i!==n) return undefined;
+  return parseFloat(v);
+}
+/* nazwy funkcji i słowa kluczowe nie są zmiennymi (stała – wcześniej tablica tworzona przy każdym dopasowaniu) */
+var EXPR_KW=['SIN','COS','TAN','ASIN','ACOS','ATAN','ATAN2','SQRT','ABS','POT','TRUNC','ROUND','LN','EXP','DIV','MOD','IC','AC','IF','WHILE','FOR','GOTO','G','M','T','D','F','S'];
 function evalExpr(s) {
     if (s===undefined||s===null) return NaN;
     s=String(s).trim().toUpperCase();
@@ -1944,8 +2020,7 @@ s=s.replace(/\$TC_DP1\s*\[\s*[\w,\s]+\s*\]/g,function(){
     s=s.replace(/\bR(\d+)\b/g,function(m,n){return vars[n]!==undefined?String(vars[n]):'0';});
     /* ── Zmienne nazwane (PAR, MOJAZMIEN itp.) ── */
     s=s.replace(/\b([A-Z_][A-Z0-9_]{1,})\b/g,function(m,n){
-      var gkw2=['SIN','COS','TAN','ASIN','ACOS','ATAN','ATAN2','SQRT','ABS','POT','TRUNC','ROUND','LN','EXP','DIV','MOD','IC','AC','IF','WHILE','FOR','GOTO','G','M','T','D','F','S'];
-      if (gkw2.indexOf(n)>=0) return m;
+      if (EXPR_KW.indexOf(n)>=0) return m;
       return vars['$'+n]!==undefined?String(vars['$'+n]):m;
     });
     s=s.replace(/ATAN2\s*\(([^,)]+),([^)]+)\)/g,function(m,a,b){
@@ -1969,11 +2044,11 @@ s=s.replace(/\$TC_DP1\s*\[\s*[\w,\s]+\s*\]/g,function(){
 /* Iteracyjne wyszukiwanie funkcji z poprawnym dopasowaniem ZAGNIEŻDŻONYCH nawiasów */
 var fnNames = Object.keys(fns).sort(function(a,b){return b.length-a.length;});
 var fnGuard = 0;
-while (fnGuard++ < 500) {
+while (s.indexOf('(')>=0 && fnGuard++ < 500) {   /* bez nawiasu nie ma wywołań funkcji – pomijamy 13 wyszukiwań */
   var foundAny = false;
   for (var fi=0; fi<fnNames.length; fi++) {
     var fn = fnNames[fi];
-    var re = new RegExp('\\b'+fn+'\\s*\\(');
+    var re = _re('\\b'+fn+'\\s*\\(');
     var mm = re.exec(s);
     if (!mm) continue;
     var openPos = mm.index + mm[0].length - 1; // pozycja '('
@@ -1996,8 +2071,11 @@ while (fnGuard++ < 500) {
     s=s.replace(/\bDIV\b/g,'/').replace(/\bMOD\b/g,'%');
     s=s.replace(/\bIC\s*\(([^)]+)\)/g,'$1').replace(/\bAC\s*\(([^)]+)\)/g,'$1');
     try {
-      if (/^[\d\s()+\-*/.%eE\^]+$/.test(s))
+      if (/^[\d\s()+\-*/.%eE\^]+$/.test(s)) {
+        var _fa=fastArith(s);               /* szybko: bez kompilowania nowej funkcji */
+        if (_fa!==undefined) return _fa;
         return parseFloat(Function('"use strict";return('+s+')')());
+      }
     } catch(e){}
 return parseFloat(s);
   }
@@ -2161,7 +2239,7 @@ function execSubProgAt(code, px, py, pz, lidx) {
     function findLabel(name) {
       for (var i=0;i<lines2.length;i++){
         var lc = lines2[i].replace(/;.*/,'').replace(/\/\/.*/,'').trim().toUpperCase();
-        if (new RegExp('^'+name+'\\s*:').test(lc)) return i;
+        if (_re('^'+name+'\\s*:').test(lc)) return i;
       }
       return -1;
     }
@@ -2309,24 +2387,24 @@ line=line.replace(/\bR(\d+)/g,'§R$1§');
     line=line.replace(/\x01(\d+)\x01/g, function(_,i){ return _idStore[+i]; });
 
     function getN(c) {
-      var mt2=new RegExp('\\b'+c+'=([+-]?[\\d.]+)').exec(line);
+      var mt2=_re('\\b'+c+'=([+-]?[\\d.]+)').exec(line);
       if (mt2) return parseFloat(mt2[1]);
-      var mt=new RegExp('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
-            ||new RegExp(c+'([+-]?[\\d.]+)').exec(line);
+      var mt=_re('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
+            ||_re(c+'([+-]?[\\d.]+)').exec(line);
       return mt ? parseFloat(mt[1]) : null;
     }
 function getAddr(c) {
       // X=wyrażenie (może zawierać R, IC(), AC(), funkcje, spacje)
-      var mt=new RegExp('\\b'+c+'\\s*=\\s*([^,;\\n]+?)(?=\\s+[A-Z]|$|[,;])').exec(line);
-      if (!mt) mt=new RegExp('\\b'+c+'=([^\\s,;]+)').exec(line);
+      var mt=_re('\\b'+c+'\\s*=\\s*([^,;\\n]+?)(?=\\s+[A-Z]|$|[,;])').exec(line);
+      if (!mt) mt=_re('\\b'+c+'=([^\\s,;]+)').exec(line);
       if (mt) {
         var raw2=mt[1];
         var isIC=/^IC\s*\(/i.test(raw2), isAC=/^AC\s*\(/i.test(raw2);
         return {v:evalExpr(raw2), ic:isIC, ac:isAC};
       }
       // X30 klasyczny
-      var mt2=new RegExp('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
-             ||new RegExp(c+'([+-]?[\\d.]+)').exec(line);
+      var mt2=_re('(?:^|[\\s,])'+c+'([+-]?[\\d.]+)').exec(line)
+             ||_re(c+'([+-]?[\\d.]+)').exec(line);
       if (mt2) return {v:parseFloat(mt2[1]), ic:false, ac:false};
       return null;
     }
@@ -2337,7 +2415,7 @@ function getAddr(c) {
       return absolute?a.v:cur+a.v;
     }
 function getParam(name) {
-      var mt=new RegExp(name+'=([^\\s,;]+)').exec(line);
+      var mt=_re(name+'=([^\\s,;]+)').exec(line);
       return mt ? evalExpr(mt[1]) : null;
     }
     /* obsługuje RPL=45, RPL45, Z=-10, Z-10 */
@@ -5914,14 +5992,14 @@ var gfM=/GOTOF\s+([A-Z_][A-Z0-9_]*):?/.exec(line);
         for (var gi=idx+1; gi<lines.length; gi++) {
           var gfRaw=lines[gi].replace(/;.*/,'').trim().toUpperCase();
           if (gfIsBlockNum) {
-            if (new RegExp('^'+gfLabel+'(\\s|$)').test(gfRaw)) {
+            if (_re('^'+gfLabel+'(\\s|$)').test(gfRaw)) {
               log.push({ln:idx+1, msg:'GOTOF '+gfLabel+' → L'+(gi+1), t:'info'});
               idx=gi-1; gfFound=true; break;
             }
             continue;
           }
           var gfL=gfRaw.replace(/^N\d+\s*/,'');
-          if (new RegExp('^'+gfLabel+'\\s*:').test(gfL)) {
+          if (_re('^'+gfLabel+'\\s*:').test(gfL)) {
             log.push({ln:idx+1, msg:'GOTOF '+gfLabel+' → L'+(gi+1), t:'info'});
             idx=gi-1; gfFound=true; break;
           }
@@ -5986,14 +6064,14 @@ var gbM=/GOTOB\s+([A-Z_][A-Z0-9_]*):?/.exec(line);
         for (var gi2=idx-1; gi2>=0; gi2--) {
           var gbRaw=lines[gi2].replace(/;.*/,'').trim().toUpperCase();
           if (gbIsBlockNum) {
-            if (new RegExp('^'+gbLabel+'(\\s|$)').test(gbRaw)) {
+            if (_re('^'+gbLabel+'(\\s|$)').test(gbRaw)) {
               log.push({ln:idx+1, msg:'GOTOB '+gbLabel+' → L'+(gi2+1), t:'info'});
               idx=gi2-1; gbFound=true; break;
             }
             continue;
           }
           var gbL=gbRaw.replace(/^N\d+\s*/,'');
-          if (new RegExp('^'+gbLabel+'\\s*:').test(gbL)) {
+          if (_re('^'+gbLabel+'\\s*:').test(gbL)) {
             log.push({ln:idx+1, msg:'GOTOB '+gbLabel+' → L'+(gi2+1), t:'info'});
             idx=gi2-1; gbFound=true; break;
           }
@@ -6015,7 +6093,7 @@ var gbM=/GOTOB\s+([A-Z_][A-Z0-9_]*):?/.exec(line);
         var repStart=-1;
         for (var ri2=idx-1; ri2>=0; ri2--) {
           var repL=lines[ri2].replace(/;.*/,'').trim().toUpperCase().replace(/^N\d+\s*/,'');
-          if (new RegExp('^'+repLabel+'\\s*:').test(repL)) { repStart=ri2; break; }
+          if (_re('^'+repLabel+'\\s*:').test(repL)) { repStart=ri2; break; }
         }
         if (repStart<0) {
           log.push({ln:idx+1, msg:'❌ REPEAT: etykieta "'+repLabel+'" nie znaleziona', t:'err'}); errs++;
@@ -6167,7 +6245,7 @@ var wA=whileM[1].trim(), wOp=whileM[2], wB=whileM[3].trim();
               var pbL=lines[pb].replace(/;.*/,'').trim().toUpperCase();
               if(/\bGOTO[BF]\b/.test(pbL)) pfJump=true;
               for (var pv=0; pv<pfVars.length; pv++) {
-                if (new RegExp('(^|[^A-Z0-9_$])'+pfVars[pv].replace('$','\\$')+'\\s*=(?!=)').test(pbL)) { pfMod=true; break; }
+                if (_re('(^|[^A-Z0-9_$])'+pfVars[pv].replace('$','\\$')+'\\s*=(?!=)').test(pbL)) { pfMod=true; break; }
               }
               if (pfMod) break;
             }
@@ -7050,11 +7128,9 @@ if (view==='3d') {
       /* narastająca ścieżka: przebuduj tor do bieżącej pozycji.
          Duże programy – throttling: pełny rebuild tylko przy zmianie segmentu. */
       if (moveIdx!==undefined) {
-        var _big = paths.length > 600;
-        if (!_big || moveIdx !== window._lastGrowIdx) {
-          rebuildThree(moveIdx, _big ? 1 : (t||0));
-          window._lastGrowIdx = moveIdx;
-        }
+        /* zbudowana scena tylko zmienia zakres rysowania (GPU), więc płynnie także przy dużych programach */
+        rebuildThree(moveIdx, t||0);
+        window._lastGrowIdx = moveIdx;
       }
       /* znacznik narzędzia: pozycja + orientacja wg płaszczyzny CYCLE800 */
       if (typeof updateThreeToolMark==='function') {
@@ -7160,6 +7236,28 @@ function drawGrid() {
   }
 }
 
+/* ── Warstwy 2D w pamięci: ślad wykonanych ruchów rysowany raz i dorysowywany przyrostowo w animacji.
+   Przerysowanie od zera tylko po zmianie widoku (przesunięcie, powiększenie, rozmiar), ustawień, programu albo cofnięciu. ── */
+var _L2 = {key:null, src:null, sh:null, ln:null, n:{sh:0, ln:0}};
+function _layer2Key(key, src){
+  if (_L2.key===key && _L2.src===src && _L2.sh && _L2.sh.width===canvas.width && _L2.sh.height===canvas.height) return;
+  _L2.key=key; _L2.src=src;
+  ['sh','ln'].forEach(function(k){
+    if (!_L2[k]) _L2[k]=document.createElement('canvas');
+    _L2[k].width=canvas.width; _L2[k].height=canvas.height;   /* zmiana rozmiaru czyści warstwę */
+    _L2.n[k]=0;
+  });
+}
+function _layer2Sync(n, drawRange, k){
+  var c=_L2[k];
+  if (n < _L2.n[k]) { c.getContext('2d').clearRect(0,0,c.width,c.height); _L2.n[k]=0; }
+  if (n > _L2.n[k]) {
+    var main=ctx; ctx=c.getContext('2d');
+    ctx.save();
+    try { drawRange(_L2.n[k], n); } finally { ctx.restore(); ctx=main; }
+    _L2.n[k]=n;
+  }
+}
 function draw2D(N, mc, moveIdx, t) {
 /* kinematyka stołu B: każdy ślad obrócony o (B_bieżący − B_segmentu) wokół osi Y */
   var _Bc=(window.tableViewB||0);
@@ -7167,7 +7265,10 @@ function draw2D(N, mc, moveIdx, t) {
     var d=(_Bc-(bSeg||0))*Math.PI/180;
     return px*Math.cos(d)-(pz||0)*Math.sin(d);
   }
-  var paths=window.paths.map(function(m){
+  /* ruchy obrócone o stół B liczone tylko dla tych, które są rysowane (wcześniej kopia całej ścieżki w każdej klatce) */
+  var _src=window.paths, _rc=new Array(_src.length);
+  function P(i){ return _rc[i] || (_rc[i]=_rotMove(_src[i])); }
+  function _rotMove(m){
     if(m.type==='arc'){
       var bS=(m.b0!==undefined)?m.b0:((m.b1!==undefined)?m.b1:0);
       var c=Object.assign({},m);
@@ -7178,9 +7279,12 @@ function draw2D(N, mc, moveIdx, t) {
     c2.x0=_rotX(m.x0,m.z0,(m.b0!==undefined)?m.b0:0);
     c2.x1=_rotX(m.x1,m.z1,(m.b1!==undefined)?m.b1:0);
     return c2;
-  });
+  }
   var td=parseFloat(document.getElementById('toolDiam').value)*vScale/2;
   var lw=Math.max(0.5, vScale*0.001);
+  var _nDone=Math.min(N, _src.length);
+  _layer2Key([canvas.width, canvas.height, vScale, vOff.x, vOff.y, _Bc, mc.feed, mc.rapid, mc.arc, document.getElementById('toolDiam').value,
+    shadow2dOn, shadow2dLevel, traceOpacity, lw].join('|'), _src);
 /* ── Import DXF – cienkie czarne linie w tle ── */
   if (dxfShapes && dxfShapes.length) {
     ctx.save();
@@ -7223,14 +7327,14 @@ for (var di=1; di<sh.pts.length; di++){
       ctx.closePath();
       ctx.fill();
     }
-    function shadowChain(idxMax, partialIdx, partialT){
-      for(var ci=0; ci<idxMax; ci++){
-        var cm=paths[ci];
+    function shadowChain(idxFrom, idxMax, partialIdx, partialT){
+      for(var ci=idxFrom; ci<idxMax; ci++){
+        var cm=P(ci);
         if(cm.type==='feed'){ shadowSeg(w2s(cm.x0,cm.y0), w2s(cm.x1,cm.y1)); }
         else if(cm.type==='arc'){ for(var cj=1;cj<cm.pts.length;cj++){ shadowSeg(w2s(cm.pts[cj-1].x,cm.pts[cj-1].y), w2s(cm.pts[cj].x,cm.pts[cj].y)); } }
       }
-      if(partialIdx!==undefined && partialIdx<paths.length && partialT>0){
-        var pm=paths[partialIdx];
+      if(partialIdx!==undefined && partialIdx<_src.length && partialT>0){
+        var pm=P(partialIdx);
         if(pm.type==='feed'){ var pp=interpMove(pm,partialT); shadowSeg(w2s(pm.x0,pm.y0), w2s(pp.x,pp.y)); }
         else if(pm.type==='arc'){
           var tl=moveLen(pm), tgt=tl*partialT, acc=0;
@@ -7242,17 +7346,22 @@ for (var di=1; di<sh.pts.length; di++){
         }
       }
     }
-    if(moveIdx!==undefined && moveIdx<paths.length){ shadowChain(moveIdx, moveIdx, t); }
-    else { shadowChain(N); }
+    /* wykonane ruchy: warstwa w pamięci (dorysowywana przyrostowo), bieżący ruch na żywo */
+    _layer2Sync(_nDone, function(from, to){ ctx.globalAlpha = 0.04 + 0.28*shadow2dLevel; ctx.fillStyle = '#808080'; shadowChain(from, to); }, 'sh');
+    ctx.save(); ctx.globalAlpha=1; ctx.drawImage(_L2.sh,0,0); ctx.restore();
+    if(moveIdx!==undefined && moveIdx<_src.length){ shadowChain(0, 0, moveIdx, t); }
     ctx.restore();
   }
 
   /* rysuj ukończone ruchy */
 
 
-  /* rysuj ukończone ruchy */
-  for(var i=0;i<N;i++){
-    var m=paths[i];ctx.globalAlpha=1;
+  /* rysuj ukończone ruchy – do warstwy w pamięci; w kolejnych klatkach dorysowywane są tylko nowe */
+  _layer2Sync(_nDone, _drawMoves, 'ln');
+  ctx.save(); ctx.globalAlpha=1; ctx.drawImage(_L2.ln,0,0); ctx.restore();
+  function _drawMoves(from, to){
+  for(var i=from;i<to;i++){
+    var m=P(i);ctx.globalAlpha=1;
 if(m.type==='rapid'){
       var a=w2s(m.x0,m.y0),b=w2s(m.x1,m.y1);
       /* nie rysuj jeśli przejazd jest zerowej długości */
@@ -7320,6 +7429,7 @@ if(m.type==='rapid'){
       for(var j=1;j<m.pts.length;j++){var s=w2s(m.pts[j].x,m.pts[j].y); ctx.lineTo(s.x,s.y);}
       ctx.stroke();
 }
+  }
   }
   /* ── Gabaryt docelowy cyklu (kontur nominalny do uzyskania) ── */
   ctx.save();
@@ -7427,8 +7537,8 @@ ctx.fillStyle='#1565c0'; ctx.globalAlpha=0.85;
 
   ctx.globalAlpha=1;
   /* rysuj bieżący ruch częściowo */
-  if(moveIdx!==undefined && moveIdx<paths.length && t>0){
-    var m=paths[moveIdx];
+  if(moveIdx!==undefined && moveIdx<_src.length && t>0){
+    var m=P(moveIdx);
     if(m.type==='rapid'){
       var pos=interpMove(m,t);
       ctx.strokeStyle=mc.rapid;ctx.setLineDash([4,5]);ctx.lineWidth=1;ctx.globalAlpha=0.7;
@@ -8413,12 +8523,54 @@ function updateThreeCamera() {
   THREE_camera.lookAt(t.x, t.y, t.z);
 }
 
+/* ── Paczki geometrii 3D: cała ścieżka w kilku buforach zamiast tysięcy obiektów (rysuje karta graficzna) ── */
+var _B3 = null;            /* bieżąca paczka podczas budowy (null = pojedyncze obiekty) */
+var _T3 = null;            /* grupa, do której trafiają pojedyncze obiekty */
+var _g3 = null;
+function _g3Key(){
+  var ms=document.getElementById('matSel'), tdEl=document.getElementById('toolDiam');
+  return [ms?ms.value:'', tdEl?tdEl.value:'', traceOpacity, show3dTube].join('|');
+}
+function _dispose3(o){
+  o.traverse(function(c){
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) (Array.isArray(c.material)?c.material:[c.material]).forEach(function(mm){ mm.dispose(); });
+  });
+}
+/* rurka (walec bez den, 12 ścian) od punktu (x0,y0,z0) wzdłuż kierunku (ux,uy,uz) – jak CylinderGeometry(r,r,len,12,1,true) */
+function _tubeInto(B, x0,y0,z0, ux,uy,uz, len, r, color){
+  var ax=Math.abs(ux)<0.9?1:0, ay=ax?0:1;               /* wektor pomocniczy nierównoległy do osi */
+  var px=uy*0-uz*ay, py=uz*ax-ux*0, pz=ux*ay-uy*ax;     /* u × a */
+  var pl=Math.sqrt(px*px+py*py+pz*pz); px/=pl; py/=pl; pz/=pl;
+  var qx=uy*pz-uz*py, qy=uz*px-ux*pz, qz=ux*py-uy*px;   /* u × p */
+  var base=B.tP.length/3, x1=x0+ux*len, y1=y0+uy*len, z1=z0+uz*len;
+  for (var k=0;k<=12;k++){
+    var a=k/12*Math.PI*2, ca=Math.cos(a), sa=Math.sin(a);
+    var nx=px*ca+qx*sa, ny=py*ca+qy*sa, nz=pz*ca+qz*sa;
+    B.tP.push(x0+nx*r, y0+ny*r, z0+nz*r, x1+nx*r, y1+ny*r, z1+nz*r);
+    B.tN.push(nx,ny,nz, nx,ny,nz);
+    B.tC.push(color.r,color.g,color.b, color.r,color.g,color.b);
+  }
+  for (var k2=0;k2<12;k2++){
+    var i0=base+k2*2;
+    B.tI.push(i0, i0+1, i0+2, i0+1, i0+3, i0+2);
+  }
+}
 function rebuildThree(upToIdx, upToT) {
   if (typeof E3D_current==='function' && E3D_current()!=='three') { E3D_rebuild(); return; }
   var _grow = (upToIdx!==undefined && upToIdx!==null);
   if (!THREE_scene || !THREE_group) return;
-/* usuń stare linie */
-while(THREE_group.children.length) THREE_group.remove(THREE_group.children[0]);
+  /* Narastanie ścieżki w animacji: scena jest już zbudowana w całości (jedna paczka geometrii na GPU),
+     więc zmieniamy tylko zakres rysowania i dorysowujemy bieżący, częściowo wykonany ruch – bez przebudowy. */
+  var _key3 = _g3Key();
+  if (_grow && window._g3 && window._g3.paths===paths && window._g3.key===_key3) {
+    window._g3.apply(upToIdx, upToT);
+    THREE_renderer.render(THREE_scene, THREE_camera);
+    return;
+  }
+/* usuń stare linie (i zwolnij ich bufory na karcie graficznej – bez tego pamięć rosła przy każdej przebudowie) */
+while(THREE_group.children.length){ var _old=THREE_group.children[0]; THREE_group.remove(_old); _dispose3(_old); }
+  _T3 = THREE_group;
   /* THREE_toolMark żyje w THREE_scene (nieruchomy układ maszyny) – NIE usuwamy go przy odbudowie grupy */
   addModelToThree(THREE_group);
   /* ── Import DXF – cienkie czarne linie w 3D (na poziomie Z=0) ── */
@@ -8480,10 +8632,15 @@ while(THREE_group.children.length) THREE_group.remove(THREE_group.children[0]);
   var cDrill = new THREE.Color(mc.feed);
 
 function addLine(x0,y0,z0,x1,y1,z1,color,dashed) {
+    if (_B3) {   /* paczka: odcinek trafia do wspólnego bufora (szybkie przejazdy osobno – półprzezroczyste) */
+      if (dashed) _B3.rap.push(x0,y0,z0,x1,y1,z1);
+      else { _B3.lin.push(x0,y0,z0,x1,y1,z1); _B3.linC.push(color.r,color.g,color.b,color.r,color.g,color.b); }
+      return;
+    }
     var pts=[new THREE.Vector3(x0,y0,z0),new THREE.Vector3(x1,y1,z1)];
     var geo=new THREE.BufferGeometry().setFromPoints(pts);
     var mat=new THREE.LineBasicMaterial({color:color,opacity:dashed?0.4:1,transparent:dashed});
-    THREE_group.add(new THREE.Line(geo,mat));
+    _T3.add(new THREE.Line(geo,mat));
   }
   /* półprzezroczysta rurka śladu przejazdu – walec o średnicy narzędzia między dwoma punktami */
 function addTube(x0,y0,z0,x1,y1,z1,color){
@@ -8492,13 +8649,14 @@ function addTube(x0,y0,z0,x1,y1,z1,color){
     var dx=x1-x0, dy=y1-y0, dz=z1-z0;
     var len=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if (len<1e-6) return;
+    if (_B3) { _tubeInto(_B3, x0,y0,z0, dx/len,dy/len,dz/len, len, td/2, color); return; }
     var geo=new THREE.CylinderGeometry(td/2, td/2, len, 12, 1, true);
     var mat=new THREE.MeshPhongMaterial({color:color, opacity:0.22*traceOpacity, transparent:true, side:THREE.DoubleSide, depthWrite:false});
     var tube=new THREE.Mesh(geo,mat);
     var dir=new THREE.Vector3(dx/len,dy/len,dz/len);
     tube.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir));
     tube.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);
-    THREE_group.add(tube);
+    _T3.add(tube);
   }
 
 function addDrillMark(x,y,z, xBot,yBot,zBot) {
@@ -8518,14 +8676,14 @@ function addDrillMark(x,y,z, xBot,yBot,zBot) {
     var dir=new THREE.Vector3(ux,uy,uz);
     mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir));
     mesh.position.set(x+ux*depth/2, y+uy*depth/2, z+uz*depth/2);
-    THREE_group.add(mesh);
+    _T3.add(mesh);
     /* kółko na powierzchni – w płaszczyźnie prostopadłej do osi otworu */
     var ring=new THREE.RingGeometry(td/2-0.3,td/2+0.3,32);
     var rmat=new THREE.MeshBasicMaterial({color:cDrill,side:THREE.DoubleSide});
     var rmesh=new THREE.Mesh(ring,rmat);
     rmesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), dir));
     rmesh.position.set(x,y,z);
-    THREE_group.add(rmesh);
+    _T3.add(rmesh);
     /* krzyżyk w płaszczyźnie powierzchni: dwa wektory prostopadłe do osi otworu */
     var t1=new THREE.Vector3(1,0,0);
     if (Math.abs(dir.x)>0.9) t1.set(0,1,0);
@@ -8544,7 +8702,8 @@ function addDrillMark(x,y,z, xBot,yBot,zBot) {
     var a=(bSeg||0)*Math.PI/180;
     return {x:px*Math.cos(a)+(pz||0)*Math.sin(a), z:-px*Math.sin(a)+(pz||0)*Math.cos(a)};
   }
-  paths.map(function(m){
+  /* ruch we współrzędnych detalu (obrót stołu B) */
+  function _wpMove(m){
     if(m.type==='arc'){
       var bS=(m.b0!==undefined)?m.b0:((m.b1!==undefined)?m.b1:0);
       var c=Object.assign({},m);
@@ -8556,53 +8715,102 @@ function addDrillMark(x,y,z, xBot,yBot,zBot) {
     var w1=_wp(m.x1,m.z1,(m.b1!==undefined)?m.b1:0);
 c2.x0=w0.x; c2.z0=w0.z; c2.x1=w1.x; c2.z1=w1.z;
     return c2;
-  }).forEach(function(m, _idx){
-    /* narastanie ścieżki: pomijaj ruchy jeszcze niewykonane, bieżący rysuj częściowo */
-    if (_grow) {
-      if (_idx > upToIdx) return;
-      if (_idx === upToIdx && (upToT||0) < 1) {
-        var _tt = upToT||0;
-        if (m.type==='arc') {
-          var _n = Math.max(1, Math.round((m.pts.length-1)*_tt));
-          m = Object.assign({}, m, {pts: m.pts.slice(0, _n+1)});
-        } else {
-          m = Object.assign({}, m, {
-            x1: m.x0+(m.x1-m.x0)*_tt,
-            y1: m.y0+(m.y1-m.y0)*_tt,
-            z1: m.z0+(m.z1-m.z0)*_tt
-          });
-        }
-      }
-    }
+  }
+  /* jeden ruch: linie, rurka śladu, znacznik otworu + gabaryt */
+  function _emit(m){
     if (m.type==='rapid') {
       addLine(m.x0,m.y0,m.z0, m.x1,m.y1,m.z1, cRapid, true);
-      [m.x0,m.x1].forEach(function(v){minX=Math.min(minX,v);maxX=Math.max(maxX,v);});
-      [m.y0,m.y1].forEach(function(v){minY=Math.min(minY,v);maxY=Math.max(maxY,v);});
-      [m.z0,m.z1].forEach(function(v){minZ=Math.min(minZ,v);maxZ=Math.max(maxZ,v);});
+      minX=Math.min(minX,m.x0,m.x1);maxX=Math.max(maxX,m.x0,m.x1);
+      minY=Math.min(minY,m.y0,m.y1);maxY=Math.max(maxY,m.y0,m.y1);
+      minZ=Math.min(minZ,m.z0,m.z1);maxZ=Math.max(maxZ,m.z0,m.z1);
 } else if (m.type==='feed') {
       addTube(m.x0,m.y0,m.z0, m.x1,m.y1,m.z1, cFeed);
       addLine(m.x0,m.y0,m.z0, m.x1,m.y1,m.z1, cFeed, false);
-      [m.x0,m.x1].forEach(function(v){minX=Math.min(minX,v);maxX=Math.max(maxX,v);});
-      [m.y0,m.y1].forEach(function(v){minY=Math.min(minY,v);maxY=Math.max(maxY,v);});
+      minX=Math.min(minX,m.x0,m.x1);maxX=Math.max(maxX,m.x0,m.x1);
+      minY=Math.min(minY,m.y0,m.y1);maxY=Math.max(maxY,m.y0,m.y1);
 } else if (m.type==='drill') {
       addDrillMark(m.x0, m.y0, m.z0, m.x1, m.y1, m.z1);
       addLine(m.x0,m.y0,m.z0, m.x1,m.y1,m.z1, cFeed, false);
       minX=Math.min(minX,m.x0);maxX=Math.max(maxX,m.x0);
       minY=Math.min(minY,m.y0);maxY=Math.max(maxY,m.y0);
-      [m.z0,m.z1].forEach(function(v){minZ=Math.min(minZ,v);maxZ=Math.max(maxZ,v);});
+      minZ=Math.min(minZ,m.z0,m.z1);maxZ=Math.max(maxZ,m.z0,m.z1);
     } else if (m.type==='arc') {
 for(var j=1;j<m.pts.length;j++){
         var p=m.pts[j-1],q=m.pts[j];
         addTube(p.x,p.y,p.z, q.x,q.y,q.z, cArc);
         addLine(p.x,p.y,p.z, q.x,q.y,q.z, cArc, false);
       }
-      m.pts.forEach(function(p){
-        minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);
-        minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
-        minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);
-      });
+      for(var k=0;k<m.pts.length;k++){ var pk=m.pts[k];
+        minX=Math.min(minX,pk.x);maxX=Math.max(maxX,pk.x);
+        minY=Math.min(minY,pk.y);maxY=Math.max(maxY,pk.y);
+        minZ=Math.min(minZ,pk.z);maxZ=Math.max(maxZ,pk.z);
+      }
     }
-  });
+  }
+  /* cała ścieżka do paczek geometrii (GPU); znaczniki otworów zostają osobnymi obiektami */
+  _B3 = {lin:[], linC:[], rap:[], tP:[], tN:[], tC:[], tI:[]};
+  var _ends = {lin:new Int32Array(paths.length), rap:new Int32Array(paths.length), tube:new Int32Array(paths.length), objA:new Int32Array(paths.length), objB:new Int32Array(paths.length)};
+  for (var _mi=0; _mi<paths.length; _mi++) {
+    _ends.objA[_mi]=THREE_group.children.length;
+    _emit(_wpMove(paths[_mi]));
+    _ends.objB[_mi]=THREE_group.children.length;
+    _ends.lin[_mi]=_B3.lin.length/3; _ends.rap[_mi]=_B3.rap.length/3; _ends.tube[_mi]=_B3.tI.length;
+  }
+  var _batch = _B3; _B3 = null;
+  var _linObj=null, _rapObj=null, _tubeObj=null;
+  if (_batch.lin.length) {
+    var gL=new THREE.BufferGeometry();
+    gL.setAttribute('position', new THREE.Float32BufferAttribute(_batch.lin,3));
+    gL.setAttribute('color', new THREE.Float32BufferAttribute(_batch.linC,3));
+    _linObj=new THREE.LineSegments(gL, new THREE.LineBasicMaterial({vertexColors:true}));
+    THREE_group.add(_linObj);
+  }
+  if (_batch.rap.length) {
+    var gR=new THREE.BufferGeometry();
+    gR.setAttribute('position', new THREE.Float32BufferAttribute(_batch.rap,3));
+    _rapObj=new THREE.LineSegments(gR, new THREE.LineBasicMaterial({color:cRapid,opacity:0.4,transparent:true}));
+    THREE_group.add(_rapObj);
+  }
+  if (_batch.tI.length) {
+    var gT=new THREE.BufferGeometry();
+    gT.setAttribute('position', new THREE.Float32BufferAttribute(_batch.tP,3));
+    gT.setAttribute('normal', new THREE.Float32BufferAttribute(_batch.tN,3));
+    gT.setAttribute('color', new THREE.Float32BufferAttribute(_batch.tC,3));
+    gT.setIndex(new THREE.Uint32BufferAttribute(_batch.tI,1));
+    _tubeObj=new THREE.Mesh(gT, new THREE.MeshPhongMaterial({vertexColors:true, opacity:0.22*traceOpacity, transparent:true, side:THREE.DoubleSide, depthWrite:false}));
+    THREE_group.add(_tubeObj);
+  }
+  var _partial = new THREE.Group(); THREE_group.add(_partial);
+  var _bounds = {minX:minX,maxX:maxX,minY:minY,maxY:maxY,minZ:minZ,maxZ:maxZ};
+  var _objs = THREE_group.children;
+  /* pokaż ruchy 0..idx: pełne wykonane z paczki, bieżący (t<1) jako osobne obiekty jak dotychczas */
+  function _apply(idx, t){
+    var n=paths.length, full=n, part=-1;
+    if (idx!==undefined && idx!==null) {
+      if (idx < n && (t||0) < 1) { full=idx; part=idx; } else full=Math.min(n, idx+1);
+    }
+    var e = function(arr){ return full>0 ? arr[full-1] : 0; };
+    if (_linObj) _linObj.geometry.setDrawRange(0, e(_ends.lin));
+    if (_rapObj) _rapObj.geometry.setDrawRange(0, e(_ends.rap));
+    if (_tubeObj) _tubeObj.geometry.setDrawRange(0, e(_ends.tube));
+    for (var q=0;q<n;q++) for (var o=_ends.objA[q]; o<_ends.objB[q]; o++) _objs[o].visible = q<full;
+    while(_partial.children.length){ var c=_partial.children[0]; _partial.remove(c); _dispose3(c); }
+    if (part>=0) {
+      var m=_wpMove(paths[part]), tt=t||0;
+      if (m.type==='arc') {
+        var nn=Math.max(1, Math.round((m.pts.length-1)*tt));
+        m=Object.assign({}, m, {pts:m.pts.slice(0, nn+1)});
+      } else {
+        m=Object.assign({}, m, {x1:m.x0+(m.x1-m.x0)*tt, y1:m.y0+(m.y1-m.y0)*tt, z1:m.z0+(m.z1-m.z0)*tt});
+      }
+      var keep=[minX,maxX,minY,maxY,minZ,maxZ];
+      _T3=_partial; _emit(m); _T3=THREE_group;
+      minX=keep[0];maxX=keep[1];minY=keep[2];maxY=keep[3];minZ=keep[4];maxZ=keep[5];
+    }
+  }
+  window._g3 = {paths:paths, key:_key3, apply:_apply};
+  _apply(_grow ? upToIdx : null, upToT);
+  minX=_bounds.minX;maxX=_bounds.maxX;minY=_bounds.minY;maxY=_bounds.maxY;minZ=_bounds.minZ;maxZ=_bounds.maxZ;
 
 /* Auto-dopasowanie kamery/zoom TYLKO przy pełnym budowaniu sceny (nie podczas narastania).
      Podczas animacji (_grow) zachowujemy zoom i pozycję kamery ustawione przez użytkownika. */
