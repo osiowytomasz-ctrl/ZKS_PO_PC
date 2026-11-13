@@ -410,6 +410,50 @@ export function blockedPredecessors(opsByLp, id) {
 }
 
 /**
+ * Operacje, na których koniec [id] i tak czeka z samej budowy drzewa – bez żadnych wpisanych zależności: wcześniejsze suboperacje tej samej
+ * operacji (kolejność liter), wcześniejsze rodzeństwo jej operacji nadrzędnych i ich potomki. Wpisanie ich w Z1–Z4 jest zbędne.
+ */
+export function structurallyBefore(opsByLp, id) {
+  const kids = new Map();
+  for (const lp of Object.keys(opsByLp)) { const p = subParent(lp); if (p && opsByLp[p]) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(lp); } }
+  for (const l of kids.values()) l.sort(lpCompare);
+  const memo = new Map();
+  const own = (lp) => {
+    if (memo.has(lp)) return memo.get(lp);
+    memo.set(lp, false);
+    const o = opsByLp[lp], par = subParent(lp);
+    let v = o.startManual != null || (o.preds || []).length > 0;
+    if (!v && par && opsByLp[par]) v = kids.get(par).indexOf(lp) > 0 || own(par);
+    memo.set(lp, v); return v;
+  };
+  // tylko powiązania wynikające z drzewa (bez Z1–Z4): kolejność rodzeństwa, start z rodzicem, start po pierwszym dziecku, koniec rodzica po dzieciach
+  const deps = (n) => {
+    const lp = n.slice(2), op = opsByLp[lp], out = [];
+    if (!op) return out;
+    const par = subParent(lp);
+    if (n[0] === 's') {
+      if (par && opsByLp[par]) { const sibs = kids.get(par), i = sibs.indexOf(lp); if (i > 0) out.push('e:' + sibs[i - 1]); else if (own(par)) out.push('s:' + par); }
+      if (kids.has(lp) && !own(lp)) out.push('s:' + kids.get(lp)[0]);
+    } else {
+      out.push('s:' + lp);
+      if (kids.has(lp) && !(op.hours > 0)) for (const k of kids.get(lp)) out.push('e:' + k);
+    }
+    return out;
+  };
+  const seen = new Set(['s:' + id]), stack = ['s:' + id];
+  while (stack.length) for (const d of deps(stack.pop())) if (!seen.has(d)) { seen.add(d); stack.push(d); }
+  return new Set(Object.keys(opsByLp).filter((lp) => lp !== String(id) && seen.has('e:' + lp)));
+}
+
+/** Zbędne zależności operacji [id] (wpisane w Z1–Z4, a wynikające z kolejności suboperacji). */
+export function redundantPreds(opsByLp, id) {
+  const preds = (opsByLp[id] && opsByLp[id].preds) || [];
+  if (!preds.length) return [];
+  const before = structurallyBefore(opsByLp, id);
+  return preds.filter((p) => before.has(p));
+}
+
+/**
  * Dlaczego operacja [pred] nie może być poprzednikiem [id] w pozycji [slot] (null = można). Operacja główna może zależeć od suboperacji innej
  * operacji, a suboperacja od innej operacji; nie może zależeć od swojej operacji głównej ani operacja główna od własnych suboperacji (cykl).
  */
@@ -421,6 +465,7 @@ export function predError(opsByLp, id, slot, pred) {
   if (isAncestor(p, id)) return `Operacja ${p} jest ${depthOf(p) === 0 ? 'operacją główną' : 'suboperacją nadrzędną'} tej ${levelGen(id)}; powiązanie jest zbędne i tworzy cykl`;
   if (isAncestor(id, p)) return `Operacja ${p} jest ${levelIns(p)} tej ${levelGen(id)}; powiązanie tworzy cykl`;
   if (blockedPredecessors(opsByLp, id).has(p)) return `Operacja ${p} zależy od tej operacji, powiązanie utworzyłoby cykl`;
+  if (structurallyBefore(opsByLp, id).has(p)) return `Zbędne: ${id} i tak czeka na ${p} (kolejność suboperacji wynika z liter numeru)`;
   const others = (opsByLp[id]?.preds || []).filter((_, i) => i !== slot);
   if (others.includes(p)) return `Operacja ${p} jest już wpisana jako inny poprzednik`;
   return null;
@@ -430,7 +475,8 @@ export function predError(opsByLp, id, slot, pred) {
 export function predecessorChoices(opsByLp, id, slot) {
   const blocked = blockedPredecessors(opsByLp, id);
   const others = new Set((opsByLp[id]?.preds || []).filter((_, i) => i !== slot));
-  return Object.keys(opsByLp).filter((lp) => lp !== String(id) && !blocked.has(lp) && !others.has(lp) && !isAncestor(lp, id) && !isAncestor(id, lp)).sort(lpCompare);
+  const implied = structurallyBefore(opsByLp, id);
+  return Object.keys(opsByLp).filter((lp) => lp !== String(id) && !blocked.has(lp) && !implied.has(lp) && !others.has(lp) && !isAncestor(lp, id) && !isAncestor(id, lp)).sort(lpCompare);
 }
 
 /**

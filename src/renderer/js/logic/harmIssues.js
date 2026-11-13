@@ -1,7 +1,7 @@
 // Konflikty i błędy harmonogramu liczone na bieżąco (po każdej zmianie w bazie): pętle zależności, brakujący poprzednicy,
 // suboperacje bez operacji nadrzędnej, koniec ręczny przed startem ręcznym, brak startu, brak czasu, nieznane stanowisko, koniec po wysyłce.
 // Ten sam zestaw reguł ma Android (harmfb/HarmIssues.kt).
-import { predError, subParent, isSyntheticId, lpCompare } from './harmModel.js';
+import { predError, subParent, isSyntheticId, lpCompare, redundantPreds } from './harmModel.js';
 
 const fmt = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; };
 const isDone = (op) => String(op.status || '').trim().toLowerCase() === 'zak.';
@@ -20,12 +20,14 @@ export function findIssues(opsByLp, extra = {}) {
   for (const [lp, op] of Object.entries(ops)) {
     const preds = op.preds || [];
     const par = subParent(lp);
+    const redundant = new Set(redundantPreds(ops, lp));
     if (par && !ops[par]) push(lp, 'error', 'parent', `${lp}: brak operacji nadrzędnej ${par}`, 'lp');
     if (preds.length > 4) push(lp, 'error', 'preds', `${lp}: więcej niż 4 poprzedników (${preds.join(', ')})`, 'z4');
     preds.forEach((p, i) => {
       const col = 'z' + Math.min(4, i + 1);
       if (!ops[p]) { push(lp, 'error', 'missing', `${lp}: poprzednik ${p} nie istnieje`, col); return; }
       if (preds.indexOf(p) !== i) { push(lp, 'warn', 'dup', `${lp}: poprzednik ${p} wpisany dwa razy`, col); return; }
+      if (redundant.has(p)) { push(lp, 'warn', 'redundant', `${lp} ← ${p}: zbędna zależność (kolejność suboperacji wynika z liter numeru)`, col); out[out.length - 1].pred = p; return; }
       const err = predError(without(ops, lp, p), lp, i, p);
       if (err) {
         if (isCycleMsg(err)) cycleLinks.push([lp, p, col]);

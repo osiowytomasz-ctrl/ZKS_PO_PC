@@ -80,6 +80,7 @@ test('plan zapisu: kontrola numerów, poziomów i zależności', () => {
   const fresh = [{ ...emptyNode('900'), element: 'Nowa', komis: 'K9' }, { ...emptyNode('900a'), station: '1Si', hours: '8' }, { ...emptyNode('900b'), station: '2Un', hours: '4', preds: '900a, 800' }];
   const p = planTree(o, [], fresh, { stations: ['1Si', '2Un'] });
   assert.deepEqual(p.errors, []); assert.equal(p.sets.length, 3); assert.deepEqual(p.remove, []);
-  assert.deepEqual(p.sets[2][1].preds, ['900a', '800']);
+  assert.deepEqual(p.sets[2][1].preds, ['800']);                               // 900a pominięte: 900b i tak startuje po 900a
+  assert.ok(p.warnings.some((w) => w.includes('zbędne zależności 900a')));
   assert.ok(planTree(o, [], [{ ...emptyNode('901'), station: 'XYZ' }], { stations: ['1Si'] }).warnings[0].includes('XYZ'));
 });

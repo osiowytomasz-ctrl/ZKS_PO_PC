@@ -5,7 +5,7 @@ import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX } from '../logic/harmModel.js';
-import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup } from '../harmStore.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree } from '../harmStore.js';
 import { backupData, backupText, parseBackup, backupDiff, backupFileName } from '../logic/harmBackup.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
 import { treeEditor } from './harmTreeEditor.js';
@@ -194,8 +194,17 @@ export function mountHarmLive(el, appCtx) {
     };
     const tab = (v, t) => h('button', { class: 'btn small' + (level === v ? ' primary' : ''), onclick: (e) => { level = v; [...e.target.parentNode.children].forEach((b) => b.classList.remove('primary')); e.target.classList.add('primary'); render(); } }, t);
     const err = st.issues.filter((x) => x.level === 'error').length;
-    const m = modal('Konflikty i błędy harmonogramu', h('div', {},
-      h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Sprawdzane na bieżąco po każdej zmianie. Błędy: pętle zależności, brakujący poprzednicy, suboperacja bez operacji nadrzędnej, koniec ręczny przed startem. Uwagi: brak startu, brak czasu, nieznane stanowisko, koniec po wysyłce. Pogrubione na żółto – powiązanie, którego usunięcie rozwiązuje wszystkie pętle. Kliknij pozycję, aby przejść do komórki.'),
+    // zbędne zależności (z kolejności suboperacji) – usuwane jednym zapisem, z możliwością cofnięcia
+    const red = st.issues.filter((x) => x.kind === 'redundant');
+    const cleanBtn = red.length && acc().edit ? h('button', { class: 'btn small primary', title: 'Usuwa z Z1–Z4 zależności od wcześniejszych suboperacji tej samej operacji (i tak wykonują się po kolei). Można cofnąć ↶.', onclick: async () => {
+      if (!(await confirmBox('Usuń zbędne zależności', `Zależności do usunięcia: ${red.length} (w ${new Set(red.map((x) => x.lp)).size} operacjach).\n${red.slice(0, 12).map((x) => x.lp + ' ← ' + x.pred).join(', ')}${red.length > 12 ? ' …' : ''}\n\nHarmonogram się nie zmieni – suboperacje i tak wykonują się po kolei.`, 'Usuń'))) return;
+      const byOp = new Map(); for (const x of red) { if (!byOp.has(x.lp)) byOp.set(x.lp, new Set()); byOp.get(x.lp).add(x.pred); }
+      const sets = [...byOp].map(([lp, ps]) => { const op = st.m.opsByLp[lp]; return [lp, { ...op, preds: (op.preds || []).filter((p) => !ps.has(p)) }]; });
+      try { await applyTree({ remove: sets.map(([lp]) => lp), sets }, `Usunięcie zbędnych zależności: ${red.length}`); m.close(); toast(`Usunięto zbędnych zależności: ${red.length}. Cofnij: ↶`); }
+      catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
+    } }, `Usuń zbędne zależności (${red.length})`) : null;
+    const m = modal('Konflikty i błędy harmonogramu', h('div', {}, cleanBtn ? h('div', { class: 'row', style: { marginBottom: '6px' } }, cleanBtn) : null,
+      h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Sprawdzane na bieżąco po każdej zmianie. Błędy: pętle zależności, brakujący poprzednicy, suboperacja bez operacji nadrzędnej, koniec ręczny przed startem. Uwagi: brak startu, brak czasu, nieznane stanowisko, koniec po wysyłce, zbędna zależność od wcześniejszej suboperacji. Pogrubione na żółto – powiązanie, którego usunięcie rozwiązuje wszystkie pętle. Kliknij pozycję, aby przejść do komórki.'),
       h('div', { class: 'row', style: { gap: '4px', marginBottom: '6px' } }, tab('all', `Wszystkie (${st.issues.length})`), tab('error', `Błędy (${err})`), tab('warn', `Uwagi (${st.issues.length - err})`)),
       list, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
     render();

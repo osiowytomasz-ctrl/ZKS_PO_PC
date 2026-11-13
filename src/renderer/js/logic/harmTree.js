@@ -1,7 +1,7 @@
 // Edytor gałęzi operacji (operacja › suboperacja › subsuboperacja): drzewo do edycji w oknie, opisy jako tekst do notatnika
 // (eksport/import pliku .txt) i plan zapisu ze sprawdzeniem całej logiki (numery, poziomy, duplikaty, zależności, cykle, odwołania z zewnątrz).
 // Czyste funkcje – testy: test/harm-tree.test.js. Okno: views/harmLive.js (treeEditor).
-import { ID_PATTERN, isSyntheticId, lpCompare, descendants } from './harmModel.js';
+import { ID_PATTERN, isSyntheticId, lpCompare, descendants, redundantPreds } from './harmModel.js';
 import { computeSchedule, subParent, depthOf } from './schedule.js';
 
 let keySeq = 0;
@@ -155,6 +155,15 @@ export function planTree(opsByLp, origIds, nodes, { stations = [], parseNum = (t
     const bad = preds.filter((p) => deleted.includes(p));
     if (bad.length) errors.push(`Operacja ${lp} zależy od usuwanej ${bad.join(', ')}; usuń najpierw to powiązanie`);
     if (preds.some((p) => idMap.has(p))) { const fixed = preds.map((p) => idMap.get(p) ?? p); sim[lp] = { ...op, preds: fixed }; refs.push([lp, sim[lp]]); }
+  }
+  // zbędne zależności (wynikające z kolejności suboperacji) – pomijane przy zapisie
+  for (const n of nodes) {
+    const lp = n.lp.trim(), op = finalOf.get(n); if (!op || !op.preds.length || !ID_PATTERN.test(lp)) continue;
+    // tylko nowe węzły i zmienione zależności (stare zbędne zależności czyści przycisk na liście ⚠, bez zmian w niezmienionej gałęzi)
+    const origPreds = n.orig && opsByLp[n.orig] ? (opsByLp[n.orig].preds || []).join(',') : null;
+    if (origPreds != null && origPreds === op.preds.join(',')) continue;
+    const red = redundantPreds(sim, lp);
+    if (red.length) { op.preds = op.preds.filter((p) => !red.includes(p)); sim[lp] = op; warnings.push(`${lp}: pominięto zbędne zależności ${red.join(', ')} (kolejność suboperacji wynika z liter)`); }
   }
   // zależności węzłów z okna
   for (const n of nodes) {
