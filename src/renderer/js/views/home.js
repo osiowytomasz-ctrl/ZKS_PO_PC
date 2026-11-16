@@ -1,5 +1,4 @@
 import { h, clear, api, apiCached, toast } from '../ui.js';
-import { MODULES } from '../app.js';
 import { createWorkflow } from './workflow.js';
 import { filterParts, levelsPresent, LEVELS, levelOf } from '../logic/home.js';
 import { parseSheetColor, contrastColor } from '../logic/common.js';
@@ -7,16 +6,8 @@ import { parseSheetColor, contrastColor } from '../logic/common.js';
 export function mountHome(el, ctx) {
   const state = { parts: null, loading: false, error: null, code: '', level: '', tab: 'braki' };
 
-  const grid = h('div', { class: 'grid-modules' });
-  const draw = () => {
-    clear(grid);
-    // Logo w prawym górnym rogu na wysokość czterech wierszy; przyciski układają się obok, w dwóch kolumnach.
-    grid.append(h('img', { class: 'logo', src: 'img/logo.png', alt: 'Logo ZKS' }));
-    for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp)) {
-      const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
-      grid.append(h('button', { class: 'mod ' + (m.style || ''), disabled: !!denied, onclick: () => ctx.go(m.id) }, m.title));
-    }
-  };
+  // Przyciski modułów oraz Braki / Workflow są w górnym pasku (app.js); ekran główny pokazuje wybraną zakładkę na całą szerokość.
+  const draw = () => {};
 
   const listBox = h('div', {});
   const renderList = () => {
@@ -33,7 +24,7 @@ export function mountHome(el, ctx) {
         h('td', { class: 'left', style: { background: bg, color: levelOf(p.color) === 'red' ? '#fff' : contrastColor(bg), fontWeight: 600 } }, p.partCode),
         h('td', {}, p.status), h('td', {}, p.stock), h('td', {}, p.available)));
     }
-    listBox.append(h('div', { class: 'table-wrap', style: { maxHeight: 'calc(100vh - 360px)', minHeight: '160px' } },
+    listBox.append(h('div', { class: 'table-wrap', style: { maxHeight: 'calc(100vh - 190px)', minHeight: '160px' } },
       h('table', { class: 't', style: { width: '100%' } },
         h('thead', {}, h('tr', {}, ...['KOD części', 'Stan', 'Zapas', 'Dost'].map((t) => h('th', {}, t)))), tbody)));
     listBox.append(h('div', { class: 'muted', style: { marginTop: '4px' } }, `Pozycji: ${shown.length}${shown.length !== state.parts.length ? ' z ' + state.parts.length : ''}` + (state.stale ? '  ·  dane z pamięci, odświeżanie…' : '')));
@@ -64,18 +55,14 @@ export function mountHome(el, ctx) {
   }
 
   draw();
-  const tabs = h('div', { class: 'tabs', style: { maxWidth: '900px', margin: '0 auto 6px' } });
-  const braki = h('div', { class: 'panel', style: { maxWidth: '900px', margin: '0 auto' } },
+  const braki = h('div', { class: 'panel', style: { maxWidth: '1100px', margin: '0 auto' } },
     h('div', { class: 'row', style: { marginBottom: '8px' } },
       h('h2', { style: { margin: 0 } }, 'Braki części'), h('span', { class: 'grow' }),
       codeInput, levelSel, h('button', { class: 'btn', onclick: refresh }, 'Odśwież')),
     listBox);
-  const wf = createWorkflow(ctx); const workflow = wf.node; let wfLoaded = false;
-  const drawTabs = () => {
-    clear(tabs);
-    for (const [id, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) tabs.append(h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; drawTabs(); if (id === 'workflow' && !wfLoaded) { wfLoaded = true; wf.refresh(); } braki.style.display = id === 'braki' ? '' : 'none'; workflow.style.display = id === 'workflow' ? '' : 'none'; } }, label));
-  };
-  drawTabs(); workflow.style.display = 'none';
-  el.append(grid, tabs, braki, workflow);
-  refresh();
+  const wf = createWorkflow(ctx); const workflow = wf.node;
+  const tab = ctx.homeTab === 'workflow' ? 'workflow' : 'braki';
+  braki.style.display = tab === 'braki' ? '' : 'none'; workflow.style.display = tab === 'workflow' ? '' : 'none';
+  el.append(braki, workflow);
+  if (tab === 'workflow') wf.refresh(); else refresh();
 }

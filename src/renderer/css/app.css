@@ -13,6 +13,19 @@ input, select, textarea { font: inherit; }
 .topbar .who { font-size: 12px; opacity: .85; }
 .topbar button { background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; padding: 4px 10px; }
 .topbar button:hover { background: #666; }
+.topbar { gap: 6px; padding: 5px 10px; flex-wrap: wrap; }
+.topbar .brand { height: 30px; cursor: pointer; margin-right: 4px; }
+.topbar .nav-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.topbar .nav-sep { width: 1px; height: 22px; background: #777; margin: 0 4px; }
+.topbar button.nav { background: #4a4a4a; border: 1px solid #6a6a6a; padding: 4px 12px; font-size: 13px; }
+.topbar button.nav.on { background: #f0f0f0; color: #000; border-color: #fff; font-weight: 700; }
+.topbar button.nav.green-outline { border-color: var(--green-border); border-width: 2px; }
+.topbar button.nav.green { background: var(--tool-green); border-color: var(--tool-green-border); color: #000; font-weight: 700; }
+.topbar button.nav.accent { background: linear-gradient(#fffbe0, #ffeb3b 60%, #ffe600); color: #000; font-weight: 700; border-color: #c9b600; }
+.topbar button.nav.on.green, .topbar button.nav.on.accent { box-shadow: 0 0 0 2px #fff; }
+.topbar button.nav:disabled { opacity: .4; cursor: not-allowed; }
+.topbar .sub { display: inline-flex; gap: 6px; align-items: center; margin-left: 6px; }
+.topbar .sub b { font-size: 14px; }
 .screen { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .grid-modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 900px; margin: 0 auto 12px; }

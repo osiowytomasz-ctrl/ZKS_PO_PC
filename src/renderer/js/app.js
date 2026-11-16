@@ -42,6 +42,7 @@ export const MODULES = [
 export const ctx = {
   version: '',         // numer wersji programu PC (np. 1.1.0)
   user: null,          // { email, name, roles, permissions }
+  homeTab: 'braki',    // ekran główny: Braki albo Workflow (przyciski w górnym pasku)
   userError: null,
   go,
   home: () => go('home'),
@@ -71,11 +72,30 @@ function backTarget(id) {
   return 'home';
 }
 
+/**
+ * Górny pasek: logo i przyciski modułów (dawniej na ekranie głównym) oraz zakładki Braki i Workflow – widoczne na każdym ekranie,
+ * więc między modułami przechodzi się jednym kliknięciem. Moduły z Narzędziowni i Helpu mają dodatkowo „← Wróć” i swój tytuł.
+ */
 function topbar(title, showBack) {
   const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO (PC) wersja ${ctx.version}` : '');
+  const sub = MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp));
+  const activeMain = sub ? backTarget(current) : current;
+  const navBtn = (label, onclick, { active = false, style = '', disabled = false, title: tip = '' } = {}) =>
+    h('button', { class: 'nav ' + style + (active ? ' on' : ''), disabled, title: tip || label, onclick }, label);
+  const nav = h('div', { class: 'nav-bar' });
+  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp)) {
+    const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
+    nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: m.style || '', disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
+  }
+  nav.append(h('span', { class: 'nav-sep' }));
+  for (const [tab, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) {
+    nav.append(navBtn(label, () => { ctx.homeTab = tab; go('home'); }, { active: current === 'home' && (ctx.homeTab || 'braki') === tab, title: label === 'Braki' ? 'Braki części' : 'Workflow – zadania' }));
+  }
   return h('div', { class: 'topbar' },
-    showBack ? h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć') : null,
-    h('h1', {}, title),
+    h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),
+    nav,
+    sub ? h('span', { class: 'sub' }, h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć'), h('b', {}, title)) : null,
+    h('span', { class: 'grow' }),
     h('span', { class: 'who' }, who),
     current !== 'settings' ? h('button', { onclick: () => go('settings') }, 'Ustawienia') : null);
 }
@@ -97,6 +117,7 @@ export function go(id) {
     else mount = (el, c) => mountPlaceholder(el, c, mod);
   }
   root.append(topbar(title, id !== 'home'), screen);
+  document.title = id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
   const result = mount(screen, ctx);
   if (typeof result === 'function') cleanup = result;
 }

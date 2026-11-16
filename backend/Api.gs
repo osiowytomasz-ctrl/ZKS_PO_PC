@@ -1064,6 +1064,11 @@ function api_getPlanGrid(ctx) {
             cellRuns = [{ text: text, color: color }];
           }
         }
+        // data albo liczba w komórce: formatowanie tekstu (RichText) jest wtedy puste – bierzemy wartość (data jako dd-MM-yyyy)
+        if (!text && cell !== '' && cell != null) {
+          text = plain(cell);
+          cellRuns = text ? [{ text: text, color: color }] : [];
+        }
         vRow.push(text);
         kRow.push('edit');
         runRow[c] = cellRuns;
