@@ -100,7 +100,7 @@ export function mountGrafik(el, ctx) {
     if (col.edit) { const ut = (p.ut || {})[year()] || {}; return String(Number(ut[col.edit]) || 0); }
     if (col.sum) return s ? String(s[col.sum]) : '';
     if (col.hours !== undefined) { if (!s) return ''; const v = col.hours === 'sum' ? s.hoursToMonth[11] : s.hoursByMonth[col.hours]; return v ? String(v) : ''; }
-    if (col.abs) { const v = s ? s.absences[col.abs] : 0; return v ? String(v) : ''; }
+    if (col.abs) return s ? String(s.absences[col.abs] || 0) : '';   // jak w arkuszu: także 0
     return code(p.id, col.iso);
   };
 
@@ -143,7 +143,7 @@ export function mountGrafik(el, ctx) {
       if (c.iso) return;
       const filt = !!st.filters[c.key];
       headM.append(h('th', { rowspan: 3, title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
-        style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.edit ? '#fff2cc' : '#e4e4e4', color: '#000', whiteSpace: 'normal', lineHeight: 1.1,
+        style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.edit ? '#fff2cc' : c.abs ? F.absenceStyle(c.abs).bg : '#e4e4e4', color: c.abs && !filt ? F.absenceStyle(c.abs).color : '#000', ...(c.abs ? { fontStyle: F.absenceStyle(c.abs).italic ? 'italic' : 'normal' } : {}), whiteSpace: 'normal', lineHeight: 1.1,
           fontSize: (i >= 2 ? 11 : 12) * z + 'px', minWidth: widths[i] + 'px', maxWidth: widths[i] + 'px', ...(i < fixed ? { left: leftOf(i) + 'px' } : {}) } },
       c.title + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : '')));
     });
@@ -189,7 +189,7 @@ export function mountGrafik(el, ctx) {
         if (c.sum === 'remaining' || c.sum === 'available') { if (Number(txt) < 0) style.background = '#ff0000'; }
         if (c.edit) style = { ...style, background: '#fffbe6', cursor: canWrite ? 'cell' : 'default' };
         if (c.hours !== undefined) style = { ...style, background: '#e2efda' };
-        if (c.abs) style = { ...style, color: txt ? '#000' : '#999' };
+        if (c.abs) { const as = F.absenceStyle(c.abs); style = { ...style, background: as.bg, color: as.color, fontWeight: as.bold ? 700 : 400, fontStyle: as.italic ? 'italic' : 'normal' }; }
         if (c.iso) {
           const cs = F.cellStyle(txt, c.iso, { todayIso: t, hour, holiday: hol.has(c.iso), utNegative: s && s.remaining < 0 });
           style = { ...style, background: cs.bg, color: cs.color, fontWeight: cs.bold ? 700 : 400, fontStyle: cs.italic ? 'italic' : 'normal', position: 'relative', cursor: canWrite ? 'cell' : 'default' };

@@ -65,6 +65,12 @@ export function cellStyle(code, iso, ctx = {}) {
   return DEFAULT_STYLE;
 }
 /** Nagłówek dnia: sobota niebieska, niedziela i święto czerwone (jak w arkuszu). */
+/** Kolor kolumny absencji (AU–BE karty G) – ten sam co komórka dnia z tym kodem; „Sł” nie ma reguły, więc jak w arkuszu – łososiowy. */
+export function absenceStyle(code) {
+  if (eq(code, 'Sł')) return S('#fce5cd', '#000000', true);
+  return cellStyle(code, '2000-01-03', { todayIso: '1999-01-01', hour: 0 });   // dzień roboczy w przyszłości: bez reguł „minione” i „dziś”
+}
+
 export function headerStyle(iso, holiday) {
   const dow = new Date(iso + 'T00:00:00Z').getUTCDay();
   if (dow === 6) return S('#00b0f0', '#ffffff');
