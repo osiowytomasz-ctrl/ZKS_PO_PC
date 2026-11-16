@@ -50,7 +50,7 @@ export function shareDialog(ctx) {
   const saved = lsGet();
   const st = {
     format: saved.format || 'jpg', rows: 'screen', komis: ctx.komisShown !== false, levels: new Set([1, 2, 3].filter((l) => !ctx.levelsHidden.has(l))),
-    cols: new Set(ctx.shownKeys), chart: saved.chart !== false, interval: ctx.interval, title: saved.title || 'Harmonogram',
+    cols: new Set(ctx.shownKeys), chart: saved.chart !== false, interval: ctx.interval, title: (saved.title || 'Harmonogram') + (ctx.sim && !/symulacj/i.test(saved.title || '') ? ' – SYMULACJA' : ''),
     pageSize: saved.pageSize || 'A4', landscape: saved.landscape !== false, scale: saved.scale || 2,
     inRange: saved.inRange !== false,
     // strona PDF/wydruku: dopasowanie, skala własna [%], wyrównanie w poziomie, margines [mm]

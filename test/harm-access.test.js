@@ -52,3 +52,7 @@ test('Firebase.gs: poziom z kolumny „Harmonogram” i domyślne', () => {
   assert.equal(lv('e@x.pl', { plan: 'write' }), 'none'); assert.equal(lv('admin@x.pl'), 'god');
   rows[2][6] = 'MASTER'; assert.equal(lv('b@x.pl'), 'master');   // zmiana w karcie działa od razu (bez pamięci podręcznej)
 });
+
+test('symulacja (bez zapisu) od CLERIK', () => {
+  assert.deepEqual(['god', 'master', 'clerik', 'tourist', 'none'].map((l) => harmAccess(l).sim), [true, true, true, false, false]);
+});

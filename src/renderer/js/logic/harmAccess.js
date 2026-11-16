@@ -20,7 +20,8 @@ export function legacyLevel(perms) {
 /** Uprawnienia dla poziomu. */
 export function harmAccess(level) {
   const lv = normLevel(level) || 'none', r = HARM_LEVELS.indexOf(lv);
-  return { level: lv, label: HARM_LABELS[lv], view: r >= 1, add: r >= 2, edit: r >= 3, del: r >= 4, style: r >= 4 };
+  // sim – symulacja: przesuwanie i edycja na kopii danych z bazy, bez zapisu (od CLERIK)
+  return { level: lv, label: HARM_LABELS[lv], view: r >= 1, add: r >= 2, edit: r >= 3, del: r >= 4, style: r >= 4, sim: r >= 2 };
 }
 
 /**

@@ -5,7 +5,7 @@ import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX, lpCompare } from '../logic/harmModel.js';
-import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive, updateOps } from '../harmStore.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive, updateOps, startSandbox, stopSandbox } from '../harmStore.js';
 import { planDrag, canDrag, isLocked, cycles as dragCycles } from '../logic/harmDrag.js';
 import { archiveCandidates } from '../logic/harmArchive.js';
 import { backupData, backupText, parseBackup, backupDiff, backupFileName } from '../logic/harmBackup.js';
@@ -62,7 +62,9 @@ export function mountHarmLive(el, appCtx) {
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
   let syncTools = () => {};
   // poziom dostępu (GOD / MASTER / CLERIK / TOURIST / ---) z tokenu Firebase; bez niego (stary serwer) – jak dotychczas wg uprawnień Planu/Grafiku
-  const acc = () => harmAccess(harmLevel() ?? legacyLevel(appCtx && appCtx.user && appCtx.user.permissions));
+  const baseAcc = () => harmAccess(harmLevel() ?? legacyLevel(appCtx && appCtx.user && appCtx.user.permissions));
+  // w symulacji (od CLERIK) wolno zmieniać wszystko na kopii danych – zapis do bazy jest wtedy wyłączony (harmStore: piaskownica)
+  const acc = () => { const a = baseAcc(); return st.sim && a.sim ? { ...a, add: true, edit: true, del: true } : a; };
   const offLevel = onHarmLevel(() => { if (!el.isConnected) { offLevel(); return; } syncTools(); recompute(); });
   setOpsSource(() => (st.m ? st.m.opsByLp : {}));   // stan sprzed zmiany – do cofania
   // Zmiana komórki: informacja o zmianie i potwierdzenie (można wyłączyć w Ustawieniach), potem zapis; po zapisie można cofnąć (↶, Ctrl+Z)
@@ -144,7 +146,7 @@ export function mountHarmLive(el, appCtx) {
       if (harmLevel() == null) toast('Serwer nie podaje poziomu dostępu (wdróż nowy Firebase.gs) – tylko przeglądanie');
       syncTools();
       loadGrafik();
-      stop = await watchHarm((m) => { st.m = m; recomputeSoon(); },
+      stop = await watchHarm((m) => { st.live = m; if (st.sim) { st.simStale = true; syncSim(); return; } st.m = m; recomputeSoon(); },
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy: ' + (e.code || '') + ' ' + (e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
@@ -612,7 +614,8 @@ export function mountHarmLive(el, appCtx) {
       user: appCtx && appCtx.user ? (appCtx.user.name || appCtx.user.email || '') : '',
       version: appCtx && appCtx.version ? appCtx.version : '',
       // dane do interaktywnego HTML: cały harmonogram (symulacja liczy obsadę maszyn), dni grafiku, ustawienia i wykres jak na ekranie
-      canAdvanced: acc().style,   // HTML interaktywny – tylko GOD
+      canAdvanced: baseAcc().style,   // HTML interaktywny – tylko GOD
+      sim: !!st.sim,                 // symulacja: dopisek w tytule
       interactive: () => ({ ops: st.m.opsByLp, days: st.days || {}, cfg: { stations: (st.m.cfg && st.m.cfg.stations) || [], komisColors: (st.m.cfg && st.m.cfg.komisColors) || [], holidays: (st.m.cfg && st.m.cfg.holidays) || [] }, chartFields: st.chartOpt.fields, chartFont: st.chartOpt.font, komisColor: st.chartOpt.komisColor, komisInline: st.komisOpt.inline }),
       cols: COLS, shownKeys: shownCols().map((c) => c.key), rowsScreen: st.rows, rowsAll: withKomisRows(arrangeRows(all, new Set(), new Set()), komisSummaryList(), new Set(), { inline: st.komisOpt.inline }), komisShown: st.komisOpt.show, selectedId: st.selected,
       levelsHidden: st.hiddenLevels, interval: st.interval, holidays: holidayMap(st.m.cfg && st.m.cfg.holidays),
@@ -869,7 +872,9 @@ export function mountHarmLive(el, appCtx) {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
         st.komisOpt = kOpt; lsSet(LS.komis, kOpt);
-        if (god) st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) }; lsSet(LS.chart, st.chartOpt);
+        if (god) st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) };
+        else st.chartOpt = { ...st.chartOpt, komisColor: !!cOpt.komisColor };   // kolor komisu na pasku – każdy u siebie
+        lsSet(LS.chart, st.chartOpt);
         if (god) await saveSettings(list, komisList, holidays);
         m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
@@ -885,8 +890,11 @@ export function mountHarmLive(el, appCtx) {
         onchange: (e) => { cOpt.fields = e.target.checked ? [...cOpt.fields, k] : cOpt.fields.filter((x) => x !== k); } }), ' ' + label))),
       h('div', { class: 'row', style: { alignItems: 'center', marginTop: '6px' } }, 'Czcionka napisów na wykresie: ',
         (() => { const sel = h('select', { onchange: () => { cOpt.font = Number(sel.value); } }, h('option', { value: 0 }, 'jak w tabeli'), ...[8, 9, 10, 11, 12, 13, 14, 16, 18].map((n) => h('option', { value: n }, n + ' px'))); sel.value = String(cOpt.font || 0); return sel; })()),
+      ] : []),
+      // dla wszystkich (zapisywane na tym komputerze)
+      ...(god ? [] : [h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres')]),
       h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: !!cOpt.komisColor, onchange: (e) => { cOpt.komisColor = e.target.checked; } }),
-        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”')] : []),
+        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
@@ -1302,7 +1310,43 @@ export function mountHarmLive(el, appCtx) {
   const addBtn = iconBtn('plus', 'Dodaj operację', () => st.m && acc().add && addDialog(st.m.opsByLp, stationList(st.m.cfg), null, (lp) => treeEditor({ getOps: () => st.m.opsByLp, newLp: lp, stations: stationList(st.m.cfg), access: acc() })));
   const shareBtn = iconBtn('share', 'Udostępnij – JPG, obraz do schowka, Excel, PDF albo wydruk', openShare);
   const gearBtn = iconBtn('gear', 'Ustawienia – wygląd tabeli, potwierdzanie zmian, wykres, podsumowanie komisów, stanowiska, komisy, święta', stationsDialog);
-  const refreshBtn = iconBtn('refresh', 'Odśwież', load);
+  const refreshBtn = iconBtn('refresh', 'Odśwież', () => (st.sim ? simReset() : load()));
+  // ---------- symulacja: przesuwanie i przeliczanie na kopii danych z bazy, bez zapisu ----------
+  const simBtn = h('button', { class: 'btn small', style: { height: '30px', fontWeight: 700 }, title: 'Symulacja: przesuwaj i zmieniaj operacje na kopii danych z bazy – terminy przeliczają się, nic nie zapisuje się w bazie; wynik można udostępnić', onclick: () => (st.sim ? simStop() : simStart()) }, 'Symulacja');
+  const simBar = h('div', { style: { display: 'none', background: '#fff3cd', border: '2px solid #e6a700', borderRadius: '4px', padding: '4px 8px', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+  function syncSim() {
+    simBtn.style.display = baseAcc().sim ? 'inline-flex' : 'none';
+    simBtn.classList.toggle('primary', !!st.sim); simBtn.textContent = st.sim ? 'Zakończ symulację' : 'Symulacja';
+    clear(simBar); simBar.style.display = st.sim ? 'flex' : 'none';
+    if (!st.sim) return;
+    simBar.append(h('b', { style: { color: '#8a5a00' } }, '⚠ SYMULACJA'),
+      h('span', {}, 'Zmiany (przesuwanie, edycja, dodawanie, usuwanie) są tylko na tym komputerze i nie trafiają do bazy. Terminy liczą się jak zwykle; wynik można udostępnić (przycisk Udostępnij).'),
+      ...(st.simStale ? [h('span', { style: { color: '#a00000', fontWeight: 700 } }, 'W bazie są nowsze zmiany.')] : []),
+      h('button', { class: 'btn small', onclick: simReset, title: 'Porzuć zmiany symulacji i weź aktualne dane z bazy' }, 'Wczytaj od nowa z bazy'),
+      h('button', { class: 'btn small', onclick: simStop }, 'Zakończ symulację'));
+  }
+  function simStart() {
+    if (!st.m || !baseAcc().sim) return;
+    st.sim = true; st.simStale = false; st.live = st.live || st.m;
+    const ops = startSandbox(st.live.opsByLp, (o) => { st.m = { ...st.m, opsByLp: o }; recomputeSoon(); });
+    st.m = { ...st.live, opsByLp: ops };
+    syncSim(); syncTools(); recomputeSoon();
+    toast('Symulacja: zmiany nie zapisują się w bazie');
+  }
+  async function simStop() {
+    if (!st.sim) return;
+    if (!(await confirmBox('Zakończyć symulację?', 'Zmiany z symulacji znikną (w bazie nic się nie zmieniło). Jeśli chcesz zachować wynik, najpierw użyj „Udostępnij”.', 'Zakończ'))) return;
+    stopSandbox(); st.sim = false; st.simStale = false;
+    if (st.live) st.m = st.live;
+    syncSim(); syncTools(); recomputeSoon();
+  }
+  function simReset() {
+    if (!st.sim || !st.live) return;
+    st.simStale = false;
+    const ops = startSandbox(st.live.opsByLp, (o) => { st.m = { ...st.m, opsByLp: o }; recomputeSoon(); });
+    st.m = { ...st.live, opsByLp: ops };
+    syncSim(); recomputeSoon(); toast('Symulacja: dane wczytane od nowa z bazy');
+  }
   const undoBtn = iconBtn('undo', 'Cofnij ostatnią zmianę (Ctrl+Z)', doUndo);
   onUndoChange((n, label) => { undoBtn.disabled = !n; undoBtn.title = n ? `Cofnij: ${label} (Ctrl+Z)` : 'Nie ma zmian do cofnięcia'; });
   const onKey = (e) => {
@@ -1320,15 +1364,16 @@ export function mountHarmLive(el, appCtx) {
     broomBtn.disabled = !(Object.keys(st.filters).length || st.sorts.length);
     const a = acc();
     addBtn.style.display = a.add ? 'inline-flex' : 'none'; undoBtn.style.display = a.edit ? 'inline-flex' : 'none';
+    if (typeof syncSim === 'function' && simBtn) simBtn.style.display = baseAcc().sim ? 'inline-flex' : 'none';
     levelTag.textContent = a.label; levelTag.title = `Twój poziom dostępu do Harmonogramu: ${a.label} – ${LEVEL_INFO[a.level]}. Ustawia go administrator w zakładce Uzytkownicy (kolumna „Harmonogram”).`;
   };
-  const LEVEL_INFO = { god: 'przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki, stanowiska, komisy, święta', master: 'przeglądanie, dodawanie, edycja', clerik: 'przeglądanie, dodawanie', tourist: 'przeglądanie', none: 'brak dostępu' };
+  const LEVEL_INFO = { god: 'przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki, stanowiska, komisy, święta', master: 'przeglądanie, dodawanie, edycja, symulacja', clerik: 'przeglądanie, dodawanie, symulacja (przesuwanie i przeliczanie bez zapisu, udostępnianie)', tourist: 'przeglądanie', none: 'brak dostępu' };
   const levelTag = h('span', { class: 'muted', style: { fontSize: '11px', fontWeight: 700, padding: '0 4px', border: '1px solid #bbb', borderRadius: '3px', lineHeight: '18px' } });
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '4px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,
     h('span', { class: 'grow' }),
-    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), pathBar, body);
-  syncTools(); syncIssues();
+    h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, simBtn, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), simBar, pathBar, body);
+  syncTools(); syncIssues(); syncSim();
   load();
 }

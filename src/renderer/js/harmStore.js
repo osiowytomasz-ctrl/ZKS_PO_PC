@@ -37,6 +37,20 @@ export async function watchHarm(onChange, onError) {
 const clean = (o) => { const r = {}; for (const [k, v] of Object.entries(o)) if (v !== undefined) r[k] = v; return r; };
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Symulacja (piaskownica): kopia operacji z bazy w pamięci tego komputera. Te same funkcje zapisu (edycja komórek, przesuwanie,
+// edytor gałęzi, usuwanie, cofanie) zmieniają wtedy tylko kopię – nic nie trafia do bazy. Ustawienia, import, kopia, archiwum – zablokowane.
+// ---------------------------------------------------------------------------------------------------------------------
+let sandbox = null;
+/** Start symulacji na kopii [ops]; [emit](opsByLp) – po każdej zmianie kopii. */
+export function startSandbox(ops, emit) { sandbox = { ops: JSON.parse(JSON.stringify(ops || {})), emit }; undoStack.length = 0; notifyUndo(); return sandbox.ops; }
+export function stopSandbox() { sandbox = null; undoStack.length = 0; notifyUndo(); }
+export const inSandbox = () => !!sandbox;
+const sbEmit = () => { sandbox.ops = { ...sandbox.ops }; sandbox.emit(sandbox.ops); };
+const sbPatch = (lp, patch) => { const o = { ...(sandbox.ops[lp] || {}) }; for (const [k, v] of Object.entries(patch)) { if (v === null) delete o[k]; else o[k] = v; } sandbox.ops[lp] = o; };
+const sbMerge = (lp, op) => { sandbox.ops[lp] = { ...(sandbox.ops[lp] || {}), ...clean(JSON.parse(JSON.stringify(op))) }; };
+const sbBlocked = (what) => { if (sandbox) throw new Error(`Symulacja: ${what} jest niedostępne (zakończ symulację)`); };
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Cofanie zmian (na tym komputerze, w tej sesji): przed każdym zapisem zapamiętujemy poprzedni stan dotkniętych operacji;
 // „Cofnij” zapisuje ten stan z powrotem (operacje dodane – usuwa, zmienione i usunięte – przywraca). Najwyżej 50 kroków.
 // ---------------------------------------------------------------------------------------------------------------------
@@ -58,6 +72,7 @@ export async function undoLast() {
   const cur = opsSource() || {};
   const remove = Object.keys(e.before).filter((lp) => cur[lp]);
   const sets = Object.entries(e.before).filter(([, op]) => op).map(([lp, op]) => [lp, op]);
+  if (sandbox) { for (const lp of remove) delete sandbox.ops[lp]; for (const [lp, op] of sets) sandbox.ops[lp] = JSON.parse(JSON.stringify(op)); undoStack.pop(); notifyUndo(); sbEmit(); return e.label; }
   await writeTree({ remove, sets });
   undoStack.pop(); notifyUndo();
   return e.label;
@@ -65,6 +80,7 @@ export async function undoLast() {
 
 /** Import operacji z arkusza (wynik opsFromSheetRows): zastępuje całą zawartość harm_ops. Tylko suche dane; ustawienia stanowisk (config/main) zostają. */
 export async function importOps(operations) {
+  sbBlocked('import');
   const { sdk, db } = await firebase();
   const chunks = new Map();
   for (const o of operations) {
@@ -84,6 +100,7 @@ export async function importOps(operations) {
 /** Zmiana pól jednej operacji (np. {startManual: ms|null}); null kasuje wartość w bazie. */
 export async function updateOp(lp, patch, label = `Zmiana operacji ${lp}`) {
   const before = snapshot([lp]);
+  if (sandbox) { sbPatch(lp, patch); pushUndo(label, before); sbEmit(); return; }
   const { sdk, db } = await firebase();
   const data = {};
   for (const [k, v] of Object.entries(patch)) data[`ops.${lp}.${k}`] = v === null ? sdk.deleteField() : v;
@@ -95,6 +112,7 @@ export async function updateOp(lp, patch, label = `Zmiana operacji ${lp}`) {
 export async function updateOps(patches, label = `Zmiana operacji: ${patches.length}`) {
   if (!patches.length) return;
   const before = snapshot(patches.map(([lp]) => lp));
+  if (sandbox) { for (const [lp, p] of patches) sbPatch(lp, p); pushUndo(label, before); sbEmit(); return; }
   const { sdk, db } = await firebase();
   const byChunk = new Map();
   for (const [lp, patch] of patches) {
@@ -111,6 +129,7 @@ export async function updateOps(patches, label = `Zmiana operacji: ${patches.len
 /** Nowa operacja albo pełna podmiana istniejącej. */
 export async function saveOp(lp, op) {
   const before = snapshot([lp]);
+  if (sandbox) { sbMerge(lp, op); pushUndo(`Zapis operacji ${lp}`, before); sbEmit(); return; }
   const { sdk, db } = await firebase();
   await sdk.setDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { ops: { [lp]: clean(op) } }, { merge: true });
   pushUndo(`Zapis operacji ${lp}`, before);
@@ -120,6 +139,7 @@ export async function saveOp(lp, op) {
 /** Wiele nowych operacji naraz (jeden zapis wsadowy; operacje z jednego dokumentu scalane). */
 export async function saveOps(entries) {
   const before = snapshot(entries.map(([lp]) => lp));
+  if (sandbox) { for (const [lp, op] of entries) sbMerge(lp, op); pushUndo(`Dodanie operacji: ${entries.length}`, before); sbEmit(); return; }
   const { sdk, db } = await firebase();
   const chunks = new Map();
   for (const [lp, op] of entries) { const id = chunkId(lp); if (!chunks.has(id)) chunks.set(id, {}); chunks.get(id)[lp] = clean(op); }
@@ -133,6 +153,12 @@ export async function saveOps(entries) {
 /** Zmiana numeru operacji (plan z renamePlan): nowe klucze, usunięcie starych (także suboperacji) i poprawa poprzedników – jednym zapisem wsadowym. */
 export async function renameOp(plan) {
   const before = snapshot([...plan.moves.flatMap((m) => [m.oldId, m.newId]), ...plan.referrers.map(([lp]) => lp)]);
+  if (sandbox) {
+    for (const m of plan.moves) delete sandbox.ops[m.oldId];
+    for (const m of plan.moves) sbMerge(m.newId, m.op);
+    for (const [lp, preds] of plan.referrers) sbPatch(lp, { preds });
+    pushUndo(plan.moves.length ? `Zmiana numeru ${plan.moves[0].oldId} → ${plan.moves[0].newId}` : 'Zmiana numerów', before); sbEmit(); return;
+  }
   const { sdk, db } = await firebase();
   const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
   const b = sdk.writeBatch(db);
@@ -155,6 +181,7 @@ export async function applyTree(plan, label = 'Edycja gałęzi') {
   try { const w = chunkSizeWarning(plan.sets.map(([lp]) => lp), { ...(opsSource() || {}), ...Object.fromEntries(plan.sets) }); if (w) toast(w); } catch { /* tylko ostrzeżenie */ }
 }
 async function writeTree(plan) {
+  if (sandbox) { for (const lp of plan.remove) delete sandbox.ops[lp]; for (const [lp, op] of plan.sets) sbMerge(lp, op); sbEmit(); return; }
   const { sdk, db } = await firebase();
   const ref = (lp) => sdk.doc(db, 'harm_ops', chunkId(lp));
   const b = sdk.writeBatch(db);
@@ -166,6 +193,7 @@ async function writeTree(plan) {
 /** Usunięcie kilku operacji naraz (np. operacji głównej razem z suboperacjami). */
 export async function deleteOps(lps) {
   const before = snapshot(lps);
+  if (sandbox) { for (const lp of lps) delete sandbox.ops[lp]; pushUndo(`Usunięcie: ${lps.join(', ')}`, before); sbEmit(); return; }
   const { sdk, db } = await firebase();
   const b = sdk.writeBatch(db);
   for (const lp of lps) b.update(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() });
@@ -174,6 +202,7 @@ export async function deleteOps(lps) {
 }
 
 export async function deleteOp(lp) {
+  if (sandbox) { delete sandbox.ops[lp]; sbEmit(); return; }
   const { sdk, db } = await firebase();
   await sdk.updateDoc(sdk.doc(db, 'harm_ops', chunkId(lp)), { [`ops.${lp}`]: sdk.deleteField() });
 }
@@ -188,6 +217,7 @@ async function commit(sdk, db, writes) {
 
 /** Zapis ustawień harmonogramu: stanowiska [{name, bg, color, sum?}], kolory komisów [{komis, bg, color, …}] i święta [{date: 'RRRR-MM-DD', name}] (zamienia całe listy). */
 export async function saveSettings(stations, komisColors, holidays) {
+  sbBlocked('zapis ustawień');
   const { sdk, db } = await firebase();
   await sdk.setDoc(sdk.doc(db, 'config', 'main'), {
     stations: stations.map(({ name, bg, color, sum }) => (sum ? { name, bg, color, sum: true } : { name, bg, color })),
@@ -201,6 +231,7 @@ export async function saveSettings(stations, komisColors, holidays) {
  * stanowiska, kolory komisów i święta. Lista cofania jest czyszczona (dotyczyła poprzedniego stanu).
  */
 export async function restoreBackup(ops, config) {
+  sbBlocked('import kopii');
   const r = await importOps(Object.entries(ops).map(([lp, op]) => ({ lp, ...op })));
   if (config) await saveSettings(config.stations || [], config.komisColors || [], config.holidays || []);
   undoStack.length = 0; notifyUndo();
@@ -212,6 +243,7 @@ export async function restoreBackup(ops, config) {
 // ---------------------------------------------------------------------------------------------------------------------
 /** Przenosi operacje [lps] do archiwum (jeden zapis wsadowy na paczkę: kopia w archiwum + usunięcie z harmonogramu). */
 export async function archiveOps(lps, user = '') {
+  sbBlocked('archiwizacja');
   const ops = opsSource() || {};
   const { sdk, db } = await firebase();
   const now = Date.now(), writes = [];
@@ -233,6 +265,7 @@ export async function loadArchive() {
 }
 /** Przywraca operacje [lps] z archiwum do harmonogramu (bez pól archiwum). */
 export async function restoreFromArchive(archived, lps) {
+  sbBlocked('przywracanie z archiwum');
   const { sdk, db } = await firebase();
   const writes = [];
   for (const lp of lps) {
