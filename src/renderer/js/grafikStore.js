@@ -1,0 +1,96 @@
+// Grafik w Firestore: gr_meta/main (pracownicy, miejsca pracy, urlopy, święta) i gr_days/{rrrr-mm} (kody i komentarze miesiąca).
+// W bazie tylko kody i komentarze – kolory i podsumowania liczy program (logic/grafikFb.js). Nasłuch na żywo tylko potrzebnych miesięcy.
+import { firebase } from './fb.js';
+import { api } from './ui.js';
+import { monthKey, dayOf } from './logic/grafikFb.js';
+
+/** Nasłuch pracowników i miesięcy [months]; [cb]({meta, months: {rrrr-mm: doc}}). Zwraca obiekt z setMonths(lista) i stop(). */
+export async function watchGrafik(months, cb, onError) {
+  const { sdk, db } = await firebase();
+  const st = { meta: null, months: {}, subs: new Map(), metaReady: false, ready: new Set() };
+  const emit = () => { if (st.metaReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months } }); };
+  const unMeta = sdk.onSnapshot(sdk.doc(db, 'gr_meta', 'main'), (s) => { st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
+  const setMonths = (list) => {
+    const want = new Set(list);
+    for (const [k, un] of st.subs) if (!want.has(k)) { un(); st.subs.delete(k); delete st.months[k]; st.ready.delete(k); }
+    for (const k of want) if (!st.subs.has(k)) {
+      st.subs.set(k, sdk.onSnapshot(sdk.doc(db, 'gr_days', k), (s) => { st.months[k] = s.exists() ? s.data() : {}; st.ready.add(k); emit(); }, onError));
+    }
+    emit();
+  };
+  setMonths(months);
+  return { setMonths, stop: () => { unMeta(); for (const un of st.subs.values()) un(); st.subs.clear(); } };
+}
+
+/**
+ * Zapis zmian komórek: [{pid, iso, code?, note?}] (code/note pominięte = bez zmiany, '' = usunięcie) – jednym zapisem wsadowym.
+ * [rows] – mapa pid → wiersz karty G: w okresie przejściowym te same zmiany idą też do arkusza (graf_norm, wersja webowa).
+ */
+export async function saveCells(changes, rows) {
+  if (!changes.length) return { sheet: null };
+  const { sdk, db } = await firebase();
+  const byMonth = new Map();
+  for (const ch of changes) {
+    const mk = monthKey(ch.iso), dd = dayOf(ch.iso);
+    if (!byMonth.has(mk)) byMonth.set(mk, { c: {}, n: {} });
+    const doc = byMonth.get(mk);
+    if (ch.code !== undefined) (doc.c[ch.pid] = doc.c[ch.pid] || {})[dd] = ch.code === '' ? sdk.deleteField() : ch.code;
+    if (ch.note !== undefined) (doc.n[ch.pid] = doc.n[ch.pid] || {})[dd] = ch.note === '' ? sdk.deleteField() : ch.note;
+  }
+  const b = sdk.writeBatch(db);
+  for (const [mk, doc] of byMonth) {
+    const data = {};
+    if (Object.keys(doc.c).length) data.c = doc.c;
+    if (Object.keys(doc.n).length) data.n = doc.n;
+    b.set(sdk.doc(db, 'gr_days', mk), data, { merge: true });
+  }
+  await b.commit();
+  // okres przejściowy: to samo w karcie G (błąd arkusza nie cofa zapisu w bazie – tylko informacja)
+  let sheet = null;
+  if (rows) {
+    const wb = changes.filter((ch) => rows[ch.pid]).map((ch) => ({ row: rows[ch.pid], iso: ch.iso, ...(ch.code !== undefined ? { value: ch.code } : {}), ...(ch.note !== undefined ? { note: ch.note } : {}) }));
+    if (wb.length) sheet = api('grafikWriteBack', [wb]).then((r) => r, (e) => ({ error: e.message || String(e) }));
+  }
+  return { sheet };
+}
+
+/** Zmiana danych pracowników / świąt (gr_meta/main, scalanie pól). */
+export async function saveMeta(patch) {
+  const { sdk, db } = await firebase();
+  await sdk.setDoc(sdk.doc(db, 'gr_meta', 'main'), { ...patch, updatedAt: Date.now() }, { merge: true });
+}
+
+/**
+ * Import całej karty G (api grafikExport) do bazy: pracownicy (identyfikator z nr ewidencyjnego albo wiersza), kody i komentarze
+ * w paczkach miesięcy, święta. Zastępuje dotychczasowe dane Grafiku w bazie. Zwraca liczby do komunikatu.
+ */
+export async function importFromSheet(user = '') {
+  const x = await api('grafikExport', [], { timeoutMs: 180000 });
+  const used = new Set();
+  const people = x.people.map((p) => {
+    let id = p.sep ? `sep${p.row}` : (p.nr ? String(p.nr).replace(/[^\w-]/g, '_') : `r${p.row}`);
+    while (used.has(id)) id += '_';
+    used.add(id);
+    return { id, row: p.row, lp: p.lp, name: p.name, suffix: p.suffix || '', nr: p.nr || '', place: p.place || '', sep: !!p.sep, ut: p.ut || {} };
+  });
+  const months = {};
+  let cells = 0, notes = 0;
+  x.people.forEach((p, i) => {
+    const id = people[i].id;
+    x.dates.forEach((iso, d) => {
+      const code = String(x.codes[i][d] || '').trim(), note = String((x.notes[i] || [])[d] || '');
+      if (!code && !note) return;
+      const doc = months[monthKey(iso)] = months[monthKey(iso)] || { c: {}, n: {} };
+      if (code) { (doc.c[id] = doc.c[id] || {})[dayOf(iso)] = code; cells++; }
+      if (note) { (doc.n[id] = doc.n[id] || {})[dayOf(iso)] = note; notes++; }
+    });
+  });
+  const { sdk, db } = await firebase();
+  const old = await sdk.getDocs(sdk.collection(db, 'gr_days'));
+  const writes = [];
+  old.forEach((d) => { if (!months[d.id]) writes.push((b) => b.delete(d.ref)); });
+  for (const [mk, doc] of Object.entries(months)) writes.push((b) => b.set(sdk.doc(db, 'gr_days', mk), doc));
+  writes.push((b) => b.set(sdk.doc(db, 'gr_meta', 'main'), { people, holidays: x.holidays || [], year: x.year || '', importedAt: Date.now(), importedBy: user, updatedAt: Date.now() }));
+  for (let i = 0; i < writes.length; i += 400) { const b = sdk.writeBatch(db); writes.slice(i, i + 400).forEach((w) => w(b)); await b.commit(); }
+  return { people: people.filter((p) => !p.sep).length, months: Object.keys(months).length, cells, notes };
+}

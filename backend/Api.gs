@@ -176,6 +176,17 @@ var API_FUNCS = {
     // z uprawnień w zakładce Uzytkownicy, a nie z listy w kodzie.
     run: function (a, ctx) { return api_getGrData_(a[0], a[1], ctx, a[2] === 'fresh'); }
   },
+  grafikExport: {
+    // Cała karta G do importu Grafiku do Firebase (pracownicy, miejsca pracy, urlopy, kody, komentarze, święta).
+    perm: ['grafik', 'write'],
+    run: function () { return api_grafikExport_(); }
+  },
+  grafikWriteBack: {
+    // Okres przejściowy: zmiany z Grafiku w Firebase zapisywane także w karcie G (graf_norm, wersja webowa, formuły arkusza).
+    perm: ['grafik', 'write'],
+    write: true,
+    run: function (a) { return api_grafikWriteBack_(a[0]); }
+  },
   saveGrData: {
     perm: ['grafik', 'write'],
     write: true,
@@ -1576,4 +1587,92 @@ function api_testWorkflow() {
   Logger.log('Wiersze: ' + r.rows.length);
   Logger.log('Nagłówki: ' + r.headers.join(' | '));
   Logger.log(JSON.stringify(r.rows.slice(0, 3)));
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Grafik w Firebase: eksport karty G (import do bazy) i zapis zmian z powrotem do G (okres przejściowy)
+// ---------------------------------------------------------------------------------------------------------------------
+var GR_FIRST_ROW = 5;            // pierwszy wiersz pracownika
+var GR_HEAD_ROW = 4;             // wiersz z datami i nagłówkami
+
+/** Kolumny karty G wg nagłówków (wiersz 4) i opisów (wiersz 2): daty, miejsce pracy (kolumna przed pierwszą datą), urlopy, plan. */
+function api_grafikColumns_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var top = sheet.getRange(1, 1, GR_HEAD_ROW, lastCol).getDisplayValues();
+  var head = top[GR_HEAD_ROW - 1], row2 = top[1];
+  var cols = { dates: [], dateCol: {}, nr: -1, utPrev: -1, utCur: -1, utYearPrev: '', utYear: '', plan: -1, planYear: '', place: -1 };
+  for (var c = 0; c < head.length; c++) {
+    var h = String(head[c] || '').trim();
+    var m = h.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (m && c > 10) {
+      var iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+      if (cols.place < 0) cols.place = c - 1;
+      cols.dates.push({ iso: iso, col: c }); cols.dateCol[iso] = c;
+      continue;
+    }
+    if (/^nr\b/i.test(h) && cols.nr < 0) cols.nr = c;
+    var u = h.match(/^UT\s*(\d{4})$/i);
+    if (u) { if (cols.utPrev < 0) { cols.utPrev = c; cols.utYearPrev = u[1]; } else { cols.utCur = c; cols.utYear = u[1]; } }
+  }
+  for (var k = 0; k < row2.length; k++) { var pm = String(row2[k] || '').match(/Plan urlopu\s*(\d{4})/i); if (pm) { cols.plan = k; cols.planYear = pm[1]; } }
+  return cols;
+}
+
+function api_grafikExport_() {
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName('G');
+  if (!sheet) throw new Error('Arkusz G nie istnieje!');
+  var cols = api_grafikColumns_(sheet);
+  if (!cols.dates.length) throw new Error('Nie znaleziono dat w wierszu 4 karty G.');
+  var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn(), n = lastRow - GR_FIRST_ROW + 1;
+  if (n < 1) throw new Error('Karta G nie ma pracowników.');
+  var rng = sheet.getRange(GR_FIRST_ROW, 1, n, lastCol);
+  var vals = rng.getDisplayValues(), notes = rng.getNotes();
+  var people = [], codes = [], cellNotes = [];
+  for (var i = 0; i < n; i++) {
+    var r = vals[i], shown = String(r[1] || '').trim();
+    if (!shown && !String(r[cols.place] || '').trim()) continue;
+    var nm = shown.match(/^(.*?)\s+UT=\s*-?[\d.,]*\s*(.*)$/);
+    var name = (nm ? nm[1] : shown).trim(), suffix = nm ? nm[2].trim() : '';
+    var ut = {};
+    var year = cols.utYear || cols.planYear;
+    if (year) {
+      var plan = [];
+      for (var m = 0; m < 12; m++) { var v = cols.plan >= 0 ? Number(String(r[cols.plan + m]).replace(',', '.')) : 0; plan.push(isFinite(v) ? v : 0); }
+      ut[year] = { prev: Number(r[cols.utPrev]) || 0, cur: Number(r[cols.utCur]) || 0, plan: plan };
+    }
+    people.push({ row: GR_FIRST_ROW + i, lp: String(r[0] || '').trim(), name: name, suffix: suffix, nr: cols.nr >= 0 ? String(r[cols.nr] || '').trim() : '',
+      place: cols.place >= 0 ? String(r[cols.place] || '').trim() : '', sep: name.indexOf('****') >= 0, ut: ut });
+    var pc = [], pn = [];
+    for (var d = 0; d < cols.dates.length; d++) { pc.push(String(r[cols.dates[d].col] || '').trim()); pn.push(String(notes[i][cols.dates[d].col] || '')); }
+    codes.push(pc); cellNotes.push(pn);
+  }
+  var holidays = [];
+  var iSheet = ss.getSheetByName('i');
+  if (iSheet) {
+    iSheet.getRange('A36:A100').getValues().forEach(function (row) {
+      var x = row[0];
+      if (x instanceof Date) holidays.push(Utilities.formatDate(x, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd'));
+    });
+  }
+  return { dates: cols.dates.map(function (d) { return d.iso; }), people: people, codes: codes, notes: cellNotes, holidays: holidays, year: cols.utYear || cols.planYear || '' };
+}
+
+/** Zmiany z aplikacji do karty G: [{row (wiersz arkusza), iso, value?, note?}] – value/note pominięte = bez zmiany, '' = wyczyszczenie. */
+function api_grafikWriteBack_(changes) {
+  if (!Array.isArray(changes) || !changes.length) return { written: 0 };
+  var sheet = SpreadsheetApp.getActive().getSheetByName('G');
+  if (!sheet) throw new Error('Arkusz G nie istnieje!');
+  var cols = api_grafikColumns_(sheet), written = 0, missing = [];
+  changes.forEach(function (ch) {
+    var row = Number(ch && ch.row), col = cols.dateCol[ch && ch.iso];
+    if (!(row >= GR_FIRST_ROW) || col == null) { missing.push(ch && ch.iso); return; }
+    var cell = sheet.getRange(row, col + 1);
+    if (ch.value !== undefined && ch.value !== null) { cell.setValue(String(ch.value)); written++; }
+    if (ch.note !== undefined && ch.note !== null) { cell.setNote(String(ch.note)); written++; }
+  });
+  SpreadsheetApp.flush();
+  api_grBump_();
+  return { written: written, missing: missing.slice(0, 20) };
 }

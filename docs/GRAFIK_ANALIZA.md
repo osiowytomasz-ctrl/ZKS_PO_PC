@@ -85,3 +85,35 @@ Powolność: każdy odczyt to kilka sekund czytania arkusza (wartości + 2× kol
   wyłączenia czyta G.
 - **Funkcje do zachowania 1:1**: zakres dat, autofiltr i sortowanie każdej kolumny, kolory, separatory, zoom, edycja jak w Excelu
   (jak w Planie: strzałki, pisanie, kopiuj/wklej, Delete, cofnij), zapis, uprawnienia z kolumny „Grafik”.
+
+## 7. Wyniki audytu (karta G) i co wdrożono w PC 1.20.0
+
+**Co pokazał audyt** (`GrafikAudit.gs`; plik z wynikiem zawiera dane osobowe i nie trafia do repozytorium):
+
+- `A3` = zakres lewy `B4:C…`, `B3` = okno dni od DZIŚ−3 do DZIŚ+7; wiersz 4 = nagłówki, daty od kolumny `BG` (01-01-2026 … 31-01-2028);
+  wiersz 3 nad datami = znacznik święta (niedziela albo data z `i!A36:A100`).
+- Kolumny wyliczane w arkuszu: `B` nazwa z dopiskiem `UT= <pozostało>` (+ ewentualnie przyrostek, np. „br”), `C` pozostało = `D − AT`,
+  `D` dostępny = UT poprzedniego roku + UT bieżący − wykorzystane, `F–Q` liczba UT w miesiącach, `R–AC` plan urlopu (ręcznie),
+  `AD–AO` godziny narastająco do końca miesiąca, `AP` suma planu, `AQ/AR` UT z lat, `AS` wykorzystane do dziś (UT + NŻ),
+  `AT` UT po dzisiaj, `AU–BE` liczby nieobecności (NŻ, v, L4, OP, Ojc, OKL, HDK, BO, BHP, SZ, Sł), `BF` **miejsce pracy**.
+- **Kolory komórek to wyłącznie formatowanie warunkowe** (31 reguł) – nie są „daną”. Komentarzy w karcie jest kilka.
+- `graf_norm` (plik Harmonogramu): `H1 = TRANSPOSE(IMPORTRANGE(…"G!BF4:…"))` – miejsce pracy osoby to kolumna `BF`;
+  godziny stanowisk (B:G) i terminy (kolumna M Harmonogramu) liczą to samo, co silnik programu (`stationHours`, `computeEnd`).
+- `i!A10 = UNIQUE(SORT(G!B5:B27))` – jedyne inne odwołanie do G.
+- **Niespójność w arkuszu**: formuły godzin `AD–AO` różnią się między wierszami (część bierze tylko pierwszą liczbę, część skleja cyfry
+  i pomija L4). Program liczy godziny jednolicie: suma godzin zmian z kodu (`a8` = 8, `a5b3` = 8, `L4`/`UT` = 0).
+
+**Model w Firestore (bez kolorów – minimum danych):**
+
+- `gr_meta/main` – `people[{id,row,lp,name,suffix,nr,place,sep,ut:{rok:{prev,cur,plan[12]}}}]`, `holidays[]`, `year`, `importedAt/By`;
+- `gr_days/{rrrr-mm}` – `c:{osoba:{dd:kod}}` i `n:{osoba:{dd:komentarz}}`; program nasłuchuje tylko miesięcy z widocznego zakresu
+  (+ cały rok „do” dla podsumowań urlopów).
+- Kolory (`cellStyle` – te same 31 reguł w tej samej kolejności), podsumowania (`personSummary`) i graf_norm (`grafNormDays`) liczy program.
+
+**PC 1.20.0 – moduł Grafik na Firebase:** tabela jak arkusz (zaznaczanie, strzałki, Tab/Enter, pisanie w komórce, F2, Delete,
+Ctrl+C/X/V zgodne z Excelem, Ctrl+Z/Y), zapis od razu, zmiany innych widoczne na żywo, **komentarze komórek** (menu pod prawym
+przyciskiem, znacznik w rogu), podsumowanie pracownika (miesiące, nieobecności, edycja miejsca/UT/planu), autofiltr i sortowanie,
+zoom, kolumny podsumowania. „Import z G” przenosi kartę do bazy; w okresie przejściowym każda zmiana trafia też do karty G
+(`grafikWriteBack`), więc graf_norm i wersja webowa działają bez zmian. Poprzedni widok z arkusza – przycisk „Arkusz”.
+
+**Dalej:** Android na Firebase, Harmonogram (graf_norm z bazy zamiast arkusza) i Plan (pracownicy i zmiany z bazy).

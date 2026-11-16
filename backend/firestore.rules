@@ -62,6 +62,19 @@ service cloud.firestore {
       allow read, write: if planLvl() in ['read', 'write'];
     }
 
+    // Grafik: kody zmian i nieobecności (gr_days/{rrrr-mm}) oraz pracownicy, miejsca pracy, urlopy, święta (gr_meta/main).
+    // Czyta każdy z dostępem do Grafiku, Planu albo Harmonogramu (podpowiedzi zmian, godziny stanowisk); zmienia – zapis w Grafiku.
+    function grLvl() { return request.auth == null ? 'none' : tok().get('grafik', 'none'); }
+    function grRead() { return grLvl() in ['read', 'write'] || planLvl() in ['read', 'write'] || canView(); }
+    match /gr_days/{month} {
+      allow read: if grRead();
+      allow write: if grLvl() == 'write';
+    }
+    match /gr_meta/{doc} {
+      allow read: if grRead();
+      allow write: if grLvl() == 'write';
+    }
+
     // test połączenia z Ustawień aplikacji PC
     match /test/{doc} {
       allow read, write: if canView();
