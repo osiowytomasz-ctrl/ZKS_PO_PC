@@ -6,7 +6,7 @@
 import { h, clear, toast, modal, confirmBox, columnFilterDialog } from '../ui.js';
 import * as F from '../logic/grafikFb.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { updateSorts, sortLabels } from '../logic/common.js';
+import { iconSvg } from './harmIcons.js';
 import { watchGrafik, saveCells, saveMeta, importFromSheet } from '../grafikStore.js';
 import { mountGrafikSheet } from './grafikSheet.js';
 import { stationList } from '../logic/harmModel.js';
@@ -20,12 +20,21 @@ const sheetDate = (iso) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0
 const MON3 = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
 const WD = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'so'];
 
+// Filtry i sortowanie zapamiętane na tym komputerze (jak w Harmonogramie): wartości filtra jako listy
+function loadFilters() {
+  const saved = lsGet('grafik.filters', {}) || {};
+  const filters = {};
+  for (const [k, v] of Object.entries(saved.filters || {})) if (Array.isArray(v)) filters[k] = new Set(v);
+  return { filters, sorts: Array.isArray(saved.sorts) ? saved.sorts.filter((x) => x && x.key) : [] };
+}
+const saveFilters = (st) => lsSet('grafik.filters', { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
+
 export function mountGrafik(el, ctx) {
   const canWrite = ctx.level('grafik') === 'write';
   const today = () => isoOf(new Date());
   const st = {
     from: addDays(today(), -3), to: addDays(today(), 7), meta: null, months: {}, codes: {}, notes: {}, sel: null, editing: null,
-    filters: {}, sorts: [], zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null,
+    filters: {}, sorts: [], ...loadFilters(), zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null,
   };
   const body = h('div', { tabindex: '0', class: 'gr', style: { flex: 1, minHeight: 0, overflow: 'auto', outline: 'none', background: '#fff', position: 'relative' } });
   const info = h('span', { class: 'muted' });
@@ -66,8 +75,8 @@ export function mountGrafik(el, ctx) {
   const year = () => st.to.slice(0, 4);
   const summaries = () => { const m = new Map(), t = today(); for (const p of people()) if (!p.sep) m.set(p.id, F.personSummary(p, st.codes[p.id] || {}, year(), t)); return m; };
   const dates = () => F.daysBetween(st.from, st.to);
-  const columns = () => {
-    const y = year(), g = st.groups;
+  const columns = (g = st.groups) => {
+    const y = year();
     return [
       { key: 'name', title: 'Pracownik', w: 170 }, { key: 'place', title: 'Miejsce', w: 52 },
       ...(g.ut ? [
@@ -108,13 +117,17 @@ export function mountGrafik(el, ctx) {
     }
     sums = summaries();
     cols = columns();
+    // filtry i sortowanie działają też na kolumnach ukrytych grup (jak ukryte kolumny w Harmonogramie)
+    const fcols = columns({ ut: true, hours: true, abs: true });
+    for (const k of Object.keys(st.filters)) if (!fcols.some((c) => c.key === k)) delete st.filters[k];
+    st.sorts = st.sorts.filter((x) => fcols.some((c) => c.key === x.key));
     const getV = (pid, c) => { const p = people().find((x) => x.id === pid); return p ? value(p, c) : ''; };
     const all = people().filter((p) => !p.sep).map((p) => p.id);
-    const filtered = visibleRows(all, cols, st.filters, getV);
-    const sorted = st.sorts.length ? sortRows(filtered, cols, st.sorts, getV) : filtered;
+    const filtered = visibleRows(all, fcols, st.filters, getV);
+    const sorted = st.sorts.length ? sortRows(filtered, fcols, st.sorts, getV) : filtered;
     // separatory zostają w swoim miejscu, gdy nie ma sortowania (grupy jak w arkuszu)
     rows = st.sorts.length ? sorted.map((id) => people().find((p) => p.id === id)) : people().filter((p) => p.sep ? !Object.keys(st.filters).length : sorted.includes(p.id));
-    const hol = holidays(), t = today(), hour = new Date().getHours(), labels = sortLabels(st.sorts), stList = stations();
+    const hol = holidays(), t = today(), hour = new Date().getHours(), labels = Object.fromEntries(st.sorts.map((x) => [x.key, sortLabel(x.key)])), stList = stations();
     const sy = body.scrollTop, sx = body.scrollLeft;
     clear(body);
     const z = st.zoom / 100;
@@ -124,30 +137,39 @@ export function mountGrafik(el, ctx) {
     const leftOf = (i) => widths.slice(0, i).reduce((a, b) => a + b, 0);
     const weekH = Math.round(17 * z);
     // nagłówek: wiersz tygodni (ISO) nad datami, pod nim daty w pionie „dd-mm-rrrr” jak w karcie G
-    const head1 = h('tr', {}), head2 = h('tr', {});
+    const headM = h('tr', {}), head1 = h('tr', {}), head2 = h('tr', {});
     const thBase = { position: 'sticky', cursor: 'pointer', padding: '2px 3px', fontWeight: 700, borderRight: '1px solid #999', borderBottom: '1px solid #999' };
     cols.forEach((c, i) => {
       if (c.iso) return;
       const filt = !!st.filters[c.key];
-      head1.append(h('th', { rowspan: 2, title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
+      headM.append(h('th', { rowspan: 3, title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
         style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.edit ? '#fff2cc' : '#e4e4e4', color: '#000', whiteSpace: 'normal', lineHeight: 1.1,
           fontSize: (i >= 2 ? 11 : 12) * z + 'px', minWidth: widths[i] + 'px', maxWidth: widths[i] + 'px', ...(i < fixed ? { left: leftOf(i) + 'px' } : {}) } },
-      c.title + (labels[c.key] ? ' ' + labels[c.key] : '')));
+      c.title + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : '')));
     });
     const dcols = cols.filter((c) => c.iso);
+    // wiersz miesięcy nad tygodniami
+    for (let i = 0; i < dcols.length;) {
+      const mk = dcols[i].iso.slice(0, 7); let n = 1;
+      while (i + n < dcols.length && dcols[i + n].iso.slice(0, 7) === mk) n++;
+      const mi = Number(mk.slice(5, 7)) - 1, label = `${F.MONTHS[mi]} ${mk.slice(0, 4)}`;
+      headM.append(h('th', { colspan: n, title: label, style: { ...thBase, cursor: 'default', top: 0, zIndex: 3, height: weekH + 'px', padding: '0 4px', fontSize: 11 * z + 'px', textAlign: 'left',
+        background: mi % 2 ? '#fce4d6' : '#fff2cc', color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: n * 34 * z + 'px' } }, n >= 3 ? label : n === 2 ? MON3[mi] : MON3[mi].slice(0, 1)));
+      i += n;
+    }
     for (let i = 0; i < dcols.length;) {
       const wk = F.isoWeek(dcols[i].iso); let n = 1;
       while (i + n < dcols.length && F.isoWeek(dcols[i + n].iso) === wk) n++;
-      head1.append(h('th', { colspan: n, title: `Tydzień ${wk} (ISO)`, style: { ...thBase, cursor: 'default', top: 0, zIndex: 3, height: weekH + 'px', padding: '0 2px', fontSize: 11 * z + 'px', background: wk % 2 ? '#d9e1f2' : '#eef2f9', color: '#000', whiteSpace: 'nowrap' } },
+      head1.append(h('th', { colspan: n, title: `Tydzień ${wk} (ISO)`, style: { ...thBase, cursor: 'default', top: weekH + 'px', zIndex: 3, height: weekH + 'px', padding: '0 2px', fontSize: 11 * z + 'px', background: wk % 2 ? '#d9e1f2' : '#eef2f9', color: '#000', whiteSpace: 'nowrap' } },
         n >= 2 ? `tydz. ${wk}` : String(wk)));
       i += n;
     }
     for (const c of dcols) {
       const hs = F.headerStyle(c.iso, hol.has(c.iso)), filt = !!st.filters[c.key], wd = WD[new Date(c.iso + 'T00:00:00Z').getUTCDay()];
       head2.append(h('th', { title: `${sheetDate(c.iso)} (${wd}), tydzień ${F.isoWeek(c.iso)}. Kliknij: filtr i sortowanie`, onclick: () => openFilter(c),
-        style: { ...thBase, top: weekH + 'px', zIndex: 3, padding: '3px 0', minWidth: 34 * z + 'px', fontSize: 11 * z + 'px', fontWeight: 400,
+        style: { ...thBase, top: 2 * weekH + 'px', zIndex: 3, padding: '3px 0', minWidth: 34 * z + 'px', fontSize: 11 * z + 'px', fontWeight: 400,
           background: filt ? '#ffb74d' : c.iso === t ? '#00b050' : hs.bg, color: filt || c.iso === t ? '#000' : hs.color } },
-      h('div', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', margin: '0 auto', lineHeight: 1 } }, sheetDate(c.iso) + (labels[c.key] ? ' ' + labels[c.key] : ''))));
+      h('div', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', margin: '0 auto', lineHeight: 1 } }, sheetDate(c.iso) + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : ''))));
     }
     const tbody = h('tbody', {});
     grid = [];
@@ -184,11 +206,11 @@ export function mountGrafik(el, ctx) {
       });
       tbody.append(tr);
     });
-    table.append(h('thead', {}, head1, head2), tbody);
+    table.append(h('thead', {}, headM, head1, head2), tbody);
     body.append(table);
     body.scrollTop = sy; body.scrollLeft = sx;
     paintSel();
-    info.textContent = `Pracowników: ${grid.filter(Boolean).length}` + (canWrite ? '' : ' · tylko odczyt') + ' · zmiany zapisują się od razu' + (st.undo.length ? ` · cofnij: ${st.undo.length}` : '');
+    info.textContent = `Pracowników: ${grid.filter(Boolean).length}` + (canWrite ? '' : ' · tylko odczyt') + ' · zmiany zapisują się od razu' + (Object.keys(st.filters).length ? ` · filtry: ${Object.keys(st.filters).length}` : '') + (st.undo.length ? ` · cofnij: ${st.undo.length}` : '');
   }
 
   // ---------- zaznaczenie i klawiatura (jak w Excelu) ----------
@@ -399,12 +421,34 @@ export function mountGrafik(el, ctx) {
   }
 
   // ---------- filtry i sortowanie (jak autofiltr) ----------
+  const sortLabel = (key) => { const i = st.sorts.findIndex((x) => x.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
+  /**
+   * Filtr i sortowanie kolumny – zasady Harmonogramu: lista wartości z liczbą wierszy (z uwzględnieniem pozostałych filtrów),
+   * ostatnio wybrane sortowanie jest pierwszym poziomem (kolejne kolumny – następne poziomy, numer przy strzałce),
+   * na górze okna wybór innej kolumny, także z ukrytych grup; filtry i sortowanie zapamiętane na tym komputerze.
+   */
   function openFilter(c) {
+    const fcols = columns({ ut: true, hours: true, abs: true });
     const getV = (pid, col) => { const p = people().find((x) => x.id === pid); return p ? value(p, col) : ''; };
     const all = people().filter((p) => !p.sep).map((p) => p.id);
-    const cur = st.sorts.find((s) => s.key === c.key);
-    columnFilterDialog({ title: c.iso ? `${plDate(c.iso)} (${c.iso})` : c.title, options: filterOptions(all, cols, st.filters, getV, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
-      onApply: (filter, sort) => { if (filter) st.filters[c.key] = filter; else delete st.filters[c.key]; st.sorts = updateSorts(st.sorts, c.key, sort); draw(); } });
+    const cur = st.sorts.find((x) => x.key === c.key);
+    const shown = new Set(cols.map((x) => x.key)), hidden = fcols.filter((x) => !shown.has(x.key));
+    const label = (x) => x.iso ? `${sheetDate(x.iso)} (${WD[new Date(x.iso + 'T00:00:00Z').getUTCDay()]})` : (x.full || x.title);
+    let dlg = null;
+    const opt = (x) => h('option', { value: x.key }, `${label(x)}${st.filters[x.key] ? ' ▼' : ''}${sortLabel(x.key) ? ' ' + sortLabel(x.key) : ''}`);
+    const sel = h('select', { style: { width: '100%', padding: '4px' }, onchange: () => { const n = fcols.find((x) => x.key === sel.value); if (n && n.key !== c.key) { if (dlg) dlg.close(); openFilter(n); } } },
+      h('optgroup', { label: 'Widoczne' }, ...cols.map(opt)), ...(hidden.length ? [h('optgroup', { label: 'Ukryte (Urlopy / Godziny / Absencje)' }, ...hidden.map(opt))] : []));
+    sel.value = c.key;
+    const others = Object.keys(st.filters).filter((k) => k !== c.key).map((k) => fcols.find((x) => x.key === k)).filter(Boolean);
+    const picker = h('div', { style: { border: '1px solid #ccc', background: '#f6f8fc', padding: '6px', marginBottom: '6px' } },
+      h('div', { style: { fontWeight: 700, fontSize: '12px', marginBottom: '4px' } }, 'Kolumna do filtrowania (także ukryte):'), sel,
+      others.length ? h('div', { class: 'muted', style: { fontSize: '11px', marginTop: '3px' } }, 'Inne filtry: ' + others.map((x) => x.iso ? sheetDate(x.iso) : x.title).join(', ')) : null);
+    dlg = columnFilterDialog({ top: picker, title: label(c) + (shown.has(c.key) ? '' : ' (kolumna ukryta)'), options: filterOptions(all, fcols, st.filters, getV, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
+      onApply: (filter, sort) => {
+        if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
+        st.sorts = st.sorts.filter((x) => x.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
+        saveFilters(st); draw();
+      } });
   }
 
   // ---------- import, dawny grafik ----------
@@ -430,7 +474,7 @@ export function mountGrafik(el, ctx) {
     preset('Miesiąc', (t) => [t.slice(0, 8) + '01', F.daysBetween(t.slice(0, 8) + '01', addDays(t.slice(0, 8) + '28', 4)).filter((d) => d.slice(0, 7) === t.slice(0, 7)).pop()]),
     preset('Rok', (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31']),
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
-    ...groupBtns, h('button', { class: 'btn small', onclick: () => { st.filters = {}; st.sorts = []; draw(); } }, 'Wyczyść filtry'),
+    ...groupBtns, (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     canWrite ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza', onclick: doImport }, 'Import z G') : null,
     h('button', { class: 'btn small', onclick: openSheet, title: 'Dawny widok: wprost z karty G arkusza' }, 'Arkusz'), info), body);
