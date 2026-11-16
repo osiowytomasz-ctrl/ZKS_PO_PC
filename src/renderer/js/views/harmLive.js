@@ -307,7 +307,8 @@ export function mountHarmLive(el, appCtx) {
   }
 
   // ---------- przesuwanie operacji na wykresie (przeciągnij i upuść) ----------
-  // Pasek przesuwa się w poziomie; puszczenie wstawia operację w kolejkę jej stanowiska za operację, która startuje najpóźniej przed tym
+  // W pionie: upuszczenie na wierszu innej operacji wstawia przed nią (górna połowa wiersza) albo za nią (dolna), w kolejce jej stanowiska
+  // (inne stanowisko = zmiana stanowiska). Pasek przesuwa się w poziomie; puszczenie wstawia operację w kolejkę jej stanowiska za operację, która startuje najpóźniej przed tym
   // miejscem (logic/harmDrag.js). Zależności Z1–Z4 przepinają się same, a start i koniec – także pozostałych operacji – liczy silnik.
   // Podczas przesuwania: podgląd całego harmonogramu na żywo (kolejność wierszy bez zmian), przepięte Z1–Z4 na niebiesko, znak zakazu
   // przy operacjach z ręcznym startem i końcem (stoją w miejscu), czerwona ramka i powód, gdy w tym miejscu nie można upuścić. Esc – anuluj.
@@ -317,7 +318,8 @@ export function mountHarmLive(el, appCtx) {
     if (!res || res.start == null) return;
     e.preventDefault();
     st.drag = { lp: r.id, x0: e.clientX, y0: e.clientY, startMs: res.start, durMs: Math.max(3600000, (res.end ?? res.start) - res.start), moved: false, plan: null, T: res.start,
-      ops: st.m.opsByLp, result: st.data.result, cyc: null, can: canDrag(st.m.opsByLp, r.id), frame: 0, tip: null };
+      ops: st.m.opsByLp, result: st.data.result, cyc: null, can: canDrag(st.m.opsByLp, r.id), frame: 0, tip: null, anchor: null,
+      baseRows: st.rows, baseChart: st.chart, own: st.rows.findIndex((x) => x.id === r.id) };
     document.addEventListener('mousemove', dragMove, true);
     document.addEventListener('mouseup', dragEnd, true);
     document.addEventListener('keydown', dragKey, true);
@@ -334,18 +336,22 @@ export function mountHarmLive(el, appCtx) {
       document.body.append(d.tip);
     }
     d.T = d.startMs + dx / st.geom.HOUR * 3600000;
+    // w pionie: kursor na wierszu innej operacji – górna połowa = przed nią, dolna = za nią (w kolejce jej stanowiska)
+    const b = body.getBoundingClientRect(), y = e.clientY - b.top + body.scrollTop - st.geom.HEAD, ri = Math.floor(y / st.geom.ROW);
+    const tr = ri >= 0 && ri < d.baseRows.length ? d.baseRows[ri] : null;
+    const anchor = tr && ri !== d.own && !tr.komisRow ? { lp: tr.id, side: y - ri * st.geom.ROW < st.geom.ROW / 2 ? 'before' : 'after', row: ri } : null;
+    d.anchor = anchor;
     Object.assign(d.tip.style, { left: e.clientX + 14 + 'px', top: e.clientY + 16 + 'px' });
     if (!d.frame) d.frame = requestAnimationFrame(dragPreview);
   }
   function dragPreview() {
     const d = st.drag; if (!d) return;
     d.frame = 0;
-    d.plan = planDrag(d.ops, d.result, d.lp, d.T, { before: d.cyc || undefined });
+    d.plan = planDrag(d.ops, d.result, d.lp, d.T, { before: d.cyc || undefined, anchor: d.anchor });
     const p = d.plan;
     let data = null;
     if (p.ok) data = p.patches.length ? buildHarmData(p.ops, st.days || {}, st.m.cfg, H.localNow().getTime()) : st.data;
     // podgląd: te same wiersze w tej samej kolejności, nowe daty i zależności
-    if (!d.baseRows) { d.baseRows = st.rows; d.baseChart = st.chart; }
     const byId = data ? new Map(data.rows.map((r) => [r.id, r])) : null;
     const rows = d.baseRows.map((r) => (r.komisRow || !byId ? r : byId.get(r.id) || r));
     st.rows = rows;
@@ -354,7 +360,8 @@ export function mountHarmLive(el, appCtx) {
     d.tip.style.background = p.ok ? '#e8f0fe' : '#ffe0e0';
     d.tip.style.color = p.ok ? '#0b3d91' : '#a00000';
     d.tip.textContent = p.ok
-      ? `${d.lp} ${p.after ? 'za ' + p.after : 'na początek kolejki'} (${p.station})` + (nr && nr.start != null ? `\nstart ${fmtDt(nr.start)} → koniec ${fmtDt(nr.end)}` : '')
+      ? `${d.lp} ${p.before ? 'przed ' + p.before : p.after ? 'za ' + p.after : 'na początek kolejki'} (${p.station})` + (p.station !== p.stationFrom ? `\nzmiana stanowiska: ${p.stationFrom} → ${p.station}` : '')
+        + (nr && nr.start != null ? `\nstart ${fmtDt(nr.start)} → koniec ${fmtDt(nr.end)}` : '')
         + (p.patches.length ? `\nzmiana zależności: ${p.changed.join(', ')}` : '\nbez zmian')
       : `Nie można tutaj: ${p.reason}`;
     paintWindow();
@@ -369,9 +376,21 @@ export function mountHarmLive(el, appCtx) {
       g.dyn.append(h('div', { title: 'Ręczny start i ręczny koniec – operacja stoi w miejscu', style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: left + 'px', top: i * ROW + (ROW - sz) / 2 + 'px', width: sz + 'px', height: sz + 'px', borderRadius: '50%', background: '#d00000', boxShadow: '0 0 0 1.5px #fff, 0 0 3px rgba(0,0,0,.6)' } },
         h('div', { style: { position: 'absolute', left: '17%', right: '17%', top: '40%', height: '20%', background: '#fff', borderRadius: '1px' } })));
     }
+    const ok = d.plan && d.plan.ok, col = ok ? '#1a73e8' : '#d00000';
+    if (d.anchor) {   // w pionie: linia wstawienia nad (przed) albo pod (za) wierszem wskazanej operacji i duch paska w tym miejscu
+      const a = d.anchor.row, it = chart.items[a];
+      if (a >= from && a < to && it) {
+        const w = Math.max(2, d.durMs / 3600000 * HOUR);
+        const x = it.noBar ? Math.max(0, (d.T - x0) / 3600000 * HOUR) : d.anchor.side === 'after' ? it.endHours * HOUR : Math.max(0, it.startHours * HOUR - w);
+        const y = d.anchor.side === 'after' ? (a + 1) * ROW - 2 : a * ROW - 1;
+        g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 7, pointerEvents: 'none', left: 0, top: y + 'px', width: g.chartW + 'px', height: '3px', background: col } }));
+        g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: x + 'px', top: a * ROW + 1 + 'px', width: w + 'px', height: ROW - 2 + 'px', border: `2px dashed ${col}`, background: ok ? 'rgba(26,115,232,.12)' : 'rgba(208,0,0,.12)', boxSizing: 'border-box' } }));
+      }
+      return;
+    }
     const i = chart.items.findIndex((it) => it.row.id === d.lp);
     if (i >= from && i < to) {
-      const left = Math.max(0, (d.T - x0) / 3600000 * HOUR), w = Math.max(2, d.durMs / 3600000 * HOUR), ok = d.plan && d.plan.ok;
+      const left = Math.max(0, (d.T - x0) / 3600000 * HOUR), w = Math.max(2, d.durMs / 3600000 * HOUR);
       g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: left + 'px', top: i * ROW + 1 + 'px', width: w + 'px', height: ROW - 2 + 'px', border: `2px dashed ${ok ? '#1a73e8' : '#d00000'}`, background: ok ? 'rgba(26,115,232,.12)' : 'rgba(208,0,0,.12)', boxSizing: 'border-box' } }));
     }
   }
@@ -398,8 +417,9 @@ export function mountHarmLive(el, appCtx) {
     if (!p.ok) { toast(`Nie przesunięto ${d.lp}: ${p.reason}`); return; }
     if (!p.patches.length) return;
     try {
-      await updateOps(p.patches, `Przesunięcie ${d.lp} ${p.after ? 'za ' + p.after : 'na początek'}`);
-      toast(`${d.lp} ${p.after ? 'za ' + p.after : 'na początku kolejki'} ${p.station}; zmienione zależności: ${p.changed.join(', ')} (Cofnij – ↶)`);
+      const where = p.before ? 'przed ' + p.before : p.after ? 'za ' + p.after : 'na początek';
+      await updateOps(p.patches, `Przesunięcie ${d.lp} ${where}`);
+      toast(`${d.lp} ${where} (${p.station})${p.station !== p.stationFrom ? `, stanowisko ${p.stationFrom} → ${p.station}` : ''}; zmienione: ${p.changed.join(', ')} (Cofnij – ↶)`);
     } catch (err) { toast('Nie zapisano przesunięcia: ' + (err.code === 'permission-denied' ? 'brak uprawnień' : err.message || err)); }
   }
 
@@ -1157,7 +1177,7 @@ export function mountHarmLive(el, appCtx) {
       const bar = (left, width, withLabel) => {
         const dragOk = acc().edit && !st.drag && canDrag(st.m.opsByLp, r.id).ok;
         const dragging = st.drag && st.drag.moved && st.drag.lp === r.id;
-        const box = h('div', { title: tip + (dragOk ? '\nPrzeciągnij w poziomie: nowe miejsce w kolejce stanowiska' : ''), onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id),
+        const box = h('div', { title: tip + (dragOk ? '\nPrzeciągnij: w poziomie – nowe miejsce w czasie; na wiersz innej operacji – przed nią (górna połowa) albo za nią (dolna)' : ''), onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id),
           onmousedown: (e) => { if (e.button === 0 && acc().edit) beginDrag(e, r); },
           style: { cursor: dragOk ? 'grab' : 'pointer', position: 'absolute', zIndex: dragging ? 5 : 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: LF + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg,
             ...(dragging ? { outline: `3px solid ${st.drag.plan && st.drag.plan.ok ? '#1a73e8' : '#d00000'}`, outlineOffset: '1px' } : {}),

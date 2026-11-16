@@ -140,3 +140,55 @@ test('ponad 4 zależności – odrzucone', () => {
   assert.equal(p4.ok, false);
   assert.match(p4.reason, /najwyżej 4/);
 });
+
+test('w pionie: za wskazaną operacją i przed nią', () => {
+  const ops = base(), r = run(ops);
+  const a = planDrag(ops, r, '4', 0, { anchor: { lp: '1', side: 'after' } });
+  assert.ok(a.ok, a.reason);
+  assert.deepEqual(preds(a.ops, '4'), ['1']);
+  assert.deepEqual(preds(a.ops, '2'), ['4']);
+  const b = planDrag(ops, r, '4', 0, { anchor: { lp: '2', side: 'before' } });
+  assert.ok(b.ok, b.reason);
+  assert.equal(b.before, '2');
+  assert.deepEqual(preds(b.ops, '4'), ['1']);
+  assert.deepEqual(preds(b.ops, '2'), ['4']);
+  assert.deepEqual(preds(b.ops, '3'), ['2']);
+  const r2 = run(b.ops);
+  assert.equal(r2.get('4').start, r.get('1').end);
+});
+
+test('w pionie: przed pierwszą – przejmuje jej start ręczny', () => {
+  const ops = base(), r = run(ops);
+  const p = planDrag(ops, r, '3', 0, { anchor: { lp: '1', side: 'before' } });
+  assert.ok(p.ok, p.reason);
+  assert.deepEqual(preds(p.ops, '3'), []);
+  assert.equal(p.ops['3'].startManual, r.get('1').start);
+  assert.equal(p.ops['1'].startManual, undefined);
+  assert.deepEqual(preds(p.ops, '1'), ['3']);
+  assert.deepEqual(preds(p.ops, '4'), ['2']);
+  assert.deepEqual(Object.fromEntries(p.patches)['1'], { preds: ['3'], startManual: null });
+  const r2 = run(p.ops);
+  assert.equal(r2.get('1').start, r2.get('3').end);
+});
+
+test('w pionie: na inne stanowisko', () => {
+  const ops = base(), r = run(ops);
+  const p = planDrag(ops, r, '10', 0, { anchor: { lp: '3', side: 'after' } });
+  assert.ok(p.ok, p.reason);
+  assert.equal(p.ops['10'].station, 'A');
+  assert.equal(p.stationFrom, 'B');
+  assert.deepEqual(preds(p.ops, '10'), ['3']);
+  assert.deepEqual(preds(p.ops, '4'), ['10']);
+  assert.equal(Object.fromEntries(p.patches)['10'].station, 'A');
+});
+
+test('w pionie: odmowy', () => {
+  const ops = base();
+  ops[3] = { ...ops[3], startManual: 1, endManual: 2 };
+  ops[100] = { station: 'A', preds: [] }; ops['100a'] = { hours: 2 }; ops['100b'] = { hours: 2 };
+  const r = run(ops);
+  assert.match(planDrag(ops, r, '4', 0, { anchor: { lp: '3', side: 'before' } }).reason, /ręczny start i koniec/);
+  assert.ok(planDrag(ops, r, '4', 0, { anchor: { lp: '3', side: 'after' } }).ok);
+  assert.match(planDrag(ops, r, '4', 0, { anchor: { lp: '100', side: 'after' } }).reason, /złożona z suboperacji/);
+  assert.match(planDrag(ops, r, '100b', 0, { anchor: { lp: '100a', side: 'before' } }).reason, /jednym drzewie|kolejność/);
+});
