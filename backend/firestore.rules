@@ -79,6 +79,12 @@ service cloud.firestore {
       allow write: if grLvl() == 'write';
     }
 
+    // Kompetencje operatorów (kp/main: dane, uprawnienia, matryca umiejętności) – dane kadrowe, więc tylko osoby z prawem do Grafiku
+    match /kp/{doc} {
+      allow read: if grLvl() in ['read', 'write'];
+      allow write: if grLvl() == 'write';
+    }
+
     // test połączenia z Ustawień aplikacji PC
     match /test/{doc} {
       allow read, write: if canView();

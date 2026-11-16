@@ -3,6 +3,7 @@ import { preload } from './catalog.js';
 import { startBackgroundRefresh } from './prefetch.js';
 import { permissionsSummary } from './logic/common.js';
 import { mountHome } from './views/home.js';
+import { mountCompetence } from './views/competence.js';
 import { mountSettings } from './views/settings.js';
 import { mountScanner } from './views/scanner.js';
 import { mountGrafik } from './views/grafik.js';
@@ -21,6 +22,7 @@ import { mountToolRoom } from './views/toolroom.js';
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
+  { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', mount: mountCompetence },
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },

@@ -17,6 +17,9 @@ const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, 
 const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 const plDate = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const sheetDate = (iso) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;   // format nagłówka karty G
+// kolumny urlopów: zielony gradient od pasteli (Plan) do zieleni (Pozostały) – jak kolumna „UT” w karcie G
+const mix = (a, b, t) => '#' + [0, 2, 4].map((i) => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('');
+const utShade = (i, n, head) => (head ? mix('#d8ecc9', '#6aa84f', n > 1 ? i / (n - 1) : 1) : mix('#f1f8ec', '#b6d7a8', n > 1 ? i / (n - 1) : 1));
 const MON3 = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
 const WD = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'so'];
 
@@ -86,7 +89,7 @@ export function mountGrafik(el, ctx) {
         { key: 's:used', title: 'Wykorz.', full: 'Wykorzystane do dziś (UT + NŻ)', sum: 'used' },
         { key: 's:fut', title: 'Zaplan.', full: 'Zaplanowane (UT po dziś)', sum: 'future' },
         { key: 's:avail', title: 'Dostęp.', full: 'UT dostępny (poprzedni + bieżący − wykorzystany)', sum: 'available' },
-        { key: 's:rem', title: 'Pozost.', full: 'UT pozostały (dostępny − zaplanowany)', sum: 'remaining' }] : []),
+        { key: 's:rem', title: 'Pozost.', full: 'UT pozostały (dostępny − zaplanowany)', sum: 'remaining' }].map((c, i, all) => ({ ...c, ut: i, utN: all.length })) : []),
       ...(g.hours ? [...MON3.map((m, i) => ({ key: 'h:' + i, title: m, full: `Godziny przepracowane – ${F.MONTHS[i]} ${y}`, hours: i })), { key: 'h:sum', title: 'Razem', full: `Godziny ${y} razem`, hours: 'sum', w: 50 }] : []),
       ...(g.abs ? F.ABSENCES.map(([k, label]) => ({ key: 'a:' + k, title: k, full: `${label} (${k}) – liczba dni w ${y}`, abs: k, w: 38 })) : []),
       ...dates().map((iso) => ({ key: 'd:' + iso, iso, title: iso })),
@@ -143,7 +146,7 @@ export function mountGrafik(el, ctx) {
       if (c.iso) return;
       const filt = !!st.filters[c.key];
       headM.append(h('th', { rowspan: 3, title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
-        style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.edit ? '#fff2cc' : c.abs ? F.absenceStyle(c.abs).bg : '#e4e4e4', color: c.abs && !filt ? F.absenceStyle(c.abs).color : '#000', ...(c.abs ? { fontStyle: F.absenceStyle(c.abs).italic ? 'italic' : 'normal' } : {}), whiteSpace: 'normal', lineHeight: 1.1,
+        style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.ut !== undefined ? utShade(c.ut, c.utN, true) : c.abs ? F.absenceStyle(c.abs).bg : '#e4e4e4', color: c.abs && !filt ? F.absenceStyle(c.abs).color : '#000', ...(c.abs ? { fontStyle: F.absenceStyle(c.abs).italic ? 'italic' : 'normal' } : {}), whiteSpace: 'normal', lineHeight: 1.1,
           fontSize: (i >= 2 ? 11 : 12) * z + 'px', minWidth: widths[i] + 'px', maxWidth: widths[i] + 'px', ...(i < fixed ? { left: leftOf(i) + 'px' } : {}) } },
       c.title + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : '')));
     });
@@ -184,10 +187,12 @@ export function mountGrafik(el, ctx) {
       cols.forEach((c, ci) => {
         const fixedCell = ci < fixed;
         let txt = value(p, c), style = { borderRight: '1px solid #c8c8c8', borderBottom: '1px solid #c8c8c8', padding: '1px 4px', whiteSpace: 'nowrap', textAlign: c.key === 'name' ? 'left' : 'center' };
-        if (c.key === 'name') { txt = F.displayName(p, s ? s.remaining : 0); style = { ...style, fontWeight: 600 }; }
-        if (c.key === 'place') { const stn = F.placeStation(p.place, stList); if (stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 }; }
+        const stn = F.placeStation(p.place, stList);
+        if (c.key === 'name') { txt = F.displayName(p, s ? s.remaining : 0); style = { ...style, fontWeight: 600, ...(stn ? { background: stn.bg, color: stn.color } : {}) }; }
+        if (c.ut !== undefined) style = { ...style, background: utShade(c.ut, c.utN, false) };
+        if (c.key === 'place') { if (stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 }; }
         if (c.sum === 'remaining' || c.sum === 'available') { if (Number(txt) < 0) style.background = '#ff0000'; }
-        if (c.edit) style = { ...style, background: '#fffbe6', cursor: canWrite ? 'cell' : 'default' };
+        if (c.edit) style = { ...style, cursor: canWrite ? 'cell' : 'default', fontWeight: 700 };
         if (c.hours !== undefined) style = { ...style, background: '#e2efda' };
         if (c.abs) { const as = F.absenceStyle(c.abs); style = { ...style, background: as.bg, color: as.color, fontWeight: as.bold ? 700 : 400, fontStyle: as.italic ? 'italic' : 'normal' }; }
         if (c.iso) {
@@ -200,7 +205,7 @@ export function mountGrafik(el, ctx) {
         const n = c.iso ? note(p.id, c.iso) : '';
         if (n) { td.title = 'Komentarz: ' + n; td.append(h('span', { style: { position: 'absolute', right: 0, top: 0, width: 0, height: 0, borderTop: '7px solid #ff6d00', borderLeft: '7px solid transparent' } })); }
         if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.nr : ''}. Dwuklik / prawy przycisk: podsumowanie urlopów i godzin`;
-        if (c.key === 'place') { const stn = F.placeStation(p.place, stList); td.title = stn ? `Stanowisko ${stn.name} (kolor jak w Harmonogramie)` : 'Miejsce pracy bez stanowiska w Harmonogramie'; }
+        if (c.key === 'place') { td.title = stn ? `Stanowisko ${stn.name} (kolor jak w Harmonogramie)` : 'Miejsce pracy bez stanowiska w Harmonogramie'; }
         if (c.hours !== undefined && typeof c.hours === 'number' && s) td.title = `${F.MONTHS[c.hours]}: ${s.hoursByMonth[c.hours]} h · narastająco do końca miesiąca: ${s.hoursToMonth[c.hours]} h`;
         tr.append(td);
       });
