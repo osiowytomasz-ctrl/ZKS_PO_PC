@@ -978,7 +978,7 @@ function api_getPlanGrid(ctx) {
   var tz = Session.getScriptTimeZone();
 
   // zmiana zapisana literą (Zmiana a/b/c - KARTA PRACY: a = I, b = II, c = III) albo dawniej cyfrą 1/2/3
-  var shiftRe = /Zmiana\s*([123abc])\s*-\s*KARTA PRACY/i;
+  var shiftRe = /Zmiana\s*([123abc])\s*[-–—]\s*KARTA PRACY/i;
 
   function plain(cell) {
     return cell instanceof Date

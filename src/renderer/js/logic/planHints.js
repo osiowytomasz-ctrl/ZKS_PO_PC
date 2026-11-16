@@ -4,7 +4,7 @@ import { shiftHours } from './schedule.js';
 import { cleanName } from './grafik.js';
 
 // Zmiana w nagłówku bloku: litera jak w kodach Grafiku – „Zmiana a - KARTA PRACY” (a = I, b = II, c = III); dawny zapis cyfrą (1/2/3) też jest rozpoznawany.
-export const SHIFT_RE = /Zmiana\s*([123abc])\s*-\s*KARTA PRACY/i;
+export const SHIFT_RE = /Zmiana\s*([123abc])\s*[-–—]\s*KARTA PRACY/i;   // myślnik zwykły, półpauza albo pauza
 export const SHIFTS = ['a', 'b', 'c'];
 const FROM_DIGIT = { 1: 'a', 2: 'b', 3: 'c' };
 /** Zmiana jako litera a/b/c (przyjmuje też dawne 1/2/3) albo null. */
@@ -20,7 +20,7 @@ export function blockOf(grid, r) {
 /** Zmiana z tekstu nagłówka jako litera („Zmiana b - KARTA PRACY” → 'b', dawne „Zmiana 2 - …” → 'b') albo null. */
 export const shiftOfText = (t) => { const m = SHIFT_RE.exec(String(t ?? '')); return m ? normShift(m[1]) : null; };
 /** Ten sam tekst z inną zmianą zapisaną literą (reszta – np. dopiski – bez zmian; dawny zapis cyfrą zamienia się na literę). */
-export const withShift = (t, s) => String(t ?? '').replace(/(Zmiana\s*)[123abc](\s*-\s*KARTA PRACY)/i, `$1${normShift(s) || s}$2`);
+export const withShift = (t, s) => String(t ?? '').replace(/(Zmiana\s*)[123abc](\s*[-–—]\s*KARTA PRACY)/i, `$1${normShift(s) || s}$2`);
 
 /** Klucz pracownika do porównania z Grafikiem: „Nazwisko Imi” (trzy litery imienia), bez wielkości liter. */
 export const workerKey = (name) => cleanName(name).toLowerCase().replace(/\s+/g, ' ').trim();
@@ -84,4 +84,39 @@ export function komisSuggestions(history, fragment, max = 8) {
   const starts = [], contains = [];
   for (const k of history) { const l = k.toLowerCase(); if (l === f) continue; if (l.startsWith(f)) starts.push(k); else if (l.includes(f)) contains.push(k); }
   return [...starts, ...contains].slice(0, max);
+}
+
+/**
+ * Bloki zmian i komórki dat liczone w programie z tekstu arkusza – tak jak serwer, ale z literami a/b/c (i dawnymi 1/2/3).
+ * Dzięki temu zwijanie i data przy nagłówku działają także wtedy, gdy na serwerze jest jeszcze starsza wersja Api.gs
+ * (rozpoznaje tylko „Zmiana 1/2/3”). Zmienia [grid] w miejscu i go zwraca.
+ *  - blok: wiersz z „Zmiana x - KARTA PRACY” do wiersza przed następnym takim nagłówkiem (identyfikatory shiftBlock_N jak na serwerze);
+ *  - data zmiany: komórka na lewo od komórki z nagłówkiem (wartość rrrr-mm-dd z tekstu dd-mm-rrrr albo pusta).
+ */
+export function normalizeGrid(grid) {
+  if (!grid || !Array.isArray(grid.values)) return grid;
+  const blocks = []; let cur = null;
+  grid.kinds = grid.kinds || []; grid.runs = grid.runs || [];
+  const dateCells = (grid.dateCells || []).slice();
+  const hasDate = new Set(dateCells.map((d) => d.row + ':' + d.col));
+  grid.values.forEach((row, r) => {
+    const m = SHIFT_RE.exec(row.map((v) => String(v ?? '')).join(' '));
+    if (m) { cur = { id: 'shiftBlock_' + (blocks.length + 1), shift: normShift(m[1]), headerRow: r, lastRow: r }; blocks.push(cur); }
+    else if (cur) cur.lastRow = r;
+    if (!r) return;
+    for (let c = 1; c < row.length; c++) {
+      if (!SHIFT_RE.test(String(row[c + 1] ?? ''))) continue;
+      grid.kinds[r] = grid.kinds[r] || [];
+      if (grid.kinds[r][c] === 'date' && hasDate.has(r + ':' + c)) continue;
+      grid.kinds[r][c] = 'date';
+      if (grid.runs[r]) grid.runs[r][c] = null;
+      if (!hasDate.has(r + ':' + c)) {
+        const t = String(row[c] ?? '').trim(), m2 = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(t);
+        dateCells.push({ row: r, col: c, value: m2 ? `${m2[3]}-${m2[2].padStart(2, '0')}-${m2[1].padStart(2, '0')}` : /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : '' });
+        hasDate.add(r + ':' + c);
+      }
+    }
+  });
+  grid.blocks = blocks; grid.dateCells = dateCells;
+  return grid;
 }

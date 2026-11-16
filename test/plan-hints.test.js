@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blockOf, shiftOfText, withShift, normShift, workerKey, workersForShift, komisFragment, komisHistory, komisSuggestions, isKomisColumn } from '../src/renderer/js/logic/planHints.js';
+import { normalizeGrid, blockOf, shiftOfText, withShift, normShift, workerKey, workersForShift, komisFragment, komisHistory, komisSuggestions, isKomisColumn } from '../src/renderer/js/logic/planHints.js';
 
 test('blok i zmiana z nagłówka', () => {
   const g = { blocks: [{ id: 'b1', shift: '1', headerRow: 1, lastRow: 5 }, { id: 'b2', shift: '2', headerRow: 6, lastRow: 9 }] };
@@ -49,4 +49,26 @@ test('historyczne komisy i podpowiedzi', () => {
   assert.deepEqual(komisSuggestions(h, '26/'), ['26/934', '26/1001']);
   assert.deepEqual(komisSuggestions(h, 'serw'), ['K-SERWIS']);
   assert.deepEqual(komisSuggestions(h, '26/934'), []);           // już wpisany w całości – bez podpowiedzi
+});
+
+test('bloki i daty liczone w programie (także gdy serwer zna tylko 1/2/3)', () => {
+  const g = normalizeGrid({
+    values: [
+      ['', 'Data', 'Opis'],
+      ['', '16-11-2026', 'Zmiana 1 - KARTA PRACY'],
+      ['12', 'Kowalski Jan', 'toczenie'],
+      ['', '', 'Zmiana b – KARTA PRACY'],
+      ['13', 'Nowak Ann', 'frez'],
+      ['14', '', 'wiercenie'],
+    ],
+    kinds: [['hidden', 'header', 'header'], ['hidden', 'date', 'edit'], ['hidden', 'worker', 'edit'], ['hidden', 'edit', 'edit'], ['hidden', 'worker', 'edit'], ['hidden', 'worker', 'edit']],
+    runs: [[], [null, null, []], [], [null, [], []], [], []],
+    dateCells: [{ row: 1, col: 1, value: '2026-11-16' }],
+    blocks: [{ id: 'shiftBlock_1', shift: '1', headerRow: 1, lastRow: 5 }],          // stary serwer: blok „b” niewidoczny
+  });
+  assert.deepEqual(g.blocks, [{ id: 'shiftBlock_1', shift: 'a', headerRow: 1, lastRow: 2 }, { id: 'shiftBlock_2', shift: 'b', headerRow: 3, lastRow: 5 }]);
+  assert.equal(g.kinds[3][1], 'date');
+  assert.equal(g.runs[3][1], null);
+  assert.deepEqual(g.dateCells, [{ row: 1, col: 1, value: '2026-11-16' }, { row: 3, col: 1, value: '' }]);
+  assert.equal(blockOf(g, 5).shift, 'b');
 });

@@ -11,7 +11,7 @@ import * as P from '../logic/plan.js';
 import * as G from '../logic/planGrid.js';
 import { parseSheetColor } from '../logic/common.js';
 import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
-import { blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
+import { normalizeGrid, blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
 import { grafikPeople } from '../logic/harmDay.js';
 import { datePickerDialog } from './datePicker.js';
 
@@ -38,7 +38,7 @@ export function mountPlan(el, ctx) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie planu…'));
     try {
       st.changes = new Map(); st.undo = []; st.redo = [];
-      await apiCached('api_getPlanGrid', [], (g, meta) => { st.grid = g; st.fresh = !meta.cached; if (st.fresh) { st.changes = new Map(); st.undo = []; st.redo = []; } rebuild(); }, { timeoutMs: 180000, callArgs: fresh ? [true] : undefined });
+      await apiCached('api_getPlanGrid', [], (g, meta) => { st.grid = normalizeGrid(g); st.fresh = !meta.cached; if (st.fresh) { st.changes = new Map(); st.undo = []; st.redo = []; } rebuild(); }, { timeoutMs: 180000, callArgs: fresh ? [true] : undefined });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
   // wspólny układ: na żywo z bazy
