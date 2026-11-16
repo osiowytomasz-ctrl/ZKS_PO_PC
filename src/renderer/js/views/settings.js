@@ -2,6 +2,7 @@ import { h, field, api, toast } from '../ui.js';
 import { permissionsSummary } from '../logic/common.js';
 import { firebase } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
+import { holidaysPanel } from './holidays.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -79,5 +80,6 @@ export async function mountSettings(el, ctx) {
       h('button', { class: 'btn', title: 'Otwiera stronę z najnowszą wersją aplikacji (plik .exe)', onclick: () => window.zks.openExternal('https://github.com/osiowytomasz-ctrl/ZKS_PO_PC/releases/tag/latest') }, 'Aktualizuj'),
       h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną')),
     status, speed, fbOut,
+    cfg.url && cfg.key ? holidaysPanel() : null,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
 }

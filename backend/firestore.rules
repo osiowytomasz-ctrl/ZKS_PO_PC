@@ -17,6 +17,10 @@ service cloud.firestore {
     function canAdd() { return lvl() in ['clerik', 'master', 'god']; }
     function canEdit() { return lvl() in ['master', 'god']; }
     function isGod() { return lvl() == 'god'; }
+    // Plan i Grafik: poziomy z claimów `plan` i `grafik` (read / write)
+    function planLvl() { return request.auth == null ? 'none' : tok().get('plan', 'none'); }
+    function grLvl() { return request.auth == null ? 'none' : tok().get('grafik', 'none'); }
+    function grRead() { return grLvl() in ['read', 'write'] || planLvl() in ['read', 'write'] || canView(); }
     // tylko nowe klucze w mapie ops (bez zmiany i usuwania istniejących operacji)
     function onlyAdds() {
       let before = resource.data.get('ops', {});
@@ -40,10 +44,13 @@ service cloud.firestore {
       allow write: if isGod();
     }
 
-    // ustawienia harmonogramu: stanowiska, kolory komisów, święta
+    // ustawienia harmonogramu: stanowiska, kolory komisów, święta. Święta są wspólne dla programu (Ustawienia):
+    // czyta też Grafik i Plan, a samą listę świąt może zmienić także osoba z prawem zapisu w Grafiku.
     match /config/{doc} {
-      allow read: if canView();
-      allow write: if isGod();
+      allow read: if canView() || grRead();
+      allow create: if isGod() || (grLvl() == 'write' && request.resource.data.keys().hasOnly(['holidays']));
+      allow update: if isGod() || (grLvl() == 'write' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['holidays']));
+      allow delete: if isGod();
     }
 
     // Workflow (dawniej karta Z): zadania czyta i edytuje każdy zalogowany użytkownik programu (jak wcześniej w arkuszu);
@@ -57,15 +64,12 @@ service cloud.firestore {
     }
 
     // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
-    function planLvl() { return request.auth == null ? 'none' : tok().get('plan', 'none'); }
     match /plan_layout/{doc} {
       allow read, write: if planLvl() in ['read', 'write'];
     }
 
     // Grafik: kody zmian i nieobecności (gr_days/{rrrr-mm}) oraz pracownicy, miejsca pracy, urlopy, święta (gr_meta/main).
     // Czyta każdy z dostępem do Grafiku, Planu albo Harmonogramu (podpowiedzi zmian, godziny stanowisk); zmienia – zapis w Grafiku.
-    function grLvl() { return request.auth == null ? 'none' : tok().get('grafik', 'none'); }
-    function grRead() { return grLvl() in ['read', 'write'] || planLvl() in ['read', 'write'] || canView(); }
     match /gr_days/{month} {
       allow read: if grRead();
       allow write: if grLvl() == 'write';

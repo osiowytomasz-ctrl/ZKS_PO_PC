@@ -1,7 +1,7 @@
 // Grafik w Firebase: te same wyliczenia co karta G arkusza (formuły i formatowanie warunkowe z audytu 16.11.2026).
 // W bazie są tylko kody (a8, b8, UT, L4…) i komentarze; kolory, podsumowania urlopów i godzin oraz graf_norm liczy program.
 // Czyste funkcje – testy: test/grafik-fb.test.js. Ten sam algorytm ma Android (ui/grafik/GrafikFb.kt).
-import { shiftHours } from './schedule.js';
+import { shiftHours, slotNumber } from './schedule.js';
 
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 const has = (code, part) => lc(code).includes(lc(part));             // COUNTIFS "*x*" i TEXT_CONTAINS – bez wielkości liter
@@ -77,6 +77,36 @@ export function headerStyle(iso, holiday) {
 // ---------------------------------------------------------------------------------------------------------------------
 /** Godziny z kodu: suma zmian a, b, c (a8b2 → 10; L4, UT → 0). Arkusz liczył to niejednolicie (patrz docs/GRAFIK_ANALIZA.md). */
 export const codeHours = (code) => { const h = shiftHours(code); return h.a + h.b + h.c; };
+/**
+ * Godziny przepracowane z wpisu dnia (kolumny AD–AO karty G, poprawione): suma liczb po literach zmian a/b/c
+ * (a8 = 8, a8b2 = 10, b2c6 = 8, a10 = 10); sam numer (np. „8”) = tyle godzin; nieobecności (UT, L4, NŻ…) = 0.
+ * Arkusz liczył inaczej i niespójnie: w części wierszy pierwsza liczba z komórki (L4 = 4 h, a8b2 = 8 h), w innych
+ * sklejone cyfry (a8b2 = 82 h); do tego „DATE(rok; 2; 31)” to 3 marca, więc luty obejmował początek marca.
+ */
+export function workHours(code) {
+  const t = lc(code);
+  if (!t) return 0;
+  let sum = 0, any = false;
+  for (const m of t.matchAll(/[abc](\d{1,2})/g)) { sum += Number(m[1]); any = true; }
+  if (any) return sum;
+  return /^\d{1,2}$/.test(t) ? Number(t) : 0;
+}
+
+/** Numer tygodnia ISO 8601 (poniedziałek–niedziela; tydzień z pierwszym czwartkiem roku = 1) – jak NUM.TYG.ISO w arkuszu. */
+export function isoWeek(iso) {
+  const d = new Date(iso + 'T00:00:00Z'), wd = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - wd + 3);
+  const y = d.getUTCFullYear(), first = new Date(Date.UTC(y, 0, 4));
+  return 1 + Math.round(((d - first) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+}
+
+/** Stanowisko miejsca pracy („1Si2” → stanowisko 1Si z listy Harmonogramu, z kolorami). Wielka „I” zamiast „l” też pasuje. */
+export function placeStation(place, stations) {
+  const p = String(place ?? '').trim();
+  if (!p) return null;
+  for (const s of stations || []) if (slotNumber(p, s.name) || slotNumber(p.replace(/I/g, 'l'), s.name) || lc(p) === lc(s.name)) return s;
+  return null;
+}
 
 /**
  * Podsumowanie pracownika [p] w roku [year] z wpisów [codes] (Map/obiekt iso → kod) na dzień [todayIso]:
@@ -97,7 +127,7 @@ export function personSummary(p, codes, year, todayIso) {
     const m = Number(iso.slice(5, 7)) - 1;
     if (has(code, 'UT')) { utByMonth[m]++; if (iso <= todayIso) used++; else future++; }
     if (has(code, 'NŻ') && iso <= todayIso) used++;
-    hoursByMonth[m] += codeHours(code);
+    hoursByMonth[m] += workHours(code);
     for (const [k] of ABSENCES) if (has(code, k)) absences[k]++;
   }
   const hoursToMonth = []; let acc = 0;

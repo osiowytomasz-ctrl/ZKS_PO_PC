@@ -827,24 +827,6 @@ export function mountHarmLive(el, appCtx) {
     const kOpt = { ...st.komisOpt };
     const cOpt = { ...st.chartOpt, fields: [...st.chartOpt.fields] };   // wykres: pola napisu, czcionka, kolor komisu
     const kCheck = (key, label, tip) => h('label', { style: { display: 'block', margin: '3px 0' }, title: tip || '' }, h('input', { type: 'checkbox', checked: !!kOpt[key], onchange: (e) => { kOpt[key] = e.target.checked; } }), ' ' + label);
-    // święta: tabela dat (dd.mm.rrrr) z opisem; w nagłówku osi są bordowe z białą pogrubioną czcionką
-    const fmtDay = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso; };
-    const hRows = [...holidayMap(st.m && st.m.cfg && st.m.cfg.holidays)].sort((a, b) => a[0].localeCompare(b[0])).map(([date, name]) => ({ text: fmtDay(date), name }));
-    const hBox = h('div', {});
-    const hRender = () => {
-      clear(hBox);
-      const table = h('table', { style: { borderCollapse: 'collapse' } }, h('thead', {}, h('tr', {}, ...['Data (dd.mm.rrrr)', 'Opis', ''].map((t) => h('th', { style: { textAlign: 'left', padding: '2px 6px', background: '#eee', border: '1px solid #999', fontSize: '12px' } }, t)))));
-      const tb = h('tbody', {});
-      for (const r of hRows) {
-        const dI = h('input', { type: 'text', value: r.text, placeholder: 'np. 11.11.2026', spellcheck: 'false', style: { width: '110px', border: 'none', padding: '3px 6px' }, oninput: () => { r.text = dI.value; } });
-        const nI = h('input', { type: 'text', value: r.name, placeholder: 'np. Święto Niepodległości', style: { width: '240px', border: 'none', padding: '3px 6px' }, oninput: () => { r.name = nI.value; } });
-        tb.append(h('tr', {}, h('td', { style: { border: '1px solid #999', padding: 0, whiteSpace: 'nowrap' } }, dI, calendarButton(dI, { title: 'Wybierz datę święta z kalendarza', holidays: holidayMap(st.m && st.m.cfg && st.m.cfg.holidays) })), h('td', { style: { border: '1px solid #999', padding: 0 } }, nI),
-          h('td', { style: { border: '1px solid #999', padding: '0 4px' } }, h('button', { class: 'btn small', onclick: () => { hRows.splice(hRows.indexOf(r), 1); hRender(); } }, 'Usuń'))));
-      }
-      table.append(tb); hBox.append(table);
-    };
-    hRender();
-    const hAdd = h('button', { class: 'btn small', onclick: () => { hRows.push({ text: '', name: '' }); hRender(); const ins = hBox.querySelectorAll('tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, 'Dodaj święto');
     const nameI = h('input', { type: 'text', placeholder: 'Nazwa nowego stanowiska, np. 4Fr', style: { padding: '4px', width: '220px' }, spellcheck: 'false' });
     const addBtn = h('button', { class: 'btn small', onclick: () => {
       const name = nameI.value.trim();
@@ -858,16 +840,6 @@ export function mountHarmLive(el, appCtx) {
       // komisy: bez pustych i powtórzonych nazw; święta: poprawne daty bez powtórzeń
       const komisList = kRows.map((r) => ({ ...r, komis: r.komis.trim() })).filter((r) => r.komis);
       if (new Set(komisList.map((r) => r.komis)).size !== komisList.length) { toast('Ten sam komis jest na liście kolorów dwa razy'); return; }
-      const holidays = [];
-      for (const r of hRows) {
-        if (!r.text.trim() && !r.name.trim()) continue;
-        const t = parseDateTime(r.text.trim());
-        if (t == null) { toast(`Święta: nie rozpoznano daty „${r.text}” (wpisz np. 11.11.2026)`); return; }
-        const iso = new Date(t).toISOString().slice(0, 10);
-        if (holidays.some((x) => x.date === iso)) { toast(`Święta: data ${r.text.trim()} jest wpisana dwa razy`); return; }
-        holidays.push({ date: iso, name: r.name.trim() });
-      }
-      holidays.sort((a, b) => a.date.localeCompare(b.date));
       try {
         const clamp = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
@@ -875,7 +847,7 @@ export function mountHarmLive(el, appCtx) {
         if (god) st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) };
         else st.chartOpt = { ...st.chartOpt, komisColor: !!cOpt.komisColor };   // kolor komisu na pasku – każdy u siebie
         lsSet(LS.chart, st.chartOpt);
-        if (god) await saveSettings(list, komisList, holidays);
+        if (god) await saveSettings(list, komisList);   // święta – w Ustawieniach programu (wspólne z Grafikiem)
         m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
@@ -905,8 +877,7 @@ export function mountHarmLive(el, appCtx) {
       box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli. Nazwę komisu można poprawić w polu.'),
       kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
-      h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta są w nagłówku osi czasu bordowe, z białą pogrubioną czcionką, a ich tło na wykresie jest białe jak w weekend.'),
-      hBox, h('div', { class: 'row', style: { marginTop: '8px' } }, hAdd),
+      h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta ustawia się w Ustawieniach programu (przycisk „Ustawienia” w górnym pasku) – wspólne dla Harmonogramu i Grafiku. W nagłówku osi czasu są bordowe, z białą pogrubioną czcionką.'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kopia całego harmonogramu'),
       h('p', { class: 'muted' }, 'Eksport zapisuje wszystkie operacje i ustawienia (stanowiska, kolory komisów, święta) do pliku .json. Import zastępuje cały harmonogram zawartością pliku – przed zapisem pokazuje zmiany i może najpierw zapisać kopię obecnego stanu. Tylko poziom GOD.'),
       h('div', { class: 'row', style: { gap: '6px' } },

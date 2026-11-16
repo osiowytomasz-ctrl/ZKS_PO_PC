@@ -117,3 +117,17 @@ zoom, kolumny podsumowania. „Import z G” przenosi kartę do bazy; w okresie 
 (`grafikWriteBack`), więc graf_norm i wersja webowa działają bez zmian. Poprzedni widok z arkusza – przycisk „Arkusz”.
 
 **Dalej:** Android na Firebase, Harmonogram (graf_norm z bazy zamiast arkusza) i Plan (pracownicy i zmiany z bazy).
+
+**PC 1.21.0 – uzupełnienia po pierwszym imporcie:**
+
+- kolumna „Miejsce” w kolorze stanowiska z Harmonogramu (`placeStation`, lista `stationList(config/main)`);
+- grupy kolumn jak w karcie G (przyciski): **Urlopy** (plan, UT z poprzedniego roku i bieżący – wpisywane wprost w tabeli,
+  wykorzystane, zaplanowane, dostępny, pozostały), **Godziny** (przepracowane w każdym miesiącu + razem; w podpowiedzi narastająco),
+  **Absencje** (NŻ, v, L4, OP, Ojc, OKL, HDK, BO, BHP, SZ, Sł – liczba dni z wpisem zawierającym kod, jak COUNTIFS w AU–BE);
+- godziny przepracowane (`workHours`): suma liczb po literach zmian (`a8b2` = 10), sam numer = tyle godzin, nieobecności = 0.
+  Arkusz: w części wierszy pierwsza liczba z komórki (L4 = 4 h, a8b2 = 8 h), w innych sklejone cyfry (a8b2 = 82 h), a „DATE(rok;2;31)”
+  to 3 marca – stąd różnice względem kolumn AD–AO;
+- urlop i absencje liczone dokładnie jak w arkuszu (C, D, AS, AT, AU–BE);
+- nagłówek: numer tygodnia ISO nad datami, daty w pionie w formacie karty G (dd-mm-rrrr);
+- **święta wspólne dla programu** w Ustawieniach (`config/main.holidays`, `holidayStore.js`, `views/holidays.js`) – używa ich Harmonogram
+  i Grafik; import z G dopisuje daty z `i!A36:A100`; reguły: listę świąt zmienia GOD albo osoba z zapisem w Grafiku.

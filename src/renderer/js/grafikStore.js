@@ -3,13 +3,18 @@
 import { firebase } from './fb.js';
 import { api } from './ui.js';
 import { monthKey, dayOf } from './logic/grafikFb.js';
+import { addHolidays } from './holidayStore.js';
 
-/** Nasłuch pracowników i miesięcy [months]; [cb]({meta, months: {rrrr-mm: doc}}). Zwraca obiekt z setMonths(lista) i stop(). */
+/**
+ * Nasłuch pracowników i miesięcy [months]; [cb]({meta, months: {rrrr-mm: doc}, cfg}) – cfg = config/main Harmonogramu (kolory stanowisk,
+ * wspólne święta; brak dostępu = null, bez błędu). Zwraca obiekt z setMonths(lista) i stop().
+ */
 export async function watchGrafik(months, cb, onError) {
   const { sdk, db } = await firebase();
-  const st = { meta: null, months: {}, subs: new Map(), metaReady: false, ready: new Set() };
-  const emit = () => { if (st.metaReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months } }); };
+  const st = { meta: null, months: {}, cfg: null, subs: new Map(), metaReady: false, cfgReady: false, ready: new Set() };
+  const emit = () => { if (st.metaReady && st.cfgReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months }, cfg: st.cfg }); };
   const unMeta = sdk.onSnapshot(sdk.doc(db, 'gr_meta', 'main'), (s) => { st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
+  const unCfg = sdk.onSnapshot(sdk.doc(db, 'config', 'main'), (s) => { st.cfg = s.exists() ? s.data() : null; st.cfgReady = true; emit(); }, () => { st.cfg = null; st.cfgReady = true; emit(); });
   const setMonths = (list) => {
     const want = new Set(list);
     for (const [k, un] of st.subs) if (!want.has(k)) { un(); st.subs.delete(k); delete st.months[k]; st.ready.delete(k); }
@@ -19,7 +24,7 @@ export async function watchGrafik(months, cb, onError) {
     emit();
   };
   setMonths(months);
-  return { setMonths, stop: () => { unMeta(); for (const un of st.subs.values()) un(); st.subs.clear(); } };
+  return { setMonths, stop: () => { unMeta(); unCfg(); for (const un of st.subs.values()) un(); st.subs.clear(); } };
 }
 
 /**
@@ -92,5 +97,8 @@ export async function importFromSheet(user = '') {
   for (const [mk, doc] of Object.entries(months)) writes.push((b) => b.set(sdk.doc(db, 'gr_days', mk), doc));
   writes.push((b) => b.set(sdk.doc(db, 'gr_meta', 'main'), { people, holidays: x.holidays || [], year: x.year || '', importedAt: Date.now(), importedBy: user, updatedAt: Date.now() }));
   for (let i = 0; i < writes.length; i += 400) { const b = sdk.writeBatch(db); writes.slice(i, i + 400).forEach((w) => w(b)); await b.commit(); }
-  return { people: people.filter((p) => !p.sep).length, months: Object.keys(months).length, cells, notes };
+  // święta z karty i (i!A36:A100) dopisane do wspólnej listy programu (Ustawienia); brak prawa – bez błędu
+  let holidays = 0;
+  try { holidays = await addHolidays(x.holidays || []); } catch { /* lista świąt bez zmian */ }
+  return { people: people.filter((p) => !p.sep).length, months: Object.keys(months).length, cells, notes, holidays };
 }

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cellStyle, headerStyle, personSummary, codeHours, displayName, grafNormDays, monthsBetween, daysBetween, unpackMonths, cleanCode } from '../src/renderer/js/logic/grafikFb.js';
+import { cellStyle, headerStyle, personSummary, codeHours, workHours, isoWeek, placeStation, displayName, grafNormDays, monthsBetween, daysBetween, unpackMonths, cleanCode } from '../src/renderer/js/logic/grafikFb.js';
+import { normHolidays } from '../src/renderer/js/holidayStore.js';
+import { stationList } from '../src/renderer/js/logic/harmModel.js';
 
 const ctx = { todayIso: '2026-11-16', hour: 10 };   // poniedziałek, 10:00
 
@@ -68,4 +70,19 @@ test('paczki miesięczne i daty', () => {
   assert.deepEqual(u.codes, { p1: { '2026-11-16': 'a8', '2026-11-17': 'b8' } });
   assert.deepEqual(u.notes, { p1: { '2026-11-16': 'zamiana z p2' } });
   assert.equal(cleanCode('  a8  b2 '), 'a8 b2');
+});
+
+test('godziny przepracowane, tydzień ISO, stanowisko miejsca pracy, święta', () => {
+  assert.equal(workHours('a8'), 8); assert.equal(workHours('a8b2'), 10); assert.equal(workHours('b2c6'), 8);
+  assert.equal(workHours('L4'), 0); assert.equal(workHours('UT'), 0); assert.equal(workHours('8'), 8); assert.equal(workHours(''), 0);
+  const s = personSummary({ ut: {} }, { '2026-02-27': 'a8', '2026-03-02': 'a8b2', '2026-03-03': 'L4' }, 2026, '2026-11-16');
+  assert.deepEqual(s.hoursByMonth.slice(0, 3), [0, 8, 10]);                  // luty kończy się 28.02 (w arkuszu DATE(r;2;31) = 3 marca)
+  assert.equal(isoWeek('2026-11-16'), 47); assert.equal(isoWeek('2026-01-01'), 1); assert.equal(isoWeek('2027-01-01'), 53); assert.equal(isoWeek('2025-12-29'), 1);
+  const st = stationList({ stations: [{ name: '1Si', bg: '#123456', color: '#ffffff' }] });
+  assert.equal(placeStation('1Si2', st).bg, '#123456');
+  assert.equal(placeStation('5ŚI3', st).name, '5Śl');                        // wielka „I” zamiast „l”
+  assert.equal(placeStation('Narz1', st).name, 'Narz');
+  assert.equal(placeStation('Xx1', st), null);
+  assert.deepEqual(normHolidays(['2026-11-11', { date: '2026-01-01', name: 'Nowy Rok' }, { date: '2026-11-11', name: 'x' }, 'zła']),
+    [{ date: '2026-01-01', name: 'Nowy Rok' }, { date: '2026-11-11', name: '' }]);
 });
