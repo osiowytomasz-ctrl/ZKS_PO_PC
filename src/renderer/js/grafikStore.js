@@ -91,7 +91,13 @@ export async function importFromSheet(user = '') {
     });
   });
   const { sdk, db } = await firebase();
+  // pracownicy dodani w programie (Kompetencje – bez wiersza w karcie G) zostają na końcu listy z ich wpisami
+  const prevMeta = await sdk.getDoc(sdk.doc(db, 'gr_meta', 'main'));
+  const keep = ((prevMeta.exists() && prevMeta.data().people) || []).filter((p) => !p.row && !p.sep && !used.has(p.id));
+  people.push(...keep);
+  const keepIds = new Set(keep.map((p) => p.id));
   const old = await sdk.getDocs(sdk.collection(db, 'gr_days'));
+  if (keepIds.size) old.forEach((d) => { const doc = d.data() || {}; for (const part of ['c', 'n']) for (const id of keepIds) if (doc[part] && doc[part][id]) { const m = months[d.id] = months[d.id] || { c: {}, n: {} }; m[part][id] = doc[part][id]; } });
   const writes = [];
   old.forEach((d) => { if (!months[d.id]) writes.push((b) => b.delete(d.ref)); });
   for (const [mk, doc] of Object.entries(months)) writes.push((b) => b.set(sdk.doc(db, 'gr_days', mk), doc));
@@ -100,5 +106,5 @@ export async function importFromSheet(user = '') {
   // święta z karty i (i!A36:A100) dopisane do wspólnej listy programu (Ustawienia); brak prawa – bez błędu
   let holidays = 0;
   try { holidays = await addHolidays(x.holidays || []); } catch { /* lista świąt bez zmian */ }
-  return { people: people.filter((p) => !p.sep).length, months: Object.keys(months).length, cells, notes, holidays };
+  return { kept: keep.length, people: people.filter((p) => !p.sep).length, months: Object.keys(months).length, cells, notes, holidays };
 }

@@ -14,7 +14,9 @@ export async function setFields(changes) {
   const { sdk, db } = await firebase();
   const patch = { updatedAt: Date.now() };
   for (const ch of changes) patch[`people.${ch.id}.${ch.path}`] = ch.value === '' || ch.value == null ? sdk.deleteField() : ch.value;
-  await sdk.updateDoc(sdk.doc(db, 'kp', 'main'), patch);
+  const ref = sdk.doc(db, 'kp', 'main');
+  try { await sdk.updateDoc(ref, patch); }
+  catch (e) { if (e.code !== 'not-found') throw e; await sdk.setDoc(ref, { skills: [], perms: [], people: {} }, { merge: true }); await sdk.updateDoc(ref, patch); }
 }
 
 export async function savePerson(id, data) {
@@ -39,10 +41,16 @@ export async function importCompetence(data, user = '') {
   await sdk.setDoc(sdk.doc(db, 'kp', 'main'), { ...data, importedAt: Date.now(), importedBy: user, updatedAt: Date.now() });
 }
 
-/** Grafik (pracownicy z miejscem pracy) i stanowiska Harmonogramu – do kolumny „Miejsce” i kolorów nazwisk; brak dostępu = puste. */
-export async function loadGrafikPlaces() {
+/**
+ * Pracownicy z Grafiku (gr_meta/main) i stanowiska Harmonogramu (config/main) na żywo: cb({meta, cfg}); brak dostępu = puste.
+ * Lista pracowników jest wspólna: Kompetencje dodają i zmieniają osoby (nazwisko, nr ew., miejsce pracy) w Grafiku.
+ */
+export async function watchGrafikMeta(cb) {
   const { sdk, db } = await firebase();
-  const one = async (c, d) => { try { const s = await sdk.getDoc(sdk.doc(db, c, d)); return s.exists() ? s.data() : null; } catch { return null; } };
-  const [meta, cfg] = await Promise.all([one('gr_meta', 'main'), one('config', 'main')]);
-  return { people: (meta && meta.people) || [], cfg };
+  const st = { meta: null, cfg: null, n: 0 };
+  const emit = () => { if (st.n >= 2) cb({ meta: st.meta, cfg: st.cfg }); };
+  const once = new Set();
+  const on = (c, d, k) => sdk.onSnapshot(sdk.doc(db, c, d), (s) => { st[k] = s.exists() ? s.data() : null; if (!once.has(k)) { once.add(k); st.n++; } emit(); }, () => { st[k] = null; if (!once.has(k)) { once.add(k); st.n++; } emit(); });
+  const u1 = on('gr_meta', 'main', 'meta'), u2 = on('config', 'main', 'cfg');
+  return () => { u1(); u2(); };
 }

@@ -9,7 +9,8 @@ import { stationList } from '../logic/harmModel.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { readXlsx } from '../logic/xlsxRead.js';
 import { iconSvg } from './harmIcons.js';
-import { watchCompetence, setFields, savePerson, deletePerson, saveDefs, importCompetence, loadGrafikPlaces } from '../competenceStore.js';
+import { watchCompetence, setFields, savePerson, deletePerson, saveDefs, watchGrafikMeta } from '../competenceStore.js';
+import { saveMeta } from '../grafikStore.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
@@ -20,7 +21,7 @@ export function mountCompetence(el, ctx) {
   const canWrite = ctx.level('grafik') === 'write';
   const saved = lsGet('kp.filters', {}) || {};
   const st = {
-    data: null, grafik: { people: [], cfg: null }, sel: null, editing: null, undo: [], redo: [], zoom: lsGet('kp.zoom', 100),
+    data: null, grafik: { meta: null, cfg: null }, gReady: false, sel: null, editing: null, undo: [], redo: [], zoom: lsGet('kp.zoom', 100),
     groups: { base: true, perms: false, skills: true, ...lsGet('kp.groups', {}) },
     filters: Object.fromEntries(Object.entries(saved.filters || {}).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, new Set(v)])),
     sorts: Array.isArray(saved.sorts) ? saved.sorts : [],
@@ -35,14 +36,31 @@ export function mountCompetence(el, ctx) {
   // ---------- model ----------
   const skills = () => (st.data && st.data.skills) || [];
   const perms = () => (st.data && st.data.perms) || [];
-  const peopleMap = () => (st.data && st.data.people) || {};
-  const grafikById = () => { const m = new Map(); for (const p of st.grafik.people) if (p && !p.sep) { if (p.nr) m.set(K.cleanId(String(p.nr).toUpperCase()), p); m.set(p.id, p); } return m; };
+  // Pracownicy = lista Grafiku (gr_meta/main, ta sama kolejność i separatory pominięte) + dane kompetencji (kp/main.people[id]).
+  // Osoby tylko w kompetencjach (np. z wcześniejszego importu, bez Grafiku) są na końcu z oznaczeniem „poza Grafikiem”.
+  const gPeople = () => ((st.grafik.meta && st.grafik.meta.people) || []);
+  const kpPeople = () => (st.data && st.data.people) || {};
+  const deptOf = (nr, kp) => (kp && kp.dept) || (/^[A-Za-z]+/.exec(String(nr || '')) || [''])[0].toUpperCase();
+  let peopleCache = null;
+  function peopleList() {
+    if (peopleCache) return peopleCache;
+    const kp = kpPeople(), out = [], seen = new Set();
+    let lp = 0;
+    for (const g of gPeople()) {
+      if (!g || g.sep) continue;
+      const k = kp[g.id] || {}; seen.add(g.id);
+      out.push({ ...k, id: g.id, lp: ++lp, name: g.name, nr: g.nr || '', place: g.place || '', dept: deptOf(g.nr, k), inGrafik: true, g });
+    }
+    for (const [id, k] of Object.entries(kp)) if (!seen.has(id)) out.push({ ...k, id, lp: ++lp, name: k.name || id, nr: (k.dept || '') + (k.nr || ''), place: '', dept: k.dept || '', inGrafik: false });
+    return (peopleCache = out);
+  }
+  const peopleMap = () => Object.fromEntries(peopleList().map((p) => [p.id, p]));
   const columns = (g = st.groups) => [
     { key: 'lp', title: 'Lp', w: 34, ro: true },
-    { key: 'name', title: 'Nazwisko i imię', w: 180, path: 'name' },
-    { key: 'nr', title: 'Nr ew.', full: 'Numer ewidencyjny (z wydziałem łączy osobę z Grafikiem, np. PO + 12007)', w: 60, path: 'nr' },
-    { key: 'place', title: 'Miejsce', full: 'Miejsce pracy z Grafiku (kolor stanowiska jak w Harmonogramie)', w: 56, ro: true },
-    ...(g.base ? K.BASIC.map((b) => ({ ...b, path: b.key, group: 'base' })) : []),
+    { key: 'name', title: 'Nazwisko i imię', full: 'Nazwisko i imię (wspólne z Grafikiem)', w: 180, path: 'g:name' },
+    { key: 'nr', title: 'Nr ew.', full: 'Numer ewidencyjny (wspólny z Grafikiem, np. PO12007)', w: 70, path: 'g:nr' },
+    { key: 'place', title: 'Stanowisko', full: 'Stanowisko / miejsce pracy w Grafiku (np. 1Si1) – kolor jak w Harmonogramie. Kliknij dwukrotnie: wybór z listy', w: 64, path: 'g:place', placeCol: true },
+    ...(g.base ? K.BASIC.map((b) => (b.key === 'dept' ? { ...b, ro: true, full: 'Wydział (z numeru ewidencyjnego)', group: 'base' } : { ...b, path: b.key, group: 'base' })) : []),
     ...(g.perms ? perms().map((p) => ({ key: p.key, title: p.name, full: p.name + (p.expiry ? ' – czerwone, gdy minęła lub mija w ciągu 30 dni' : ''), w: 86, path: 'perms.' + p.key, perm: p, group: 'perms', vertical: true })) : []),
     ...(g.skills ? [{ key: 'pts', title: 'Punkty', full: 'Punkty = Σ poziom × waga umiejętności', w: 56, ro: true, group: 'skills' },
       ...skills().map((s) => ({ key: s.key, title: s.name, full: `${s.name} – waga ${s.weight}. Poziom 0–100 (%)`, w: 34, path: 'skills.' + s.key, skill: s, group: 'skills', vertical: true }))] : []),
@@ -50,7 +68,7 @@ export function mountCompetence(el, ctx) {
   const allColumns = () => columns({ base: true, perms: true, skills: true });
   const raw = (p, c) => {
     if (c.key === 'lp') return p.lp ?? '';
-    if (c.key === 'place') { const g = grafikById().get(p.id); return g ? g.place || '' : ''; }
+    if (c.key === 'place') return p.place || '';
     if (c.key === 'pts') return K.points(p, skills());
     if (c.perm) return (p.perms || {})[c.key] ?? '';
     if (c.skill) return (p.skills || {})[c.key] ?? '';
@@ -59,12 +77,12 @@ export function mountCompetence(el, ctx) {
   const value = (p, c) => { const v = raw(p, c); return c.perm ? K.fmtPerm(v) : String(v); };
 
   // ---------- dane na żywo ----------
-  let unsub = null;
+  let unsub = null, unsubG = null;
   async function start() {
     body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie kompetencji…'));
-    loadGrafikPlaces().then((g) => { st.grafik = g; draw(); }, () => {});
+    watchGrafikMeta((g) => { st.grafik = g; st.gReady = true; peopleCache = null; draw(); }).then((u) => { unsubG = u; }, () => { st.gReady = true; draw(); });
     try {
-      unsub = await watchCompetence((d) => { st.data = d || { skills: [], perms: [], people: {} }; st.empty = !d; draw(); },
+      unsub = await watchCompetence((d) => { st.data = d || { skills: [], perms: [], people: {} }; st.empty = !d; peopleCache = null; draw(); },
         (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy kompetencji: ' + (e.code === 'permission-denied' ? 'brak uprawnień (prawo do Grafiku; opublikuj reguły Firestore: kp)' : e.message || e))); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message || String(e))); }
   }
@@ -72,24 +90,24 @@ export function mountCompetence(el, ctx) {
   // ---------- rysowanie ----------
   let grid = [], cols = [];
   function draw() {
-    if (!st.data) return;
+    if (!st.data || !st.gReady) return;
     for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' primary' : '');
-    if (st.empty && !Object.keys(peopleMap()).length) {
+    if (!peopleList().length) {
       clear(body);
-      body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Matrycy kompetencji nie ma jeszcze w bazie.'),
-        canWrite ? h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: doImport }, 'Import z pliku Excel (.xlsx)'), h('button', { class: 'btn', onclick: () => addPerson() }, 'Dodaj pracownika')) : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Grafiku.')));
+      body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Brak pracowników: zaimportuj Grafik z karty G (moduł Grafik → „Import z G”) albo dodaj pracownika.'),
+        canWrite ? h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => addPerson() }, 'Dodaj pracownika'), h('button', { class: 'btn', onclick: doImport }, 'Umiejętności z pliku Excel…')) : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Grafiku.')));
       return;
     }
     cols = columns();
     const fcols = allColumns();
     for (const k of Object.keys(st.filters)) if (!fcols.some((c) => c.key === k)) delete st.filters[k];
     st.sorts = st.sorts.filter((x) => fcols.some((c) => c.key === x.key));
-    const pm = peopleMap(), getV = (id, c) => (pm[id] ? value({ id, ...pm[id] }, c) : '');
-    let ids = Object.keys(pm).sort((a, b) => (Number(pm[a].lp) || 1e9) - (Number(pm[b].lp) || 1e9) || String(pm[a].name).localeCompare(String(pm[b].name), 'pl'));
+    const pm = peopleMap(), getV = (id, c) => (pm[id] ? value(pm[id], c) : '');
+    let ids = peopleList().map((p) => p.id);
     ids = visibleRows(ids, fcols, st.filters, getV);
     if (st.sorts.length) ids = sortRows(ids, fcols, st.sorts, getV);
-    const rows = ids.map((id) => ({ id, ...pm[id] }));
-    const stList = stationList(st.grafik.cfg), gmap = grafikById(), t = isoToday();
+    const rows = ids.map((id) => pm[id]);
+    const stList = stationList(st.grafik.cfg), t = isoToday();
     const z = st.zoom / 100, FIX = 3;
     const widths = cols.map((c) => Math.round((c.w || 40) * z));
     const leftOf = (i) => widths.slice(0, i).reduce((a, b) => a + b, 0);
@@ -121,19 +139,19 @@ export function mountCompetence(el, ctx) {
     grid = rows;
     rows.forEach((p, ri) => {
       const tr = h('tr', {});
-      const g = gmap.get(p.id), stn = g ? placeStation(g.place, stList) : null;
+      const stn = placeStation(p.place, stList);
       cols.forEach((c, ci) => {
         const txt = value(p, c);
         let style = { borderRight: '1px solid #c8c8c8', borderBottom: '1px solid #c8c8c8', padding: '1px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           minWidth: widths[ci] + 'px', maxWidth: widths[ci] + 'px', textAlign: c.key === 'name' || (c.group === 'base' && c.key !== 'dept') ? 'left' : 'center', background: '#fff', cursor: canWrite && !c.ro ? 'cell' : 'default' };
         if ((c.key === 'name' || c.key === 'place') && stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 };
-        else if (c.key === 'name') style = { ...style, fontWeight: 600 };
+        else if (c.key === 'name') style = { ...style, fontWeight: 600, ...(p.inGrafik ? {} : { fontStyle: 'italic', color: '#888' }) };
         if (c.key === 'pts') style = { ...style, fontWeight: 700, background: '#e2efda' };
         if (c.skill) { const bg = K.levelColor(raw(p, c)); if (bg) style = { ...style, background: bg }; }
         if (c.perm && c.perm.expiry) { const a = K.permAlert(raw(p, c), t); if (a) style = { ...style, background: '#ff0000', color: '#fff', fontWeight: 700 }; }
         if (ci < FIX) style = { ...style, position: 'sticky', left: leftOf(ci) + 'px', zIndex: 2 };
         const td = h('td', { style, 'data-r': ri, 'data-c': ci }, txt);
-        if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.dept + ' ' + p.nr : ''}${g ? ' · Grafik: ' + (g.place || 'bez miejsca') : ''}. Dwuklik: karta pracownika`;
+        if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.nr : ''}${p.inGrafik ? ' · stanowisko w Grafiku: ' + (p.place || 'brak') : ' · POZA GRAFIKIEM (prawy przycisk: dodaj do Grafiku)'}. Dwuklik: karta pracownika`;
         else if (c.perm && c.perm.expiry && K.permAlert(raw(p, c), t)) td.title = K.permAlert(raw(p, c), t) === 'expired' ? 'Termin minął' : 'Termin mija w ciągu 30 dni';
         else if (txt.length > 10) td.title = txt;
         tr.append(td);
@@ -193,7 +211,25 @@ export function mountCompetence(el, ctx) {
   const selCells = () => { const { r0, c0, r1, c1 } = st.sel, out = []; for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) if (!cols[c].ro && grid[r]) out.push({ p: grid[r], c: cols[c] }); return out; };
 
   // ---------- zapis, cofanie ----------
-  /** [items] = [{p, c, text}] → kontrola wpisu (poziom 0–100, daty) i jeden zapis. */
+  /**
+   * Zapis zmian [{id, path, value}]: ścieżki „g:pole” (nazwisko, nr ew., stanowisko) zmieniają pracownika w Grafiku (gr_meta/main),
+   * pozostałe – dane kompetencji (kp/main). Osoba spoza Grafiku ma nazwisko i numer w kompetencjach.
+   */
+  async function writeChanges(changes) {
+    const pm = peopleMap(), meta = [], kp = [];
+    for (const ch of changes) {
+      if (ch.path.startsWith('g:')) {
+        const f = ch.path.slice(2);
+        if (pm[ch.id] && pm[ch.id].inGrafik) meta.push({ ...ch, f }); else kp.push({ id: ch.id, path: f, value: ch.value });
+      } else kp.push(ch);
+    }
+    if (meta.length) {
+      const list = gPeople().map((g) => { const mine = meta.filter((m) => m.id === g.id); if (!mine.length) return g; const x = { ...g }; for (const m of mine) x[m.f] = m.value ?? ''; return x; });
+      await saveMeta({ people: list });
+    }
+    if (kp.length) await setFields(kp);
+  }
+  /** [items] = [{p, c, text}] → kontrola wpisu (poziom 0–100, daty, stanowisko) i jeden zapis. */
   async function apply(items, label) {
     if (!canWrite) { toast('Kompetencje: tylko odczyt (zapis: prawo zapisu w Grafiku)'); return; }
     const changes = [], before = [];
@@ -203,17 +239,18 @@ export function mountCompetence(el, ctx) {
       if (c.skill) { v = K.parseLevel(v); if (v === null) { toast(`${c.title}: wpisz poziom 0–100 („${text}”)`, true); return; } }
       else if (c.perm) v = K.parsePermValue(v);
       if (c.key === 'name' && !v) { toast('Nazwisko nie może być puste'); return; }
+      if (c.placeCol && v && !placeStation(v, stationList(st.grafik.cfg))) { toast(`Stanowisko „${v}” nie pasuje do żadnego stanowiska Harmonogramu (np. 1Si1, 2Un2, Narz1)`, true); return; }
       const old = raw(p, c);
       if (String(old) === String(v)) continue;
       changes.push({ id: p.id, path: c.path, value: v }); before.push({ id: p.id, path: c.path, value: old });
     }
     if (!changes.length) return;
-    try { await setFields(changes); st.undo.push({ label, before, after: changes }); if (st.undo.length > 100) st.undo.shift(); st.redo = []; }
+    try { await writeChanges(changes); st.undo.push({ label, before, after: changes }); if (st.undo.length > 100) st.undo.shift(); st.redo = []; }
     catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
   }
   async function undoRedo(from, to) {
     const step = from.pop(); if (!step) return;
-    try { await setFields(from === st.undo ? step.before : step.after); to.push(step); toast((from === st.undo ? 'Cofnięto: ' : 'Ponowiono: ') + step.label); }
+    try { await writeChanges(from === st.undo ? step.before : step.after); to.push(step); toast((from === st.undo ? 'Cofnięto: ' : 'Ponowiono: ') + step.label); }
     catch (e) { from.push(step); toast('Nie zapisano: ' + (e.message || e), true); }
   }
   function clearSel() { const items = selCells().filter((x) => x.c.key !== 'name' && String(raw(x.p, x.c)) !== '').map((x) => ({ ...x, text: '' })); if (items.length) apply(items, `Wyczyszczenie: ${items.length}`); }
@@ -224,6 +261,7 @@ export function mountCompetence(el, ctx) {
     if (!p) return;
     if (c.ro) { personCard(p); return; }
     if (!canWrite) { toast('Kompetencje: tylko odczyt'); return; }
+    if (c.placeCol && typed == null) { placeDialog(p.place, (v) => apply([{ p, c, text: v }], `${p.name} · stanowisko`), p.id); return; }
     const td = cellEl(st.sel.r1, st.sel.c1); if (!td) return;
     const r = td.getBoundingClientRect(), b = body.getBoundingClientRect();
     const input = h('input', { value: typed != null ? typed : value(p, c), style: { position: 'absolute', zIndex: 10, left: r.left - b.left + body.scrollLeft + 'px', top: r.top - b.top + body.scrollTop + 'px', width: Math.max(r.width, c.perm ? 110 : 70) + 'px', height: r.height + 'px', boxSizing: 'border-box', border: '2px solid #0b57d0', font: 'inherit', padding: '0 3px' } });
@@ -279,7 +317,7 @@ export function mountCompetence(el, ctx) {
   function contextMenu(e, p) {
     document.querySelectorAll('.gr-menu').forEach((m) => m.remove());
     const items = [['Karta pracownika…', () => personCard(p)]];
-    if (canWrite) items.push(['Dodaj pracownika…', () => addPerson()], ['Usuń pracownika…', () => removePerson(p)], ['Kolumny umiejętności i uprawnień…', defsDialog]);
+    if (canWrite) { items.push(['Zmień stanowisko…', () => beginEditPlace(p)]); if (!p.inGrafik) items.push(['Dodaj do Grafiku…', () => addPerson(p)]); items.push(['Dodaj pracownika…', () => addPerson()], ['Usuń pracownika…', () => removePerson(p)], ['Kolumny umiejętności i uprawnień…', defsDialog]); }
     const menu = h('div', { class: 'gr-menu', style: { position: 'fixed', left: e.clientX + 'px', top: e.clientY + 'px', zIndex: 9999, background: '#fff', border: '1px solid #888', boxShadow: '0 3px 10px rgba(0,0,0,.3)', minWidth: '220px' } },
       ...items.map(([label, fn]) => h('div', { style: { padding: '6px 12px', cursor: 'pointer' }, onmouseenter: (ev) => { ev.target.style.background = '#e8f0fe'; }, onmouseleave: (ev) => { ev.target.style.background = ''; }, onmousedown: (ev) => { ev.preventDefault(); menu.remove(); fn(); } }, label)));
     document.body.append(menu);
@@ -288,12 +326,12 @@ export function mountCompetence(el, ctx) {
   }
   function personCard(p) {
     if (!p) return;
-    const t = isoToday(), g = grafikById().get(p.id);
+    const t = isoToday();
     const row = (k, v, style = {}) => h('tr', {}, h('td', { style: { padding: '2px 8px', color: '#555' } }, k), h('td', { style: { padding: '2px 8px', fontWeight: 600, ...style } }, String(v ?? '')));
     const sk = skills().map((s) => ({ s, v: Number((p.skills || {})[s.key]) || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v * b.s.weight - a.v * a.s.weight);
     modal(`${p.name}${p.nr ? ' – ' + p.dept + ' ' + p.nr : ''}`, h('div', {},
       h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '18px' } },
-        h('table', {}, h('tbody', {}, row('Wydział', p.dept), row('Nr ewidencyjny', p.nr), row('Miejsce w Grafiku', g ? g.place || '—' : 'brak w Grafiku'), row('Komis wewnętrzny', p.komis),
+        h('table', {}, h('tbody', {}, row('Wydział', p.dept), row('Nr ewidencyjny', p.nr), row('Stanowisko w Grafiku', p.inGrafik ? p.place || '—' : 'poza Grafikiem'), row('Komis wewnętrzny', p.komis),
           row('Maszyna / stanowisko', p.machine), row('Stanowisko wg umowy', p.position), row('Punkty', K.points(p, skills()), { fontSize: '16px' }))),
         h('table', {}, h('tbody', {}, ...perms().filter((x) => (p.perms || {})[x.key]).map((x) => { const v = p.perms[x.key], a = x.expiry ? K.permAlert(v, t) : '';
           return row(x.name, K.fmtPerm(v) + (a === 'expired' ? ' – minął' : a === 'soon' ? ' – mija wkrótce' : ''), a ? { color: '#c00000' } : {}); })))),
@@ -301,26 +339,82 @@ export function mountCompetence(el, ctx) {
       sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`, style: { border: '1px solid #999', borderLeft: `8px solid ${s.color}`, padding: '2px 6px', background: K.levelColor(v) || '#fff' } }, `${s.name}: ${v}%`)))
         : h('p', { class: 'muted' }, 'Brak wpisanych umiejętności.')), { wide: true });
   }
-  function addPerson() {
-    const inp = (ph, w = '160px') => h('input', { placeholder: ph, style: { width: w, padding: '4px' } });
-    const name = inp('Nazwisko Imię', '220px'), dept = inp('PO', '60px'), nr = inp('12007', '90px'), machine = inp('np. Tokarz'), position = inp('np. Operator obrabiarek CNC', '220px');
-    dept.value = 'PO';
-    const m = modal('Nowy pracownik', h('div', {},
-      h('div', { class: 'row' }, 'Nazwisko i imię:', name), h('div', { class: 'row', style: { marginTop: '6px' } }, 'Wydział:', dept, ' Nr ewidencyjny:', nr),
+  const beginEditPlace = (p) => { const c = cols.find((x) => x.placeCol) || columns().find((x) => x.placeCol); placeDialog(p.place, (v) => apply([{ p, c, text: v }], `${p.name} · stanowisko`), p.id); };
+  /**
+   * Wybór stanowiska (miejsca pracy w Grafiku): stanowisko z listy Harmonogramu (1Si, 2Un, 3Co…) i numer miejsca; przy każdym numerze
+   * – kto je zajmuje. Domyślnie pierwsze wolne miejsce stanowiska. onPick('') = bez stanowiska.
+   */
+  function placeDialog(current, onPick, selfId = null) {
+    const stList = stationList(st.grafik.cfg), taken = new Map();
+    for (const g of gPeople()) if (g && !g.sep && g.place && g.id !== selfId) (taken.get(g.place.toLowerCase()) || taken.set(g.place.toLowerCase(), []).get(g.place.toLowerCase())).push(g.name);
+    const cur = placeStation(current, stList);
+    const stSel = h('select', { style: { padding: '4px', minWidth: '140px' } }, h('option', { value: '' }, '— bez stanowiska —'), ...stList.map((x) => h('option', { value: x.name }, x.name)));
+    const slots = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' } });
+    let picked = current || '';
+    const renderSlots = () => {
+      clear(slots);
+      const name = stSel.value; if (!name) { picked = ''; return; }
+      const stn = stList.find((x) => x.name === name);
+      let firstFree = null;
+      for (let n = 1; n <= 9; n++) {
+        const place = name + n, who = taken.get(place.toLowerCase()) || [];
+        if (!who.length && firstFree == null) firstFree = place;
+        const b = h('button', { class: 'btn small', title: who.length ? 'Zajęte: ' + who.join(', ') : 'Wolne', style: { minWidth: '120px', textAlign: 'left', background: picked.toLowerCase() === place.toLowerCase() ? stn.bg : '', color: picked.toLowerCase() === place.toLowerCase() ? stn.color : '' },
+          onclick: () => { picked = place; renderSlots(); } }, h('b', {}, place), ' ', h('span', { class: 'muted', style: { fontSize: '11px' } }, who.length ? who.join(', ') : 'wolne'));
+        slots.append(b);
+      }
+      if (!placeStation(picked, [stn])) { picked = firstFree || name + '1'; renderSlots(); }
+    };
+    stSel.value = cur ? cur.name : '';
+    stSel.addEventListener('change', () => { picked = ''; renderSlots(); });
+    renderSlots();
+    const m = modal('Stanowisko w Grafiku', h('div', {}, h('div', { class: 'row' }, 'Stanowisko:', stSel), slots,
+      h('p', { class: 'muted' }, 'Miejsce pracy decyduje o godzinach stanowiska w Harmonogramie (graf_norm). Jedno miejsce – jedna osoba na zmianie; zajęte miejsca mają nazwisko.'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: () => { m.close(); onPick(stSel.value ? picked : ''); } }, 'OK'))), { wide: true });
+  }
+  /**
+   * Nowy pracownik: trafia do Grafiku (gr_meta/main – za ostatnią osobą tego samego stanowiska) i do kompetencji.
+   * [from] – osoba spoza Grafiku, którą dopisujemy do Grafiku (z jej danymi).
+   */
+  function addPerson(from = null) {
+    const inp = (ph, w = '160px', v = '') => { const i = h('input', { placeholder: ph, style: { width: w, padding: '4px' } }); i.value = v; return i; };
+    const name = inp('Nazwisko Imię', '220px', from ? from.name : ''), nr = inp('np. PO12345', '110px', from ? from.nr : 'PO'), machine = inp('np. Tokarz', '160px', from ? from.machine || '' : ''), position = inp('np. Operator obrabiarek CNC', '220px', from ? from.position || '' : '');
+    let place = '';
+    const placeBtn = h('button', { class: 'btn small', onclick: () => placeDialog(place, (v) => { place = v; placeBtn.textContent = v || 'wybierz…'; }) }, 'wybierz…');
+    const m = modal(from ? 'Dodaj do Grafiku' : 'Nowy pracownik', h('div', {},
+      h('div', { class: 'row' }, 'Nazwisko i imię:', name), h('div', { class: 'row', style: { marginTop: '6px' } }, 'Nr ewidencyjny:', nr, ' Stanowisko (Grafik):', placeBtn),
       h('div', { class: 'row', style: { marginTop: '6px' } }, 'Maszyna / stanowisko:', machine), h('div', { class: 'row', style: { marginTop: '6px' } }, 'Stanowisko wg umowy:', position),
-      h('p', { class: 'muted' }, 'Wydział + numer ewidencyjny łączą osobę z Grafikiem (np. PO + 12007 = PO12007).'),
+      h('p', { class: 'muted' }, 'Pracownik pojawi się od razu w Grafiku (za ostatnią osobą wybranego stanowiska) i w Kompetencjach. Nie ma go w karcie G arkusza – wpisy z Grafiku nie trafią do arkusza.'),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {
-        if (!name.value.trim()) { toast('Wpisz nazwisko i imię'); return; }
-        const pm = peopleMap(); let id = K.personId(dept.value, nr.value, Date.now()); if (pm[id]) { toast('Pracownik o tym numerze już jest'); return; }
-        const lp = Math.max(0, ...Object.values(pm).map((x) => Number(x.lp) || 0)) + 1;
-        try { await savePerson(id, { lp, name: name.value.trim(), dept: dept.value.trim().toUpperCase(), nr: nr.value.trim(), komis: '', machine: machine.value.trim(), position: position.value.trim(), perms: {}, skills: {} }); m.close(); toast('Dodano pracownika'); }
-        catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+        const nm = name.value.trim(), nrv = nr.value.trim().toUpperCase();
+        if (!nm) { toast('Wpisz nazwisko i imię'); return; }
+        const list = gPeople();
+        let id = from ? from.id : (/\d/.test(nrv) ? K.cleanId(nrv) : 'n' + Date.now().toString(36));
+        if (list.some((g) => g.id === id || (nrv && /\d/.test(nrv) && String(g.nr || '').toUpperCase() === nrv))) { toast('Pracownik o tym numerze już jest w Grafiku'); return; }
+        const person = { id, row: null, lp: '', name: nm, suffix: '', nr: nrv, place, sep: false, ut: {} };
+        // za ostatnią osobą tego samego stanowiska (grupy jak w karcie G), inaczej na końcu
+        const stn = placeStation(place, stationList(st.grafik.cfg));
+        let at = list.length;
+        if (stn) for (let i = list.length - 1; i >= 0; i--) if (!list[i].sep && placeStation(list[i].place, [stn])) { at = i + 1; break; }
+        const next = [...list.slice(0, at), person, ...list.slice(at)];
+        try {
+          await saveMeta({ people: next });
+          const k = from ? { ...kpPeople()[from.id] } : {};
+          delete k.name; delete k.nr; delete k.dept; delete k.lp;
+          await savePerson(id, { ...k, machine: machine.value.trim(), position: position.value.trim(), perms: k.perms || {}, skills: k.skills || {} });
+          m.close(); toast(`Dodano: ${nm}${place ? ' – ' + place : ''} (Grafik i Kompetencje)`);
+        } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
       } }, 'Dodaj'))));
     name.focus();
   }
   async function removePerson(p) {
-    if (!(await confirmBox('Usuń pracownika', `Usunąć ${p.name} z matrycy kompetencji (wszystkie uprawnienia i umiejętności)?`, 'Usuń'))) return;
-    try { await deletePerson(p.id); st.sel = null; toast('Usunięto'); } catch (e) { toast('Nie usunięto: ' + (e.message || e), true); }
+    const msg = p.inGrafik ? `Usunąć ${p.name} z Grafiku i Kompetencji? Wpisy zmian w Grafiku zostaną w bazie, ale osoba zniknie z tabel.` : `Usunąć ${p.name} z Kompetencji?`;
+    if (!(await confirmBox('Usuń pracownika', msg, 'Usuń'))) return;
+    try {
+      if (p.inGrafik) await saveMeta({ people: gPeople().filter((g) => g.id !== p.id) });
+      if (kpPeople()[p.id]) await deletePerson(p.id);
+      st.sel = null; toast('Usunięto');
+    } catch (e) { toast('Nie usunięto: ' + (e.message || e), true); }
   }
   /** Kolumny umiejętności (nazwa, waga, kolor grupy) i uprawnień (nazwa, pilnowanie terminu). */
   function defsDialog() {
@@ -352,7 +446,7 @@ export function mountCompetence(el, ctx) {
   // ---------- filtry i sortowanie (zasady Harmonogramu) ----------
   function openFilter(c) {
     const fcols = allColumns(), pm = peopleMap(), ids = Object.keys(pm);
-    const getV = (id, col) => (pm[id] ? value({ id, ...pm[id] }, col) : '');
+    const getV = (id, col) => (pm[id] ? value(pm[id], col) : '');
     const cur = st.sorts.find((x) => x.key === c.key);
     const shown = new Set(cols.map((x) => x.key)), hidden = fcols.filter((x) => !shown.has(x.key));
     const sortLabel = (key) => { const i = st.sorts.findIndex((x) => x.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
@@ -371,19 +465,19 @@ export function mountCompetence(el, ctx) {
   }
 
   // ---------- import z Excela ----------
+  /** Kolumny umiejętności (nazwy, wagi, kolory grup) i uprawnień z pliku Excel – bez pracowników i ich wartości. */
   function doImport() {
     const input = h('input', { type: 'file', accept: '.xlsx', style: { display: 'none' } });
     input.addEventListener('change', async () => {
       const f = input.files && input.files[0]; input.remove(); if (!f) return;
       try {
         const sheets = await readXlsx(await f.arrayBuffer());
-        const ws = sheets.find((s) => /^mk$/i.test(s.name)) || sheets[0];
+        const ws = sheets.find((x) => /^mk$/i.test(x.name)) || sheets[0];
         const r = K.parseCompetenceSheet(ws);
-        const n = Object.keys(r.people).length;
-        if (!(await confirmBox('Import matrycy kompetencji', `Plik „${f.name}”, arkusz „${ws.name}”: pracowników ${n}, uprawnień ${r.perms.length}, umiejętności ${r.skills.length}. Dane w bazie zostaną zastąpione. Kolumna „ur” (data urodzenia) nie jest przenoszona. Kontynuować?`, 'Importuj'))) return;
-        await importCompetence(r, (ctx.user && (ctx.user.name || ctx.user.email)) || '');
-        st.undo = []; st.redo = [];
-        toast(`Zaimportowano: pracowników ${n}`);
+        // klucze kolumn z pliku (litery kolumn) – dotychczasowe wartości pracowników pod tymi samymi kluczami zostają
+        if (!(await confirmBox('Umiejętności z pliku', `Plik „${f.name}”, arkusz „${ws.name}”: umiejętności ${r.skills.length} (z wagami i kolorami grup), uprawnienia ${r.perms.length}. Zastąpią obecne kolumny matrycy. Pracownicy i ich poziomy nie są importowani. Kontynuować?`, 'Importuj'))) return;
+        await saveDefs({ skills: r.skills, perms: r.perms });
+        toast(`Zaimportowano kolumny: umiejętności ${r.skills.length}, uprawnienia ${r.perms.length}`);
       } catch (e) { toast('Import nieudany: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
     });
     document.body.append(input); input.click();
@@ -391,7 +485,7 @@ export function mountCompetence(el, ctx) {
 
   const setZoom = (v) => { st.zoom = Math.max(50, Math.min(200, v)); lsSet('kp.zoom', st.zoom); zoomLabel.textContent = st.zoom + '%'; draw(); };
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(st.zoom + (e.deltaY < 0 ? 10 : -10)); } }, { passive: false });
-  function cleanup() { document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste); if (unsub) { unsub(); unsub = null; } }
+  function cleanup() { document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste); if (unsub) { unsub(); unsub = null; } if (unsubG) { unsubG(); unsubG = null; } }
 
   const broom = (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(); draw(); } }); b.append(iconSvg('broom')); return b; })();
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
@@ -400,7 +494,7 @@ export function mountCompetence(el, ctx) {
     canWrite ? h('button', { class: 'btn small', onclick: () => addPerson() }, 'Dodaj pracownika') : null,
     canWrite ? h('button', { class: 'btn small', onclick: defsDialog }, 'Kolumny…') : null,
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
-    canWrite ? h('button', { class: 'btn small', title: 'Zastąp matrycę w bazie danymi z pliku Excel (arkusz „MK”)', onclick: doImport }, 'Import z Excela') : null, info), body);
+    canWrite ? h('button', { class: 'btn small', title: 'Kolumny umiejętności (z wagami) i uprawnień z pliku Excel (arkusz „MK”), bez pracowników', onclick: doImport }, 'Umiejętności z Excela') : null, info), body);
   zoomLabel.textContent = st.zoom + '%';
   start();
   return cleanup;
