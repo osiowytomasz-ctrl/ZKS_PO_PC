@@ -187,12 +187,12 @@ var API_FUNCS = {
   // --- Plan ---
   api_getPlanGrid: {
     perm: ['plan', 'read'],
-    run: function (a, ctx) { return api_getPlanGrid(ctx); }
+    run: function (a, ctx) { return api_getPlanGridCached_(ctx, a[0] === true); }
   },
   savePlanData: {
     perm: ['plan', 'write'],
     write: true,
-    run: function (a) { return savePlanData(a[0]); }
+    run: function (a) { var r = savePlanData(a[0]); api_planBump_(); return r; }   // następny odczyt Planu nie bierze danych z pamięci podręcznej
   },
 
   // --- ToolBuilder ---
@@ -1237,6 +1237,25 @@ function api_getGrafNorm_(fresh) {
   }
   api_cachePut_('grafnorm:v1', out, 15);
   return out;
+}
+
+// ---- Plan: siatka arkusza PLAN z pamięcią podręczną (45 s), unieważnianą zapisem z aplikacji ----
+// Odczyt całego arkusza z formatowaniem (getRichTextValues) trwa kilka sekund; kolejni użytkownicy i ponowne wejścia dostają gotową siatkę.
+// Zmiany wpisane ręcznie w arkuszu widać w aplikacji najpóźniej po API_GR_TTL sekundach (albo od razu przyciskiem Odśwież – fresh).
+function api_planVersion_() { return CacheService.getScriptCache().get('plan_ver') || '0'; }
+function api_planBump_() { CacheService.getScriptCache().put('plan_ver', String(new Date().getTime()), 21600); }
+function api_getPlanGridCached_(ctx, fresh) {
+  var key = 'plan:' + api_planVersion_();
+  var data = fresh ? null : api_cacheGet_(key);
+  if (!data) {
+    data = api_getPlanGrid(null);
+    api_cachePut_(key, data, API_GR_TTL);
+  }
+  // prawo edycji i kolor autora zależą od użytkownika – nie są częścią pamięci podręcznej
+  var email = currentUserEmail_();
+  data.canEdit = !!(ctx && ctx.permissions && ctx.permissions.plan === 'write');
+  data.userColor = PLAN_USER_FONT_COLORS[email] || '#000000';
+  return data;
 }
 
 // ---- Grafik: odczyt z pamięcią podręczną (45 s), unieważnianą zapisem z aplikacji ----

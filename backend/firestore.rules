@@ -56,6 +56,12 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
+    function planLvl() { return request.auth == null ? 'none' : tok().get('plan', 'none'); }
+    match /plan_layout/{doc} {
+      allow read, write: if planLvl() in ['read', 'write'];
+    }
+
     // test połączenia z Ustawień aplikacji PC
     match /test/{doc} {
       allow read, write: if canView();
