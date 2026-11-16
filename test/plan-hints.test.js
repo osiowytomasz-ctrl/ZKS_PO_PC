@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { blockOf, shiftOfText, withShift, workerKey, workersForShift, komisFragment, komisHistory, komisSuggestions, isKomisColumn } from '../src/renderer/js/logic/planHints.js';
+
+test('blok i zmiana z nagłówka', () => {
+  const g = { blocks: [{ id: 'b1', shift: '1', headerRow: 1, lastRow: 5 }, { id: 'b2', shift: '2', headerRow: 6, lastRow: 9 }] };
+  assert.equal(blockOf(g, 3).id, 'b1');
+  assert.equal(blockOf(g, 6).id, 'b2');
+  assert.equal(blockOf(g, 0), null);
+  assert.equal(shiftOfText('Zmiana 2 - KARTA PRACY'), '2');
+  assert.equal(shiftOfText('zmiana3-karta pracy'), '3');
+  assert.equal(shiftOfText('Opis'), null);
+  assert.equal(withShift('Zmiana 1 - KARTA PRACY (hala B)', 3), 'Zmiana 3 - KARTA PRACY (hala B)');
+});
+
+test('pracownicy wg Grafiku dnia i zmiany', () => {
+  assert.equal(workerKey('Kowalski Jan'), 'kowalski jan');
+  assert.equal(workerKey('KOWALSKI Janusz UT=3'), 'kowalski jan');
+  const workers = ['Kowalski Jan', 'Nowak Ann', 'Wiśniewski Pio', 'Zając Tom', 'Lis Ewa'];
+  const people = [
+    { fullName: 'Kowalski Janusz', text: 'a8' }, { fullName: 'Nowak Anna', text: 'b8' }, { fullName: 'Wiśniewski Piotr', text: 'UT' }, { fullName: 'Zając Tomasz', text: 'a4b4' },
+  ];
+  const g = workersForShift(workers, people, '1');
+  assert.deepEqual(g.on.map((x) => x.name), ['Kowalski Jan', 'Zając Tom']);
+  assert.deepEqual(g.other.map((x) => [x.name, x.code]), [['Nowak Ann', 'b8']]);
+  assert.deepEqual(g.away.map((x) => x.name), ['Wiśniewski Pio']);
+  assert.deepEqual(g.rest.map((x) => x.name), ['Lis Ewa']);
+  assert.equal(g.on[1].hours, 4);
+  assert.deepEqual(workersForShift(workers, people, '2').on.map((x) => x.name), ['Nowak Ann', 'Zając Tom']);
+});
+
+test('historyczne komisy i podpowiedzi', () => {
+  const grid = { values: [
+    ['', 'Pracownik', 'Opis', 'Komis'],
+    ['', '', '1. toczenie 26/934 wałek', '1. 26/934\n2. 25/112'],
+    ['', '', 'frez', '1. 26/934\n2. K-SERWIS'],
+    ['', '', '24/77 stare', ''],
+  ] };
+  assert.equal(isKomisColumn(grid, 3), true);
+  assert.equal(komisFragment('12. 26/9'), '26/9');
+  const h = komisHistory(grid, ['26/1001']);
+  assert.equal(h[0], '26/934');
+  assert.ok(h.includes('K-SERWIS') && h.includes('24/77') && h.includes('25/112') && h.includes('26/1001'));
+  assert.deepEqual(komisSuggestions(h, '26/'), ['26/934', '26/1001']);
+  assert.deepEqual(komisSuggestions(h, 'serw'), ['K-SERWIS']);
+  assert.deepEqual(komisSuggestions(h, '26/934'), []);           // już wpisany w całości – bez podpowiedzi
+});

@@ -11,6 +11,9 @@ import * as P from '../logic/plan.js';
 import * as G from '../logic/planGrid.js';
 import { parseSheetColor } from '../logic/common.js';
 import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
+import { blockOf, shiftOfText, withShift, SHIFT_NAMES, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
+import { grafikPeople } from '../logic/harmDay.js';
+import { datePickerDialog } from './datePicker.js';
 
 const LETTERS_H = 22, GUTTER_W = 46, HANDLE = 5;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -208,6 +211,7 @@ export function mountPlan(el, ctx) {
   const cellFromEvent = (e) => { const d = e.target.closest && e.target.closest('[data-r]'); if (!d || !rowsLayer || !rowsLayer.contains(d)) return null; const r = +d.dataset.r, c = +d.dataset.c; return { i: st.vis.indexOf(r), ci: st.cols.indexOf(c) }; };
   let dragSel = false;
   body.addEventListener('mousedown', (e) => {
+    if (st.editing && !st.editing.wrap.contains(e.target)) { st.editing.finish(true); return; }
     if (e.button !== 0 || st.editing || !rowsLayer) return;
     const t = e.target;
     if (t.dataset && t.dataset.toggle) { e.preventDefault(); const id = t.dataset.toggle; st.expanded.has(id) ? st.expanded.delete(id) : st.expanded.add(id); relayout({ keepAuto: true }); return; }
@@ -314,6 +318,54 @@ export function mountPlan(el, ctx) {
   }
 
   // ---------- edycja w komórce ----------
+  // lista podpowiedzi pod polem edycji (pracownicy z Grafiku, komisy): strzałki ↑ ↓ wybierają, Enter albo klik wstawia
+  function suggestList(onPick) {
+    const el = h('div', { style: { position: 'absolute', zIndex: 9, background: '#fff', border: '1px solid #888', boxShadow: '0 3px 10px rgba(0,0,0,.3)', maxHeight: '280px', overflowY: 'auto', fontSize: '13px', lineHeight: '1.35', display: 'none', minWidth: '220px' } });
+    let items = [], hi = -1;
+    const render = () => {
+      clear(el);
+      items.forEach((it, i) => {
+        if (it.head) { el.append(h('div', { style: { padding: '3px 8px', background: '#eef2f7', color: '#334', fontWeight: 700, fontSize: '12px' } }, it.head)); return; }
+        const row = h('div', { onmousedown: (e) => { e.preventDefault(); onPick(it); }, onmousemove: () => { if (hi !== i) { hi = i; render(); } },
+          style: { padding: '3px 8px', cursor: 'pointer', display: 'flex', gap: '10px', justifyContent: 'space-between', background: i === hi ? '#d2e3fc' : 'transparent', color: it.dim ? '#888' : '#000' } },
+        h('span', {}, it.label), it.note ? h('span', { style: { color: it.noteColor || '#555', fontSize: '12px' } }, it.note) : null);
+        el.append(row);
+        if (i === hi) setTimeout(() => row.scrollIntoView({ block: 'nearest' }), 0);
+      });
+      el.style.display = items.some((x) => !x.head) || items.some((x) => x.head && x.always) ? 'block' : 'none';
+    };
+    const pickable = (i) => items[i] && !items[i].head;
+    return {
+      el,
+      set(list, autoHi = false) { items = list; hi = autoHi ? list.findIndex((x, i) => pickable(i)) : -1; render(); },
+      move(d) { if (el.style.display === 'none') return false; let i = hi; do { i += d; } while (i >= 0 && i < items.length && !pickable(i)); if (pickable(i)) { hi = i; render(); } return true; },
+      current() { return pickable(hi) ? items[hi] : null; },
+      pick(it) { onPick(it); },
+      visible() { return el.style.display !== 'none'; },
+      place(input) { el.style.left = input.offsetLeft + 'px'; el.style.top = input.offsetTop + input.offsetHeight + 2 + 'px'; },
+    };
+  }
+  // Grafik dnia (pracownicy z wpisami) – pobierany raz na dzień
+  const grCache = new Map();
+  const grafikDay = (iso) => { if (!grCache.has(iso)) grCache.set(iso, api('getGrData', [iso, iso]).then(grafikPeople).catch((e) => { grCache.delete(iso); throw e; })); return grCache.get(iso); };
+  /** Data (rrrr-mm-dd) i zmiana ('1'..'3') bloku, w którym jest wiersz [r] – z uwzględnieniem niezapisanych zmian. */
+  function blockDayShift(r) {
+    const b = blockOf(st.grid, r); if (!b) return { iso: '', shift: null };
+    const dc = (st.grid.dateCells || []).find((d) => d.row === b.headerRow);
+    const ch = dc && st.changes.get(key(dc.row, dc.col));
+    const iso = ch ? ch.value : dc ? dc.value : '';
+    let shift = null;
+    for (const c of st.cols) { const sh = shiftOfText(cellText(b.headerRow, c)); if (sh) { shift = sh; break; } }
+    return { iso, shift: shift || b.shift || null };
+  }
+  let komisHist = null, komisGrid = null;
+  const komisy = () => { if (komisGrid !== st.grid) { komisGrid = st.grid; komisHist = komisHistory(st.grid, lsGet('plan.komisy', [])); } return komisHist; };
+  const rememberKomisy = (texts) => {
+    const found = []; for (const t of texts) for (const line of String(t).split('\n')) { const f = komisFragment(line); if (/^\d{2}\/\d{1,5}/.test(f)) found.push(f); }
+    if (!found.length) return;
+    const list = [...new Set([...found, ...lsGet('plan.komisy', [])])].slice(0, 400); lsSet('plan.komisy', list); komisGrid = null;
+  };
+
   function beginEdit(typed) {
     if (!st.sel || st.editing) return;
     const r = st.vis[st.sel.r1], c = st.cols[st.sel.c1], k = kind(r, c);
@@ -322,35 +374,108 @@ export function mountPlan(el, ctx) {
     const x = colLeft(st.sel.c1), y = headH() + st.offs[st.sel.r1], w = colW(c), hh = st.heights[st.sel.r1];
     const cur = cellText(r, c);
     const box = { position: 'absolute', left: x + 'px', top: y + 'px', minWidth: w + 'px', minHeight: hh + 'px', zIndex: 8, boxSizing: 'border-box', border: '2px solid #0b57d0', font: 'inherit', lineHeight: '1.3', padding: '2px 4px', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.25)' };
-    let input;
-    if (k === 'worker') {
-      input = h('input', { list: 'plan-workers', value: typed != null ? typed : cur, style: { ...box, width: Math.max(w, 180) + 'px', height: hh + 'px' } });
-      inner.append(h('datalist', { id: 'plan-workers' }, ...(st.grid.workers || []).map((x2) => h('option', { value: x2 }))));
+    const wrap = h('div', {});            // pole edycji + dodatki (lista, kalendarz) – usuwane razem
+    let input, list = null, hold = false, onType = null;
+    const shiftCell = k === 'edit' && shiftOfText(cur) != null && blockOf(st.grid, r) && blockOf(st.grid, r).headerRow === r;
+    if (shiftCell && typed == null) {
+      // nagłówek bloku: zmiana z listy rozwijanej (reszta tekstu bez zmian); „Edytuj tekst…” – zwykła edycja
+      input = h('select', { style: { ...box, width: Math.max(w, 230) + 'px', height: Math.max(hh, 26) + 'px', padding: '1px' } },
+        ...['1', '2', '3'].map((n) => h('option', { value: withShift(cur, n), selected: shiftOfText(cur) === n }, `Zmiana ${n} – ${SHIFT_NAMES[n]}`)),
+        h('option', { value: '\u0000text' }, 'Edytuj tekst…'));
+      input.addEventListener('change', () => {
+        if (input.value === '\u0000text') { finish(false); st.sel = { r0: st.sel.r1, c0: st.sel.c1, r1: st.sel.r1, c1: st.sel.c1 }; beginEdit(cur); return; }
+        finish(true);
+      });
+    } else if (k === 'worker') {
+      input = h('input', { value: typed != null ? typed : cur, placeholder: 'pracownik', style: { ...box, width: Math.max(w, 200) + 'px', height: hh + 'px' } });
+      const { iso, shift } = blockDayShift(r);
+      let groups = null, note = iso ? 'Grafik: wczytywanie…' : 'Brak daty zmiany – cała lista';
+      list = suggestList((it) => { input.value = it.value; finish(true); });
+      let typedYet = typed != null;     // lista zawęża się dopiero po wpisaniu (otwarta na istniejącej wartości pokazuje wszystkich)
+      const refresh = (auto) => {
+        const f = typedYet ? input.value.trim().toLowerCase() : '', m = (n) => !f || n.toLowerCase().includes(f);
+        const items = [];
+        const day = iso ? P.displayDate(iso) : '';
+        if (groups) {
+          const sec = (head, arr, color, dim) => { const a = arr.filter((x) => m(x.name)); if (a.length) { items.push({ head }); a.forEach((x) => items.push({ label: x.name, value: x.name, note: x.code ? x.code + (x.hours ? ` · ${x.hours} h` : '') : '', noteColor: color, dim })); } };
+          const zm = shift ? { 1: 'I', 2: 'II', 3: 'III' }[shift] + ' ' : '';
+          if (!groups.on.some((x) => m(x.name))) items.push({ head: `Na zmianie ${zm}${day}: nikogo w Grafiku`, always: true });
+          sec(`Na zmianie ${zm}${day} (Grafik)`, groups.on, '#137333');
+          sec(`Tego dnia na innej zmianie`, groups.other, '#b06000');
+          sec('Bez wpisu w Grafiku', groups.rest, '#555');
+          sec('Nieobecni (urlop, L4, wolne)', groups.away, '#a00000', true);
+        } else {
+          items.push({ head: note, always: true });
+          (st.grid.workers || []).filter(m).forEach((n) => items.push({ label: n, value: n }));
+        }
+        list.set(items, auto && !!f);
+      };
+      onType = (e) => { if (e && e.type === 'input') typedYet = true; refresh(true); };
+      if (iso) grafikDay(iso).then((people) => { groups = workersForShift(st.grid.workers || [], people, shift); if (st.editing && st.editing.input === input) refresh(false); })
+        .catch((e) => { note = 'Grafik niedostępny: ' + (e.message || e); if (st.editing && st.editing.input === input) refresh(false); });
+      setTimeout(() => refresh(false), 0);
     } else if (k === 'date') {
       input = h('input', { value: typed != null ? typed : cur, placeholder: 'dd-mm-rrrr', style: { ...box, width: Math.max(w, 130) + 'px', height: hh + 'px' } });
+      const cal = h('button', { class: 'btn small', title: 'Kalendarz', style: { position: 'absolute', zIndex: 9, left: x + Math.max(w, 130) + 2 + 'px', top: y + 'px', padding: '2px 6px' },
+        onmousedown: (e) => e.preventDefault(),
+        onclick: () => {
+          hold = true;
+          const iso = G.parseDateText(input.value);
+          datePickerDialog({ title: 'Data zmiany', withTime: false, value: iso ? Date.parse(iso + 'T00:00:00Z') : null,
+            onPick: (ms) => { hold = false; input.value = ms == null ? '' : P.displayDate(new Date(ms).toISOString().slice(0, 10)); finish(true); } });
+        } }, '📅');
+      wrap.append(cal);
     } else {
       input = h('textarea', { style: { ...box, width: Math.max(w, 220) + 'px', height: Math.max(hh, 60) + 'px', resize: 'both' } });
       input.value = typed != null ? typed : (cur === '' ? P.FIRST_ITEM : cur);
+      // komisy: w kolumnie „Komis” zawsze, w innych – gdy linia zaczyna się jak komis (np. 26/…)
+      const komisCol = isKomisColumn(st.grid, c);
+      list = suggestList((it) => {
+        const v = input.value, pos = input.selectionStart, ls = v.lastIndexOf('\n', pos - 1) + 1, le = v.indexOf('\n', pos) < 0 ? v.length : v.indexOf('\n', pos);
+        const line = v.slice(ls, le), prefix = (/^\s*\d+\.\s*/.exec(line) || [''])[0];
+        input.value = v.slice(0, ls) + prefix + it.value + v.slice(le);
+        const np = ls + prefix.length + it.value.length; input.setSelectionRange(np, np); list.set([]);
+      });
+      onType = () => {
+        const v = input.value, pos = input.selectionStart, ls = v.lastIndexOf('\n', pos - 1) + 1;
+        const frag = komisFragment(v.slice(ls, pos));
+        if (!frag || (!komisCol && !/^\d{2}\//.test(frag))) { list.set([]); return; }
+        const sug = komisSuggestions(komisy(), frag);
+        list.set(sug.length ? [{ head: 'Komisy (z planu)' }, ...sug.map((x) => ({ label: x, value: x }))] : [], true);
+      };
     }
-    st.editing = { r, c, input };
-    inner.append(input); input.focus();
-    if (typed == null && input.setSelectionRange) { const n = input.value.length; input.setSelectionRange(n, n); }
-    const finish = (commit, move) => {
-      if (!st.editing) return;
-      const v = input.value; st.editing = null; input.remove(); const dl = document.getElementById('plan-workers'); if (dl) dl.remove();
+    st.editing = { r, c, input, wrap, finish: (cm) => finish(cm) };
+    wrap.append(input); if (list) wrap.append(list.el);
+    inner.append(wrap); input.focus();
+    if (list) list.place(input);
+    if (typed == null && (k === 'worker' || k === 'date') && input.select) input.select();          // pisanie zastępuje wartość
+    else if (typed == null && input.setSelectionRange) { const n = input.value.length; input.setSelectionRange(n, n); }
+    if (typed != null && onType) setTimeout(onType, 0);
+    function finish(commit, move) {
+      if (!st.editing || st.editing.input !== input) return;
+      const v = input.value; st.editing = null; wrap.remove();
+      if (commit && k === 'edit') rememberKomisy([v]);
       if (commit) { const res = applyCells([{ r, c, text: v }], `${G.colName(c)}${r + 1}`); if (res.skipped.length) toast(res.skipped[0], true); }
       body.focus();
       if (move) move();
-    };
+    }
+    if (onType) { input.addEventListener('input', onType); input.addEventListener('click', onType); }
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
-      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-      else if (e.key === 'Enter' && e.altKey && k === 'edit') { e.preventDefault(); const s = input.selectionStart; input.value = input.value.slice(0, s) + '\n' + input.value.slice(input.selectionEnd); input.selectionStart = input.selectionEnd = s + 1; }
+      if (input.tagName === 'SELECT') { if (e.key === 'Escape') { e.preventDefault(); finish(false); } else if (e.key === 'Enter') { e.preventDefault(); finish(true, () => setSel(st.sel.r1 + 1, st.sel.c1)); } return; }
+      if (list && list.visible() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); list.move(e.key === 'ArrowDown' ? 1 : -1); return; }
+      if (list && list.visible() && e.key === 'Enter' && !e.altKey && list.current()) {
+        e.preventDefault(); const it = list.current();
+        if (k === 'worker') { input.value = it.value; finish(true, () => setSel(st.sel.r1 + 1, st.sel.c1)); } else list.pick(it);
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); if (list && list.visible() && k !== 'worker') { list.set([]); return; } finish(false); }
+      else if (e.key === 'Enter' && e.altKey && k === 'edit') { e.preventDefault(); const s0 = input.selectionStart; input.value = input.value.slice(0, s0) + '\n' + input.value.slice(input.selectionEnd); input.selectionStart = input.selectionEnd = s0 + 1; }
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true, () => setSel(st.sel.r1 + 1, st.sel.c1)); }
       else if (e.key === 'Enter' && e.shiftKey && k !== 'edit') { e.preventDefault(); finish(true, () => setSel(st.sel.r1 - 1, st.sel.c1)); }
       else if (e.key === 'Tab') { e.preventDefault(); finish(true, () => setSel(st.sel.r1, st.sel.c1 + (e.shiftKey ? -1 : 1))); }
     });
-    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('blur', () => { setTimeout(() => { if (!hold && st.editing && st.editing.input === input && document.activeElement !== input) finish(true); }, 0); });
   }
 
   // ---------- klawiatura i schowek ----------
