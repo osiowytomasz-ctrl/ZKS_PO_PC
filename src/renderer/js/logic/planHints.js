@@ -3,25 +3,30 @@
 import { shiftHours } from './schedule.js';
 import { cleanName } from './grafik.js';
 
-export const SHIFT_RE = /Zmiana\s*([123])\s*-\s*KARTA PRACY/i;
-export const SHIFT_LETTER = { 1: 'a', 2: 'b', 3: 'c' };
-export const SHIFT_NAMES = { 1: 'I zmiana', 2: 'II zmiana', 3: 'III zmiana' };
+// Zmiana w nagłówku bloku: litera jak w kodach Grafiku – „Zmiana a - KARTA PRACY” (a = I, b = II, c = III); dawny zapis cyfrą (1/2/3) też jest rozpoznawany.
+export const SHIFT_RE = /Zmiana\s*([123abc])\s*-\s*KARTA PRACY/i;
+export const SHIFTS = ['a', 'b', 'c'];
+const FROM_DIGIT = { 1: 'a', 2: 'b', 3: 'c' };
+/** Zmiana jako litera a/b/c (przyjmuje też dawne 1/2/3) albo null. */
+export const normShift = (v) => { const t = String(v ?? '').trim().toLowerCase(); return FROM_DIGIT[t] || (SHIFTS.includes(t) ? t : null); };
+export const SHIFT_NAMES = { a: 'I zmiana', b: 'II zmiana', c: 'III zmiana' };
+export const SHIFT_ROMAN = { a: 'I', b: 'II', c: 'III' };
 
-/** Blok „Zmiana N - KARTA PRACY”, do którego należy wiersz [r] (nagłówek albo wiersz pod nim) – albo null. */
+/** Blok „Zmiana a - KARTA PRACY”, do którego należy wiersz [r] (nagłówek albo wiersz pod nim) – albo null. */
 export function blockOf(grid, r) {
   for (const b of grid.blocks || []) if (r >= b.headerRow && r <= b.lastRow) return b;
   return null;
 }
-/** Numer zmiany z tekstu nagłówka („Zmiana 2 - KARTA PRACY” → '2') albo null. */
-export const shiftOfText = (t) => { const m = SHIFT_RE.exec(String(t ?? '')); return m ? m[1] : null; };
-/** Ten sam tekst z inną zmianą (reszta – np. dopiski – bez zmian). */
-export const withShift = (t, n) => String(t ?? '').replace(/(Zmiana\s*)[123](\s*-\s*KARTA PRACY)/i, `$1${n}$2`);
+/** Zmiana z tekstu nagłówka jako litera („Zmiana b - KARTA PRACY” → 'b', dawne „Zmiana 2 - …” → 'b') albo null. */
+export const shiftOfText = (t) => { const m = SHIFT_RE.exec(String(t ?? '')); return m ? normShift(m[1]) : null; };
+/** Ten sam tekst z inną zmianą zapisaną literą (reszta – np. dopiski – bez zmian; dawny zapis cyfrą zamienia się na literę). */
+export const withShift = (t, s) => String(t ?? '').replace(/(Zmiana\s*)[123abc](\s*-\s*KARTA PRACY)/i, `$1${normShift(s) || s}$2`);
 
 /** Klucz pracownika do porównania z Grafikiem: „Nazwisko Imi” (trzy litery imienia), bez wielkości liter. */
 export const workerKey = (name) => cleanName(name).toLowerCase().replace(/\s+/g, ' ').trim();
 
 /**
- * Pracownicy Planu ([workers]) pogrupowani wg Grafiku dnia ([people] z grafikPeople) dla zmiany [shift] ('1'|'2'|'3'):
+ * Pracownicy Planu ([workers]) pogrupowani wg Grafiku dnia ([people] z grafikPeople) dla zmiany [shift] ('a'|'b'|'c'; dawne '1'..'3' też):
  *  - on: na tej zmianie (w Grafiku godziny w literze zmiany: a = I, b = II, c = III),
  *  - other: tego dnia na innej zmianie,
  *  - away: nieobecni / bez godzin (UT, L4, wolne…),
@@ -30,7 +35,7 @@ export const workerKey = (name) => cleanName(name).toLowerCase().replace(/\s+/g,
  */
 export function workersForShift(workers, people, shift) {
   const byKey = new Map(people.map((p) => [workerKey(p.fullName || p.name), p]));
-  const letter = SHIFT_LETTER[shift];
+  const letter = normShift(shift);
   const out = { on: [], other: [], away: [], rest: [] };
   for (const w of workers || []) {
     const p = byKey.get(workerKey(w));

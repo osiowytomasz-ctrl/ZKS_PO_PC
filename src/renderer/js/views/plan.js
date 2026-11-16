@@ -11,7 +11,7 @@ import * as P from '../logic/plan.js';
 import * as G from '../logic/planGrid.js';
 import { parseSheetColor } from '../logic/common.js';
 import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
-import { blockOf, shiftOfText, withShift, SHIFT_NAMES, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
+import { blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
 import { grafikPeople } from '../logic/harmDay.js';
 import { datePickerDialog } from './datePicker.js';
 
@@ -348,7 +348,7 @@ export function mountPlan(el, ctx) {
   // Grafik dnia (pracownicy z wpisami) – pobierany raz na dzień
   const grCache = new Map();
   const grafikDay = (iso) => { if (!grCache.has(iso)) grCache.set(iso, api('getGrData', [iso, iso]).then(grafikPeople).catch((e) => { grCache.delete(iso); throw e; })); return grCache.get(iso); };
-  /** Data (rrrr-mm-dd) i zmiana ('1'..'3') bloku, w którym jest wiersz [r] – z uwzględnieniem niezapisanych zmian. */
+  /** Data (rrrr-mm-dd) i zmiana ('a'|'b'|'c') bloku, w którym jest wiersz [r] – z uwzględnieniem niezapisanych zmian. */
   function blockDayShift(r) {
     const b = blockOf(st.grid, r); if (!b) return { iso: '', shift: null };
     const dc = (st.grid.dateCells || []).find((d) => d.row === b.headerRow);
@@ -356,7 +356,7 @@ export function mountPlan(el, ctx) {
     const iso = ch ? ch.value : dc ? dc.value : '';
     let shift = null;
     for (const c of st.cols) { const sh = shiftOfText(cellText(b.headerRow, c)); if (sh) { shift = sh; break; } }
-    return { iso, shift: shift || b.shift || null };
+    return { iso, shift: shift || normShift(b.shift) };
   }
   let komisHist = null, komisGrid = null;
   const komisy = () => { if (komisGrid !== st.grid) { komisGrid = st.grid; komisHist = komisHistory(st.grid, lsGet('plan.komisy', [])); } return komisHist; };
@@ -380,7 +380,7 @@ export function mountPlan(el, ctx) {
     if (shiftCell && typed == null) {
       // nagłówek bloku: zmiana z listy rozwijanej (reszta tekstu bez zmian); „Edytuj tekst…” – zwykła edycja
       input = h('select', { style: { ...box, width: Math.max(w, 230) + 'px', height: Math.max(hh, 26) + 'px', padding: '1px' } },
-        ...['1', '2', '3'].map((n) => h('option', { value: withShift(cur, n), selected: shiftOfText(cur) === n }, `Zmiana ${n} – ${SHIFT_NAMES[n]}`)),
+        ...SHIFTS.map((n) => h('option', { value: withShift(cur, n), selected: shiftOfText(cur) === n }, `Zmiana ${n} – ${SHIFT_NAMES[n]}`)),
         h('option', { value: '\u0000text' }, 'Edytuj tekst…'));
       input.addEventListener('change', () => {
         if (input.value === '\u0000text') { finish(false); st.sel = { r0: st.sel.r1, c0: st.sel.c1, r1: st.sel.r1, c1: st.sel.c1 }; beginEdit(cur); return; }
@@ -398,7 +398,7 @@ export function mountPlan(el, ctx) {
         const day = iso ? P.displayDate(iso) : '';
         if (groups) {
           const sec = (head, arr, color, dim) => { const a = arr.filter((x) => m(x.name)); if (a.length) { items.push({ head }); a.forEach((x) => items.push({ label: x.name, value: x.name, note: x.code ? x.code + (x.hours ? ` · ${x.hours} h` : '') : '', noteColor: color, dim })); } };
-          const zm = shift ? { 1: 'I', 2: 'II', 3: 'III' }[shift] + ' ' : '';
+          const zm = shift ? SHIFT_ROMAN[shift] + ` (${shift}) ` : '';
           if (!groups.on.some((x) => m(x.name))) items.push({ head: `Na zmianie ${zm}${day}: nikogo w Grafiku`, always: true });
           sec(`Na zmianie ${zm}${day} (Grafik)`, groups.on, '#137333');
           sec(`Tego dnia na innej zmianie`, groups.other, '#b06000');

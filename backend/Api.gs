@@ -958,7 +958,7 @@ function api_planWorkers_() {
  *   'worker' – wybór pracownika z listy `workers`
  *   'edit'   – edytowalny tekst; formatowanie w runs[r][c] = [{text, color}]
  *   'static' – pozostałe komórki, tylko do odczytu
- * blocks: bloki „Zmiana N - KARTA PRACY”: wiersz nagłówka i ostatni wiersz bloku.
+ * blocks: bloki „Zmiana a/b/c - KARTA PRACY” (dawniej 1/2/3): wiersz nagłówka, ostatni wiersz bloku, shift = litera a/b/c.
  * Wiersze bloku między headerRow+1 a lastRow web domyślnie zwija.
  */
 function api_getPlanGrid(ctx) {
@@ -977,7 +977,8 @@ function api_getPlanGrid(ctx) {
   var richTexts = range.getRichTextValues();
   var tz = Session.getScriptTimeZone();
 
-  var shiftRe = /Zmiana\s*([123])\s*-\s*KARTA PRACY/i;
+  // zmiana zapisana literą (Zmiana a/b/c - KARTA PRACY: a = I, b = II, c = III) albo dawniej cyfrą 1/2/3
+  var shiftRe = /Zmiana\s*([123abc])\s*-\s*KARTA PRACY/i;
 
   function plain(cell) {
     return cell instanceof Date
@@ -1001,7 +1002,7 @@ function api_getPlanGrid(ctx) {
     if (shiftMatch) {
       current = {
         id: 'shiftBlock_' + (blocks.length + 1),
-        shift: shiftMatch[1],
+        shift: ({ '1': 'a', '2': 'b', '3': 'c' })[shiftMatch[1]] || shiftMatch[1].toLowerCase(),   // zawsze litera a/b/c
         headerRow: r,
         lastRow: r
       };

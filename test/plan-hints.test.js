@@ -1,16 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blockOf, shiftOfText, withShift, workerKey, workersForShift, komisFragment, komisHistory, komisSuggestions, isKomisColumn } from '../src/renderer/js/logic/planHints.js';
+import { blockOf, shiftOfText, withShift, normShift, workerKey, workersForShift, komisFragment, komisHistory, komisSuggestions, isKomisColumn } from '../src/renderer/js/logic/planHints.js';
 
 test('blok i zmiana z nagłówka', () => {
   const g = { blocks: [{ id: 'b1', shift: '1', headerRow: 1, lastRow: 5 }, { id: 'b2', shift: '2', headerRow: 6, lastRow: 9 }] };
   assert.equal(blockOf(g, 3).id, 'b1');
   assert.equal(blockOf(g, 6).id, 'b2');
   assert.equal(blockOf(g, 0), null);
-  assert.equal(shiftOfText('Zmiana 2 - KARTA PRACY'), '2');
-  assert.equal(shiftOfText('zmiana3-karta pracy'), '3');
+  assert.equal(shiftOfText('Zmiana b - KARTA PRACY'), 'b');
+  assert.equal(shiftOfText('zmiana C-karta pracy'), 'c');
+  assert.equal(shiftOfText('Zmiana 2 - KARTA PRACY'), 'b');          // dawny zapis cyfrą
+  assert.equal(shiftOfText('Zmiana d - KARTA PRACY'), null);
   assert.equal(shiftOfText('Opis'), null);
-  assert.equal(withShift('Zmiana 1 - KARTA PRACY (hala B)', 3), 'Zmiana 3 - KARTA PRACY (hala B)');
+  assert.equal(withShift('Zmiana a - KARTA PRACY (hala B)', 'c'), 'Zmiana c - KARTA PRACY (hala B)');
+  assert.equal(withShift('Zmiana 1 - KARTA PRACY', 'b'), 'Zmiana b - KARTA PRACY');   // cyfra zamienia się na literę
+  assert.deepEqual(['1', '2', '3', 'a', 'B', 'x', ''].map(normShift), ['a', 'b', 'c', 'a', 'b', null, null]);
 });
 
 test('pracownicy wg Grafiku dnia i zmiany', () => {
@@ -20,13 +24,14 @@ test('pracownicy wg Grafiku dnia i zmiany', () => {
   const people = [
     { fullName: 'Kowalski Janusz', text: 'a8' }, { fullName: 'Nowak Anna', text: 'b8' }, { fullName: 'Wiśniewski Piotr', text: 'UT' }, { fullName: 'Zając Tomasz', text: 'a4b4' },
   ];
-  const g = workersForShift(workers, people, '1');
+  const g = workersForShift(workers, people, 'a');
   assert.deepEqual(g.on.map((x) => x.name), ['Kowalski Jan', 'Zając Tom']);
   assert.deepEqual(g.other.map((x) => [x.name, x.code]), [['Nowak Ann', 'b8']]);
   assert.deepEqual(g.away.map((x) => x.name), ['Wiśniewski Pio']);
   assert.deepEqual(g.rest.map((x) => x.name), ['Lis Ewa']);
   assert.equal(g.on[1].hours, 4);
-  assert.deepEqual(workersForShift(workers, people, '2').on.map((x) => x.name), ['Nowak Ann', 'Zając Tom']);
+  assert.deepEqual(workersForShift(workers, people, 'b').on.map((x) => x.name), ['Nowak Ann', 'Zając Tom']);
+  assert.deepEqual(workersForShift(workers, people, '2').on.map((x) => x.name), ['Nowak Ann', 'Zając Tom']);   // dawne 2 = b
 });
 
 test('historyczne komisy i podpowiedzi', () => {
