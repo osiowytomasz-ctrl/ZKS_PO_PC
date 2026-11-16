@@ -91,6 +91,23 @@ export async function updateOp(lp, patch, label = `Zmiana operacji ${lp}`) {
   pushUndo(label, before);
 }
 
+/** Zmiana pól wielu operacji jednym zapisem wsadowym (np. przesunięcie na wykresie – przepięte zależności); null kasuje wartość. */
+export async function updateOps(patches, label = `Zmiana operacji: ${patches.length}`) {
+  if (!patches.length) return;
+  const before = snapshot(patches.map(([lp]) => lp));
+  const { sdk, db } = await firebase();
+  const byChunk = new Map();
+  for (const [lp, patch] of patches) {
+    const id = chunkId(lp);
+    if (!byChunk.has(id)) byChunk.set(id, {});
+    for (const [k, v] of Object.entries(patch)) byChunk.get(id)[`ops.${lp}.${k}`] = v === null ? sdk.deleteField() : v;
+  }
+  const b = sdk.writeBatch(db);
+  for (const [id, data] of byChunk) b.update(sdk.doc(db, 'harm_ops', id), data);
+  await b.commit();
+  pushUndo(label, before);
+}
+
 /** Nowa operacja albo pełna podmiana istniejącej. */
 export async function saveOp(lp, op) {
   const before = snapshot([lp]);

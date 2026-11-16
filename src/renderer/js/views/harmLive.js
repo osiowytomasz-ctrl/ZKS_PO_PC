@@ -5,7 +5,8 @@ import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
 import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX, lpCompare } from '../logic/harmModel.js';
-import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive } from '../harmStore.js';
+import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive, updateOps } from '../harmStore.js';
+import { planDrag, canDrag, isLocked, cycles as dragCycles } from '../logic/harmDrag.js';
 import { archiveCandidates } from '../logic/harmArchive.js';
 import { backupData, backupText, parseBackup, backupDiff, backupFileName } from '../logic/harmBackup.js';
 import { COLS, saveCell, removeOp, addDialog, predPicker } from './harmEdit.js';
@@ -303,6 +304,103 @@ export function mountHarmLive(el, appCtx) {
         + '<marker id="harmArrowLC" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#c000c0"/></marker></defs>' + arcs.join('') + '</svg>';
       g.leftRows.append(ov);
     }
+  }
+
+  // ---------- przesuwanie operacji na wykresie (przeciągnij i upuść) ----------
+  // Pasek przesuwa się w poziomie; puszczenie wstawia operację w kolejkę jej stanowiska za operację, która startuje najpóźniej przed tym
+  // miejscem (logic/harmDrag.js). Zależności Z1–Z4 przepinają się same, a start i koniec – także pozostałych operacji – liczy silnik.
+  // Podczas przesuwania: podgląd całego harmonogramu na żywo (kolejność wierszy bez zmian), przepięte Z1–Z4 na niebiesko, znak zakazu
+  // przy operacjach z ręcznym startem i końcem (stoją w miejscu), czerwona ramka i powód, gdy w tym miejscu nie można upuścić. Esc – anuluj.
+  function beginDrag(e, r) {
+    if (st.drag || !st.data || !st.m) return;
+    const res = st.data.result.get(r.id);
+    if (!res || res.start == null) return;
+    e.preventDefault();
+    st.drag = { lp: r.id, x0: e.clientX, y0: e.clientY, startMs: res.start, durMs: Math.max(3600000, (res.end ?? res.start) - res.start), moved: false, plan: null, T: res.start,
+      ops: st.m.opsByLp, result: st.data.result, cyc: null, can: canDrag(st.m.opsByLp, r.id), frame: 0, tip: null };
+    document.addEventListener('mousemove', dragMove, true);
+    document.addEventListener('mouseup', dragEnd, true);
+    document.addEventListener('keydown', dragKey, true);
+  }
+  function dragMove(e) {
+    const d = st.drag; if (!d) return;
+    const dx = e.clientX - d.x0;
+    if (!d.moved) {
+      if (Math.abs(dx) < 5 && Math.abs(e.clientY - d.y0) < 5) return;
+      if (!d.can.ok) { toast(`Nie można przesunąć ${d.lp}: ${d.can.reason}`); dragStop(); return; }
+      d.moved = true; document.body.style.cursor = 'grabbing';
+      d.cyc = dragCycles(d.ops);
+      d.tip = h('div', { style: { position: 'fixed', zIndex: 9999, pointerEvents: 'none', padding: '3px 7px', borderRadius: '4px', font: '12px sans-serif', whiteSpace: 'pre', boxShadow: '0 1px 4px rgba(0,0,0,.35)' } });
+      document.body.append(d.tip);
+    }
+    d.T = d.startMs + dx / st.geom.HOUR * 3600000;
+    Object.assign(d.tip.style, { left: e.clientX + 14 + 'px', top: e.clientY + 16 + 'px' });
+    if (!d.frame) d.frame = requestAnimationFrame(dragPreview);
+  }
+  function dragPreview() {
+    const d = st.drag; if (!d) return;
+    d.frame = 0;
+    d.plan = planDrag(d.ops, d.result, d.lp, d.T, { before: d.cyc || undefined });
+    const p = d.plan;
+    let data = null;
+    if (p.ok) data = p.patches.length ? buildHarmData(p.ops, st.days || {}, st.m.cfg, H.localNow().getTime()) : st.data;
+    // podgląd: te same wiersze w tej samej kolejności, nowe daty i zależności
+    if (!d.baseRows) { d.baseRows = st.rows; d.baseChart = st.chart; }
+    const byId = data ? new Map(data.rows.map((r) => [r.id, r])) : null;
+    const rows = d.baseRows.map((r) => (r.komisRow || !byId ? r : byId.get(r.id) || r));
+    st.rows = rows;
+    st.chart = H.buildChart({ rows, holidays: [], rapData: {} }, { komis: new Set(), station: new Set() }, H.emptySorts(), 0, H.localNow(), { keepAll: true, axisStartMs: d.baseChart.axisStart.getTime() });
+    const nr = data && data.result.get(d.lp);
+    d.tip.style.background = p.ok ? '#e8f0fe' : '#ffe0e0';
+    d.tip.style.color = p.ok ? '#0b3d91' : '#a00000';
+    d.tip.textContent = p.ok
+      ? `${d.lp} ${p.after ? 'za ' + p.after : 'na początek kolejki'} (${p.station})` + (nr && nr.start != null ? `\nstart ${fmtDt(nr.start)} → koniec ${fmtDt(nr.end)}` : '')
+        + (p.patches.length ? `\nzmiana zależności: ${p.changed.join(', ')}` : '\nbez zmian')
+      : `Nie można tutaj: ${p.reason}`;
+    paintWindow();
+  }
+  // znak zakazu wjazdu przy zablokowanych operacjach (ręczny start i koniec) i „duch” paska pod kursorem
+  function paintDrag(g, chart, from, to) {
+    const d = st.drag, { ROW, HOUR } = g, x0 = chart.axisStart.getTime(), sz = Math.max(12, Math.min(20, ROW - 6));
+    for (let i = from; i < to; i++) {
+      const it = chart.items[i], r = it.row;
+      if (r.komisRow || it.noBar || !isLocked(st.m.opsByLp[r.id])) continue;
+      const left = Math.max(0, it.startHours * HOUR - sz - 3);
+      g.dyn.append(h('div', { title: 'Ręczny start i ręczny koniec – operacja stoi w miejscu', style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: left + 'px', top: i * ROW + (ROW - sz) / 2 + 'px', width: sz + 'px', height: sz + 'px', borderRadius: '50%', background: '#d00000', boxShadow: '0 0 0 1.5px #fff, 0 0 3px rgba(0,0,0,.6)' } },
+        h('div', { style: { position: 'absolute', left: '17%', right: '17%', top: '40%', height: '20%', background: '#fff', borderRadius: '1px' } })));
+    }
+    const i = chart.items.findIndex((it) => it.row.id === d.lp);
+    if (i >= from && i < to) {
+      const left = Math.max(0, (d.T - x0) / 3600000 * HOUR), w = Math.max(2, d.durMs / 3600000 * HOUR), ok = d.plan && d.plan.ok;
+      g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: left + 'px', top: i * ROW + 1 + 'px', width: w + 'px', height: ROW - 2 + 'px', border: `2px dashed ${ok ? '#1a73e8' : '#d00000'}`, background: ok ? 'rgba(26,115,232,.12)' : 'rgba(208,0,0,.12)', boxSizing: 'border-box' } }));
+    }
+  }
+  function dragStop() {
+    const d = st.drag; if (!d) return null;
+    if (d.frame) cancelAnimationFrame(d.frame);
+    if (d.tip) d.tip.remove();
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', dragMove, true);
+    document.removeEventListener('mouseup', dragEnd, true);
+    document.removeEventListener('keydown', dragKey, true);
+    st.drag = null;
+    if (d.moved) draw();          // widok wraca do danych z bazy (po zapisie przyjdą już nowe)
+    return d;
+  }
+  function dragKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dragStop(); } }
+  async function dragEnd(e) {
+    const d = st.drag; if (!d) return;
+    if (d.moved) { e.preventDefault(); e.stopPropagation(); }
+    if (d.moved && d.frame) { cancelAnimationFrame(d.frame); d.frame = 0; dragPreview(); }
+    const p = d.moved ? d.plan : null;
+    dragStop();
+    if (!p) return;
+    if (!p.ok) { toast(`Nie przesunięto ${d.lp}: ${p.reason}`); return; }
+    if (!p.patches.length) return;
+    try {
+      await updateOps(p.patches, `Przesunięcie ${d.lp} ${p.after ? 'za ' + p.after : 'na początek'}`);
+      toast(`${d.lp} ${p.after ? 'za ' + p.after : 'na początku kolejki'} ${p.station}; zmienione zależności: ${p.changed.join(', ')} (Cofnij – ↶)`);
+    } catch (err) { toast('Nie zapisano przesunięcia: ' + (err.code === 'permission-denied' ? 'brak uprawnień' : err.message || err)); }
   }
 
   // ---------- nawigacja po tabeli jak w Excelu ----------
@@ -1028,6 +1126,7 @@ export function mountHarmLive(el, appCtx) {
             ...(issLevel && col.key === 'lp' ? { boxShadow: `inset 4px 0 0 ${issLevel === 'error' ? '#c00000' : '#e0a800'}` } : {}),
             ...(st.cursor && st.cursor.id === r.id && st.cursor.key === col.key ? { outline: '2px solid #1a73e8', outlineOffset: '-2px' } : {}) } }, text);
         cell.dataset.cid = r.id; cell.dataset.ckey = col.key;
+        if (col.pred !== undefined && st.drag && st.drag.moved && st.drag.plan && st.drag.plan.ok && st.drag.plan.changed.includes(r.id)) Object.assign(cell.style, { background: '#cfe3ff', fontWeight: 700 });   // zależność przepięta przy przesuwaniu
         if (col.key === 'lp' && st.path && st.path.ops.has(r.id)) Object.assign(cell.style, { background: '#ffc7c7', fontWeight: 700 });
         if (col.key === 'lp' && r.subCount && !issLevel) cell.title = 'Kliknij strzałkę, aby zwinąć lub rozwinąć suboperacje';
         // jak w Excelu: klik zaznacza komórkę, dwuklik edytuje (daty – kalendarz, Z1–Z4 – lista), pisanie zaczyna edycję
@@ -1056,7 +1155,13 @@ export function mountHarmLive(el, appCtx) {
       // każdy pasek wypełniony kolorem stanowiska z czarną ramką; węzeł złożony z dzieci (operacja albo detal) ma jedną czarną ramkę od pierwszego
       // do ostatniego odcinka, a w środku odcinki wszystkich subsuboperacji w kolorach ich stanowisk, oddzielone białymi przerwami (plan i kolejność stanowisk)
       const bar = (left, width, withLabel) => {
-        const box = h('div', { title: tip, onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id), style: { cursor: 'pointer', position: 'absolute', zIndex: 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: LF + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg } });
+        const dragOk = acc().edit && !st.drag && canDrag(st.m.opsByLp, r.id).ok;
+        const dragging = st.drag && st.drag.moved && st.drag.lp === r.id;
+        const box = h('div', { title: tip + (dragOk ? '\nPrzeciągnij w poziomie: nowe miejsce w kolejce stanowiska' : ''), onclick: () => selectRow(r.id), oncontextmenu: (e) => { e.preventDefault(); selectRow(r.id); detail(r); }, ondblclick: () => editTree(r.id),
+          onmousedown: (e) => { if (e.button === 0 && acc().edit) beginDrag(e, r); },
+          style: { cursor: dragOk ? 'grab' : 'pointer', position: 'absolute', zIndex: dragging ? 5 : 1, left: left + 'px', top: i * ROW + 2 + 'px', width: width + 'px', height: ROW - 4 + 'px', border: '1px solid #000', boxSizing: 'border-box', fontSize: LF + 'px', fontWeight: 700, whiteSpace: 'nowrap', color: '#000', background: bg,
+            ...(dragging ? { outline: `3px solid ${st.drag.plan && st.drag.plan.ok ? '#1a73e8' : '#d00000'}`, outlineOffset: '1px' } : {}),
+            ...(st.drag && st.drag.moved && st.drag.plan && st.drag.plan.ok && st.drag.plan.changed.includes(r.id) && !dragging ? { outline: '2px dashed #1a73e8', outlineOffset: '1px' } : {}) } });
         if (withLabel && label) box.append(h('span', { style: { position: 'absolute', left: '3px', top: Math.max(0, (ROW - 4 - LF * 1.25) / 2) + 'px', lineHeight: '1.25', ...(st.chartOpt.komisColor ? { paddingLeft: '10px' } : {}) } }, label));
         g.dyn.append(box);
       };
@@ -1075,6 +1180,7 @@ export function mountHarmLive(el, appCtx) {
       if (it.noBar) continue;
       for (const sg of it.delivery) g.dyn.append(h('div', { style: { position: 'absolute', zIndex: 1, pointerEvents: 'none', left: sg.left * HOUR + 'px', top: i * ROW + ROW - Math.max(3, ROW * 0.14) + 'px', width: Math.max(2, sg.width * HOUR) + 'px', height: Math.max(3, ROW * 0.14) + 'px', background: sg.kind === 'green' ? '#00b050' : '#f00' } }));
     }
+    if (st.drag && st.drag.moved) paintDrag(g, chart, from, to);
     for (const d of chart.deps) {
       const a = Math.min(d.from, d.to), b = Math.max(d.from, d.to);
       if (a === b || b < from || a >= to) continue;
