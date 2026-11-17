@@ -101,3 +101,141 @@ export function parseCompetenceSheet(ws) {
 const str = (v) => (v == null ? '' : String(v).trim());
 export const colName = (i) => { let s = ''; for (; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
 const colIdx = (l) => { let c = 0; for (const ch of l) c = c * 26 + ch.charCodeAt(0) - 64; return c; };
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Uprawnienia: każde ma numer, datę wydania i datę ważności (people[id].perms[typ] = {nr, issued, valid}).
+// Typ może mieć okres ważności w latach – wtedy „ważne do” bez wpisu liczy się z daty wydania.
+// ---------------------------------------------------------------------------------------------------------------------
+/** Domyślne typy uprawnień (z kolumn H–Y arkusza MK). */
+export const PERM_TYPES = [
+  { key: 'wst', name: 'Szkolenie wstępne' },
+  { key: 'instr', name: 'Instruktaż stanowiskowy' },
+  { key: 'bad', name: 'Badania lekarskie' },
+  { key: 'bhp', name: 'Szkolenie BHP' },
+  { key: 'suw', name: 'Suwnica' },
+  { key: 's135', name: 'Spawanie 135' },
+  { key: 's141', name: 'Spawanie 141' },
+  { key: 'gaz', name: 'Uprawnienia gazowe (G)' },
+  { key: 'ciec', name: 'Cięcie gazowe 81' },
+  { key: 'pod', name: 'Podesty ruchome' },
+  { key: 'woz', name: 'Wózki widłowe' },
+  { key: 'zwy', name: 'Zwyżki' },
+  { key: 'umowa', name: 'Umowa' },
+];
+export const PERM_FIELDS = [['nr', 'Nr'], ['issued', 'Wydano'], ['valid', 'Ważne do']];
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Definicje typów w nowym układzie? (stary import miał klucze kolumn arkusza „pH”, „pL”… i jedną wartość na kolumnę). */
+export const isNewPermDefs = (defs) => Array.isArray(defs) && defs.length > 0 && defs.every((d) => d && !/^p[A-Z]{1,2}$/.test(d.key));
+
+/** Uprawnienie osoby jako {nr, issued, valid}; stary zapis (sam tekst) – traktowany jako numer. */
+export function permOf(person, key) {
+  const v = ((person && person.perms) || {})[key];
+  if (v == null || v === '') return {};
+  if (typeof v === 'object') return v;
+  return ISO.test(String(v)) ? { issued: String(v) } : { nr: String(v) };
+}
+
+/** Data ważności: wpisana albo wyliczona z daty wydania i okresu typu (lata). {iso, computed}. */
+export function permValid(perm, def) {
+  if (perm && ISO.test(String(perm.valid || ''))) return { iso: perm.valid, computed: false };
+  const years = Number(def && def.validYears) || 0;
+  if (years > 0 && perm && ISO.test(String(perm.issued || ''))) {
+    const d = new Date(perm.issued + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() + years); d.setUTCDate(d.getUTCDate() - 1);
+    return { iso: d.toISOString().slice(0, 10), computed: true };
+  }
+  return { iso: '', computed: false };
+}
+
+/** Stan terminu: 'expired' (minął), 'soon' (w ciągu [days] dni) albo ''. */
+export function validStatus(iso, todayIso, days = 30) {
+  if (!ISO.test(String(iso || ''))) return '';
+  if (iso < todayIso) return 'expired';
+  const soon = new Date(Date.parse(todayIso + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10);
+  return iso <= soon ? 'soon' : '';
+}
+
+/** Najgorszy stan uprawnień osoby (do filtra „Terminy”): 'expired' > 'soon' > ''. */
+export function personPermStatus(person, defs, todayIso, days = 30) {
+  let worst = '';
+  for (const d of defs || []) {
+    const s = validStatus(permValid(permOf(person, d.key), d).iso, todayIso, days);
+    if (s === 'expired') return 'expired';
+    if (s === 'soon') worst = 'soon';
+  }
+  return worst;
+}
+
+// ---------- odczyt komórek arkusza z uprawnieniami ----------
+const DMY = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/;
+const pad = (n) => String(n).padStart(2, '0');
+/**
+ * Komórka arkusza → {date, kind, text}: data (z formatu daty, „waż. dd/mm/rrrr”, „wyd. dd/mm/rrrr”, dd.mm.rrrr, liczba dni Excela)
+ * z rodzajem z dopisku ('valid' / 'issued' / null), albo tekst (numer, „x”, „szkolenie”). „-”, „brak” i puste – pomijane.
+ */
+export function parsePermCell(cell) {
+  if (!cell || cell.v == null) return null;
+  if (cell.date && typeof cell.v === 'number') return { date: excelToIso(cell.v), kind: null };
+  if (typeof cell.v === 'number') return cell.v > 20000 && cell.v < 80000 ? { date: excelToIso(cell.v), kind: null } : { text: String(cell.v) };
+  let t = String(cell.v).replace(/\s+/g, ' ').trim();
+  if (!t || /^[-–]+$/.test(t) || /^brak$/i.test(t)) return null;
+  let kind = null;
+  const pre = /^(waż\.?|ważne do|wazne do|wyd\.?)\s*/i.exec(t);
+  if (pre) { kind = /^wyd/i.test(pre[1]) ? 'issued' : 'valid'; t = t.slice(pre[0].length).trim(); }
+  const m = DMY.exec(t);
+  if (m) return { date: `${m[3]}-${pad(m[2])}-${pad(m[1])}`, kind };
+  if (/^\d{5}$/.test(t) && Number(t) > 20000 && Number(t) < 80000) return { date: excelToIso(Number(t)), kind };
+  return { text: t };
+}
+
+/** Nagłówek kolumny arkusza → [typ, pole] ('nr' | 'issued' | 'valid' | 'auto' – data wyd./waż. rozpoznawana po dopisku albo dacie). */
+export function permColumn(header) {
+  const h = String(header || '').toLowerCase().replace(/\s+/g, ' ');
+  const rules = [
+    [/szkoleni\w* wstępn/, 'wst', 'issued'], [/instruktaż/, 'instr', 'issued'], [/badani/, 'bad', 'valid'], [/szkoleni\w* bhp/, 'bhp', 'issued'],
+    [/suwnic.*nr/, 'suw', 'nr'], [/suwnic.*dat/, 'suw', 'auto'], [/metoda ?135/, 's135', 'auto'], [/metoda ?141/, 's141', 'auto'],
+    [/gazowe.*nr/, 'gaz', 'nr'], [/gazowe.*dat/, 'gaz', 'auto'], [/cięcie gazowe|ciecie gazowe/, 'ciec', 'auto'],
+    [/podest.*nr/, 'pod', 'nr'], [/podest.*(dat|waż|waz)/, 'pod', 'valid'], [/wózk.*nr|wozk.*nr/, 'woz', 'nr'], [/wózk.*dat|wozk.*dat/, 'woz', 'auto'],
+    [/zwyż.*nr|zwyz.*nr/, 'zwy', 'nr'], [/zwyż.*dat|zwyz.*dat/, 'zwy', 'auto'], [/umowa/, 'umowa', 'auto'],
+  ];
+  for (const [re, key, field] of rules) if (re.test(h)) return [key, field];
+  return null;
+}
+
+/** Wartość komórki dopisana do uprawnienia [perm] (pole z kolumny, rodzaj daty z dopisku albo – dla „auto” – data przyszła = ważność). */
+export function mergePermCell(perm, field, parsed, todayIso) {
+  if (!parsed) return perm;
+  const out = { ...perm };
+  if (parsed.text != null) { out.nr = out.nr ? `${out.nr}; ${parsed.text}` : parsed.text; return out; }
+  let f = parsed.kind || (field === 'auto' || field === 'nr' ? (parsed.date > todayIso ? 'valid' : 'issued') : field);
+  if (out[f] && !out[f === 'issued' ? 'valid' : 'issued']) f = f === 'issued' ? 'valid' : 'issued';
+  out[f] = parsed.date;
+  return out;
+}
+
+/**
+ * Uprawnienia pracowników z arkusza MK: { people: { id: { name, perms: {typ: {nr, issued, valid}} } } } – identyfikator jak w Grafiku
+ * (wydział + nr ew.); kolumny rozpoznane po nagłówkach z wiersza 3 (data urodzenia nie jest czytana).
+ */
+export function parsePermsSheet(ws, todayIso) {
+  const get = (r, c) => ws.cells.get(colName(c) + r);
+  const head = (c) => String((get(3, c) || {}).v ?? '');
+  let cName = 0, cNr = 0;
+  const cols = [];
+  for (let c = 1; c <= ws.maxCol; c++) {
+    const hd = head(c).toLowerCase();
+    if (!cName && /nazwisko/.test(hd)) cName = c;
+    else if (!cNr && /ewid/.test(hd)) cNr = c;
+    else { const pc = permColumn(head(c)); if (pc && cName) cols.push([c, ...pc]); }
+  }
+  if (!cName) throw new Error('Nie rozpoznano arkusza: w wierszu 3 potrzebny jest nagłówek „Nazwisko i Imię”.');
+  const people = {};
+  for (let r = 4; r <= ws.maxRow; r++) {
+    const name = String((get(r, cName) || {}).v ?? '').trim(); if (!name) continue;
+    const dept = String((get(r, cName - 1) || {}).v ?? '').trim().toUpperCase(), nr = (get(r, cNr) || {}).v;
+    const perms = {};
+    for (const [c, key, field] of cols) { const p = parsePermCell(get(r, c)); if (p) perms[key] = mergePermCell(perms[key] || {}, field, p, todayIso); }
+    people[personId(dept, nr, r)] = { name, perms };
+  }
+  return { people, types: [...new Set(cols.map((x) => x[1]))] };
+}

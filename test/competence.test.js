@@ -37,3 +37,29 @@ test('wpisy poziomów, dat i terminy uprawnień', () => {
   assert.equal(personId('po', '12007', 4), 'PO12007'); assert.equal(personId('PO', '', 9), 'k9');
   assert.equal(levelColor(0), null); assert.equal(levelColor(100), '#57bb8a');
 });
+
+test('uprawnienia: numer, wydano, ważne do – odczyt arkusza, ważność, terminy', async () => {
+  const { parsePermCell, permColumn, mergePermCell, permOf, permValid, validStatus, personPermStatus, isNewPermDefs, parsePermsSheet, PERM_TYPES } = await import('../src/renderer/js/logic/competence.js');
+  assert.deepEqual(parsePermCell({ v: 'waż. 15/07/2023' }), { date: '2023-07-15', kind: 'valid' });
+  assert.deepEqual(parsePermCell({ v: 'wyd. 18/10/2021' }), { date: '2021-10-18', kind: 'issued' });
+  assert.deepEqual(parsePermCell({ v: 'x' }), { text: 'x' });
+  assert.equal(parsePermCell({ v: '-' }), null); assert.equal(parsePermCell({ v: 'brak' }), null);
+  assert.deepEqual(parsePermCell({ v: 46350, date: true }), { date: '2026-11-24', kind: null });
+  assert.deepEqual(permColumn('Suwnica\nNr uprawnień'), ['suw', 'nr']); assert.deepEqual(permColumn('Podesty ruch. wazne data'), ['pod', 'valid']);
+  assert.deepEqual(permColumn('Badania ważne do'), ['bad', 'valid']); assert.equal(permColumn('ur'), null);
+  // data bez dopisku w kolumnie „data wyd/waż”: przyszła = ważność, miniona = wydanie
+  assert.deepEqual(mergePermCell({}, 'auto', { date: '2027-11-24', kind: null }, '2026-11-17'), { valid: '2027-11-24' });
+  assert.deepEqual(mergePermCell({ nr: 'A' }, 'auto', { date: '2012-05-23', kind: null }, '2026-11-17'), { nr: 'A', issued: '2012-05-23' });
+  assert.deepEqual(permOf({ perms: { a: 'O/1' } }, 'a'), { nr: 'O/1' });
+  assert.deepEqual(permValid({ issued: '2021-11-20' }, { validYears: 5 }), { iso: '2026-11-19', computed: true });
+  assert.deepEqual(permValid({ issued: '2021-11-20', valid: '2030-01-01' }, { validYears: 5 }), { iso: '2030-01-01', computed: false });
+  assert.equal(validStatus('2026-11-10', '2026-11-17'), 'expired'); assert.equal(validStatus('2026-12-01', '2026-11-17'), 'soon'); assert.equal(validStatus('2027-06-01', '2026-11-17'), '');
+  assert.equal(personPermStatus({ perms: { bad: { valid: '2026-12-01' } } }, PERM_TYPES, '2026-11-17'), 'soon');
+  assert.ok(isNewPermDefs(PERM_TYPES)); assert.ok(!isNewPermDefs([{ key: 'pJ', name: 'Badania ważne do' }]));
+  // arkusz: nagłówki w wierszu 3, osoba PO + nr ew.
+  const rows = [[], [], ['lp.', '', 'Nazwisko i Imię', 'ewid. ZKS', 'Badania ważne do', 'Data szkolenia BHP', 'Suwnica Nr uprawnień', 'Suwnica data wyd/waż', 'ur'],
+    [1, 'po', 'Testowy Jan', 12007, 'waż. 15/07/2027', 'wyd. 18/10/2021', 'O/9/1', { v: Date.parse('2012-05-23T00:00:00Z'), style: { date: true } }, { v: Date.parse('1980-01-01T00:00:00Z'), style: { date: true } }]];
+  const ws = (await readXlsx(buildXlsx({ name: 'MK', rows })))[0];
+  const r = parsePermsSheet(ws, '2026-11-17');
+  assert.deepEqual(r.people.PO12007.perms, { bad: { valid: '2027-07-15' }, bhp: { issued: '2021-10-18' }, suw: { nr: 'O/9/1', issued: '2012-05-23' } });
+});

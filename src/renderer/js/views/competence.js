@@ -38,7 +38,8 @@ export function mountCompetence(el, ctx) {
 
   // ---------- model ----------
   const skills = () => (st.data && st.data.skills) || [];
-  const perms = () => (st.data && st.data.perms) || [];
+  // typy uprawnień: zapisane w bazie (nowy układ: numer, wydano, ważne do) albo domyślne (stary import miał osobne kolumny arkusza)
+  const perms = () => (st.data && K.isNewPermDefs(st.data.perms) ? st.data.perms : K.PERM_TYPES);
   // Pracownicy = lista Grafiku (gr_meta/main, ta sama kolejność i separatory pominięte) + dane kompetencji (kp/main.people[id]).
   // Osoby tylko w kompetencjach (np. z wcześniejszego importu, bez Grafiku) są na końcu z oznaczeniem „poza Grafikiem”.
   const gPeople = () => ((st.grafik.meta && st.grafik.meta.people) || []);
@@ -64,7 +65,7 @@ export function mountCompetence(el, ctx) {
     { key: 'nr', title: 'Nr ew.', full: 'Numer ewidencyjny (wspólny z Grafikiem, np. PO12007)', w: 70, path: 'g:nr' },
     { key: 'place', title: 'Stanowisko', full: 'Stanowisko / miejsce pracy w Grafiku (np. 1Si1) – kolor jak w Harmonogramie. Kliknij dwukrotnie: wybór z listy', w: 64, path: 'g:place', placeCol: true },
     ...(g.base ? K.BASIC.map((b) => (b.key === 'dept' ? { ...b, ro: true, full: 'Wydział (z numeru ewidencyjnego)', group: 'base' } : { ...b, path: b.key, group: 'base' })) : []),
-    ...(g.perms ? perms().map((p) => ({ key: p.key, title: p.name, full: p.name + (p.expiry ? ' – czerwone, gdy minęła lub mija w ciągu 30 dni' : ''), w: 86, path: 'perms.' + p.key, perm: p, group: 'perms', vertical: true })) : []),
+    ...(g.perms ? perms().flatMap((d) => K.PERM_FIELDS.map(([f, label]) => ({ key: `${d.key}.${f}`, title: label, full: `${d.name} – ${label}` + (f === 'valid' ? ' (czerwone – minęło, pomarańczowe – mija w ciągu 30 dni' + (d.validYears ? `; bez wpisu: wydano + ${d.validYears} lat` : '') + ')' : ''), w: f === 'nr' ? 100 : 78, path: `perms.${d.key}.${f}`, perm: d, field: f, group: 'perms' }))) : []),
     ...(g.skills ? [{ key: 'pts', title: 'Punkty', full: 'Punkty = Σ poziom × waga umiejętności', w: 56, ro: true, group: 'skills' },
       ...skills().map((s) => ({ key: s.key, title: s.name, full: `${s.name} – waga ${s.weight}. Poziom 0–100 (%)`, w: 34, path: 'skills.' + s.key, skill: s, group: 'skills', vertical: true }))] : []),
   ];
@@ -73,11 +74,11 @@ export function mountCompetence(el, ctx) {
     if (c.key === 'lp') return p.lp ?? '';
     if (c.key === 'place') return p.place || '';
     if (c.key === 'pts') return K.points(p, skills());
-    if (c.perm) return (p.perms || {})[c.key] ?? '';
+    if (c.perm) { const pv = K.permOf(p, c.perm.key); return c.field === 'valid' ? K.permValid(pv, c.perm).iso : pv[c.field] ?? ''; }
     if (c.skill) return (p.skills || {})[c.key] ?? '';
     return p[c.key] ?? '';
   };
-  const value = (p, c) => { const v = raw(p, c); return c.perm ? K.fmtPerm(v) : String(v); };
+  const value = (p, c) => { const v = raw(p, c); return c.perm && c.field !== 'nr' ? K.fmtPerm(v) : String(v); };
 
   // ---------- dane na żywo ----------
   let unsub = null, unsubG = null;
@@ -95,6 +96,7 @@ export function mountCompetence(el, ctx) {
   function draw() {
     if (!st.data || !st.gReady) return;
     for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' primary' : '');
+    { const n = peopleList().filter((p) => K.personPermStatus(p, perms(), isoToday())).length; alertBtn.className = 'btn small' + (st.onlyAlerts ? ' primary' : ''); alertBtn.textContent = `⚠ Terminy (${n})`; }
     if (!peopleList().length) {
       clear(body);
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Brak pracowników: zaimportuj Grafik z karty G (moduł Grafik → „Import z G”) albo dodaj pracownika.'),
@@ -108,6 +110,7 @@ export function mountCompetence(el, ctx) {
     const pm = peopleMap(), getV = (id, c) => (pm[id] ? value(pm[id], c) : '');
     let ids = peopleList().map((p) => p.id);
     ids = visibleRows(ids, fcols, st.filters, getV);
+    if (st.onlyAlerts) ids = ids.filter((id) => K.personPermStatus(pm[id], perms(), isoToday()));
     if (st.sorts.length) ids = sortRows(ids, fcols, st.sorts, getV);
     const rows = ids.map((id) => pm[id]);
     const stList = stationList(st.grafik.cfg), t = isoToday();
@@ -128,15 +131,23 @@ export function mountCompetence(el, ctx) {
       i += n;
     }
     const sortLabel = (key) => { const i = st.sorts.findIndex((x) => x.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
-    cols.forEach((c, i) => {
+    // trzy wiersze: grupy, typy uprawnień (nad trzema polami: Nr, Wydano, Ważne do), nazwy kolumn; zwykłe kolumny zajmują dwa dolne wiersze
+    const headT = h('tr', {});
+    const colHead = (c, i, rowspan) => {
       const filt = !!st.filters[c.key], mark = (filt ? ' ▼' : '') + (sortLabel(c.key) ? ' ' + sortLabel(c.key) : '');
-      const bg = filt ? '#ffb74d' : c.skill ? c.skill.color : c.perm ? (c.perm.expiry ? '#f4b183' : '#ddebf7') : '#e4e4e4';
+      const bg = filt ? '#ffb74d' : c.skill ? c.skill.color : c.perm ? (c.field === 'valid' ? '#f8cbad' : '#ddebf7') : '#e4e4e4';
       const label = c.vertical ? h('div', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', margin: '0 auto', lineHeight: 1.1, maxHeight: 150 * z + 'px', overflow: 'hidden' } }, c.title + mark)
         : h('span', {}, c.title + mark);
-      head1.append(h('th', { title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
-        style: { ...thBase, top: gH + 'px', zIndex: i < FIX ? 5 : 3, cursor: 'pointer', background: bg, whiteSpace: 'normal', lineHeight: 1.1, fontSize: 11 * z + 'px', verticalAlign: 'bottom',
+      return h('th', { ...(rowspan ? { rowspan } : {}), title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
+        style: { ...thBase, top: (rowspan ? gH : 2 * gH) + 'px', zIndex: i < FIX ? 5 : 3, cursor: 'pointer', background: bg, whiteSpace: 'normal', lineHeight: 1.1, fontSize: 11 * z + 'px', verticalAlign: 'bottom',
           minWidth: widths[i] + 'px', maxWidth: widths[i] + 'px', ...(i < FIX ? { left: leftOf(i) + 'px' } : {}) } },
-      label, c.skill ? h('div', { style: { fontWeight: 400, fontSize: 10 * z + 'px', borderTop: '1px solid rgba(0,0,0,.25)', marginTop: '2px' } }, '×' + c.skill.weight) : null));
+      label, c.skill ? h('div', { style: { fontWeight: 400, fontSize: 10 * z + 'px', borderTop: '1px solid rgba(0,0,0,.25)', marginTop: '2px' } }, '×' + c.skill.weight) : null);
+    };
+    cols.forEach((c, i) => {
+      if (!c.perm) { headT.append(colHead(c, i, 2)); return; }
+      if (c.field === 'nr') headT.append(h('th', { colspan: 3, title: c.perm.name + (c.perm.validYears ? ` – ważne ${c.perm.validYears} lat od wydania` : ''),
+        style: { ...thBase, top: gH + 'px', zIndex: 3, height: gH + 'px', background: '#bdd6ee', whiteSpace: 'nowrap', fontSize: 11 * z + 'px' } }, c.perm.name));
+      head1.append(colHead(c, i, 0));
     });
     const tbody = h('tbody', {});
     grid = rows;
@@ -151,17 +162,22 @@ export function mountCompetence(el, ctx) {
         else if (c.key === 'name') style = { ...style, fontWeight: 600, ...(p.inGrafik ? {} : { fontStyle: 'italic', color: '#888' }) };
         if (c.key === 'pts') style = { ...style, fontWeight: 700, background: '#e2efda' };
         if (c.skill) { const bg = K.levelColor(raw(p, c)); if (bg) style = { ...style, background: bg }; }
-        if (c.perm && c.perm.expiry) { const a = K.permAlert(raw(p, c), t); if (a) style = { ...style, background: '#ff0000', color: '#fff', fontWeight: 700 }; }
+        if (c.perm && c.field === 'valid') {
+          const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), a = K.validStatus(pv.iso, t);
+          if (a === 'expired') style = { ...style, background: '#ff0000', color: '#fff', fontWeight: 700 };
+          else if (a === 'soon') style = { ...style, background: '#ffc000', fontWeight: 700 };
+          if (pv.computed) style = { ...style, fontStyle: 'italic' };
+        }
         if (ci < FIX) style = { ...style, position: 'sticky', left: leftOf(ci) + 'px', zIndex: 2 };
         const td = h('td', { style, 'data-r': ri, 'data-c': ci }, txt);
         if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.nr : ''}${p.inGrafik ? ' · stanowisko w Grafiku: ' + (p.place || 'brak') : ' · POZA GRAFIKIEM (prawy przycisk: dodaj do Grafiku)'}. Dwuklik: karta pracownika`;
-        else if (c.perm && c.perm.expiry && K.permAlert(raw(p, c), t)) td.title = K.permAlert(raw(p, c), t) === 'expired' ? 'Termin minął' : 'Termin mija w ciągu 30 dni';
+        else if (c.perm && c.field === 'valid' && raw(p, c)) { const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), a = K.validStatus(pv.iso, t); td.title = `${c.perm.name}: ważne do ${K.fmtPerm(pv.iso)}` + (pv.computed ? ` (wyliczone: wydano + ${c.perm.validYears} lat)` : '') + (a === 'expired' ? ' – MINĘŁO' : a === 'soon' ? ' – mija w ciągu 30 dni' : ''); }
         else if (txt.length > 10) td.title = txt;
         tr.append(td);
       });
       tbody.append(tr);
     });
-    table.append(h('thead', {}, head0, head1), tbody);
+    table.append(h('thead', {}, head0, headT, head1), tbody);
     body.append(table);
     body.scrollTop = sy; body.scrollLeft = sx;
     paintSel();
@@ -240,9 +256,19 @@ export function mountCompetence(el, ctx) {
       if (c.ro) continue;
       let v = String(text ?? '').trim();
       if (c.skill) { v = K.parseLevel(v); if (v === null) { toast(`${c.title}: wpisz poziom 0–100 („${text}”)`, true); return; } }
-      else if (c.perm) v = K.parsePermValue(v);
+      else if (c.perm && c.field !== 'nr') { v = K.parsePermValue(v); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast(`${c.perm.name} – ${c.title}: wpisz datę dd.mm.rrrr („${text}”)`, true); return; } }
       if (c.key === 'name' && !v) { toast('Nazwisko nie może być puste'); return; }
       if (c.placeCol && v && !placeStation(v, stationList(st.grafik.cfg))) { toast(`Stanowisko „${v}” nie pasuje do żadnego stanowiska Harmonogramu (np. 1Si1, 2Un2, Narz1)`, true); return; }
+      if (c.perm) {
+        // stary zapis uprawnienia (sam tekst) – zamieniany na {nr, issued, valid}
+        const stored = ((p.perms || {})[c.perm.key]), pv = K.permOf(p, c.perm.key), old = pv[c.field] ?? '';
+        if (String(old) === String(v)) continue;
+        if (stored != null && typeof stored !== 'object') {
+          const obj = { ...pv, [c.field]: v }; if (!v) delete obj[c.field];
+          changes.push({ id: p.id, path: `perms.${c.perm.key}`, value: obj }); before.push({ id: p.id, path: `perms.${c.perm.key}`, value: stored });
+        } else { changes.push({ id: p.id, path: c.path, value: v }); before.push({ id: p.id, path: c.path, value: old }); }
+        continue;
+      }
       const old = raw(p, c);
       if (String(old) === String(v)) continue;
       changes.push({ id: p.id, path: c.path, value: v }); before.push({ id: p.id, path: c.path, value: old });
@@ -336,8 +362,13 @@ export function mountCompetence(el, ctx) {
       h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '18px' } },
         h('table', {}, h('tbody', {}, row('Wydział', p.dept), row('Nr ewidencyjny', p.nr), row('Stanowisko w Grafiku', p.inGrafik ? p.place || '—' : 'poza Grafikiem'), row('Komis wewnętrzny', p.komis),
           row('Maszyna / stanowisko', p.machine), row('Stanowisko wg umowy', p.position), row('Punkty', K.points(p, skills()), { fontSize: '16px' }))),
-        h('table', {}, h('tbody', {}, ...perms().filter((x) => (p.perms || {})[x.key]).map((x) => { const v = p.perms[x.key], a = x.expiry ? K.permAlert(v, t) : '';
-          return row(x.name, K.fmtPerm(v) + (a === 'expired' ? ' – minął' : a === 'soon' ? ' – mija wkrótce' : ''), a ? { color: '#c00000' } : {}); })))),
+        h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))),
+          h('tbody', {}, ...perms().filter((x) => Object.keys(K.permOf(p, x.key)).length).map((x) => {
+            const pv = K.permOf(p, x.key), v = K.permValid(pv, x), a = K.validStatus(v.iso, t);
+            return h('tr', {}, h('td', { class: 'left' }, x.name), h('td', { class: 'left' }, pv.nr || ''), h('td', {}, K.fmtPerm(pv.issued || '')),
+              h('td', { style: { background: a === 'expired' ? '#ff0000' : a === 'soon' ? '#ffc000' : '', color: a === 'expired' ? '#fff' : '', fontWeight: a ? 700 : 400, fontStyle: v.computed ? 'italic' : 'normal' } },
+                K.fmtPerm(v.iso) + (a === 'expired' ? ' – minęło' : a === 'soon' ? ' – mija wkrótce' : '')));
+          })))),
       h('h3', { style: { margin: '10px 0 4px' } }, 'Umiejętności'),
       sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`, style: { border: '1px solid #999', borderLeft: `8px solid ${s.color}`, padding: '2px 6px', background: K.levelColor(v) || '#fff' } }, `${s.name}: ${v}%`)))
         : h('p', { class: 'muted' }, 'Brak wpisanych umiejętności.')), { wide: true });
@@ -433,15 +464,16 @@ export function mountCompetence(el, ctx) {
         h('button', { class: 'btn small', onclick: () => { sk.push({ key: 's' + Date.now().toString(36), name: '', weight: 1, color: '#d9d9d9' }); render(); } }, 'Dodaj umiejętność'),
         h('h3', { style: { margin: '12px 0 4px' } }, 'Uprawnienia'),
         h('div', { style: { maxHeight: '220px', overflow: 'auto' } }, h('table', {}, h('tbody', {}, ...pr.map((x, i) => h('tr', {}, h('td', {}, cell(x, 'name', '240px')),
-          h('td', {}, h('label', {}, (() => { const c = h('input', { type: 'checkbox', checked: !!x.expiry, onchange: () => { x.expiry = c.checked; } }); return c; })(), ' pilnuj terminu (30 dni)')),
+          h('td', {}, 'ważne ', cell(x, 'validYears', '50px', 'number'), ' lat od wydania (0 – tylko wpisana data)'),
           h('td', {}, h('button', { class: 'btn small', onclick: () => { pr.splice(i, 1); render(); } }, 'Usuń'))))))),
-        h('button', { class: 'btn small', onclick: () => { pr.push({ key: 'p' + Date.now().toString(36), name: '' }); render(); } }, 'Dodaj uprawnienie'));
+        h('button', { class: 'btn small', onclick: () => { pr.push({ key: 'u' + Date.now().toString(36), name: '' }); render(); } }, 'Dodaj uprawnienie'),
+        h('p', { class: 'muted' }, 'Każde uprawnienie ma trzy kolumny: numer, data wydania, data ważności. Termin ważności jest czerwony, gdy minął, i pomarańczowy, gdy mija w ciągu 30 dni.'));
     };
     render();
     const m = modal('Kolumny matrycy kompetencji', h('div', {}, box, h('p', { class: 'muted' }, 'Usunięcie kolumny ukrywa ją; wpisane wartości zostają w danych pracowników.'),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), h('button', { class: 'btn primary', onclick: async () => {
         const skillsOut = sk.filter((x) => String(x.name).trim()).map((x) => ({ key: x.key, name: String(x.name).trim(), weight: Number(x.weight) || 0, color: x.color || '#d9d9d9' }));
-        const permsOut = pr.filter((x) => String(x.name).trim()).map((x) => ({ key: x.key, name: String(x.name).trim(), ...(x.expiry ? { expiry: true } : {}) }));
+        const permsOut = pr.filter((x) => String(x.name).trim()).map((x) => ({ key: x.key, name: String(x.name).trim(), ...(Number(x.validYears) > 0 ? { validYears: Number(x.validYears) } : {}) }));
         try { await saveDefs({ skills: skillsOut, perms: permsOut }); m.close(); toast('Zapisano kolumny'); } catch (e) { toast('Nie zapisano: ' + (e.message || e), true); }
       } }, 'Zapisz'))), { wide: true });
   }
@@ -478,9 +510,41 @@ export function mountCompetence(el, ctx) {
         const ws = sheets.find((x) => /^mk$/i.test(x.name)) || sheets[0];
         const r = K.parseCompetenceSheet(ws);
         // klucze kolumn z pliku (litery kolumn) – dotychczasowe wartości pracowników pod tymi samymi kluczami zostają
-        if (!(await confirmBox('Umiejętności z pliku', `Plik „${f.name}”, arkusz „${ws.name}”: umiejętności ${r.skills.length} (z wagami i kolorami grup), uprawnienia ${r.perms.length}. Zastąpią obecne kolumny matrycy. Pracownicy i ich poziomy nie są importowani. Kontynuować?`, 'Importuj'))) return;
-        await saveDefs({ skills: r.skills, perms: r.perms });
-        toast(`Zaimportowano kolumny: umiejętności ${r.skills.length}, uprawnienia ${r.perms.length}`);
+        if (!(await confirmBox('Umiejętności z pliku', `Plik „${f.name}”, arkusz „${ws.name}”: umiejętności ${r.skills.length} (z wagami i kolorami grup). Zastąpią obecne kolumny umiejętności. Pracownicy i ich poziomy nie są importowani. Kontynuować?`, 'Importuj'))) return;
+        await saveDefs({ skills: r.skills });
+        toast(`Zaimportowano umiejętności: ${r.skills.length}`);
+      } catch (e) { toast('Import nieudany: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+    });
+    document.body.append(input); input.click();
+  }
+
+  /**
+   * Uprawnienia pracowników z pliku Excel (arkusz MK): numer, data wydania, data ważności każdego uprawnienia – dopasowanie osób
+   * po wydziale i nr ew. (jak w Grafiku), a gdy brak numeru – po nazwisku. Daty „waż. …” trafiają do ważności, „wyd. …” do wydania.
+   */
+  function doImportPerms() {
+    const input = h('input', { type: 'file', accept: '.xlsx', style: { display: 'none' } });
+    input.addEventListener('change', async () => {
+      const f = input.files && input.files[0]; input.remove(); if (!f) return;
+      try {
+        const sheets = await readXlsx(await f.arrayBuffer());
+        const ws = sheets.find((x) => /^mk$/i.test(x.name)) || sheets[0];
+        const r = K.parsePermsSheet(ws, isoToday());
+        const pm = peopleMap(), norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const byName = new Map(Object.values(pm).map((p) => [norm(p.name), p.id]));
+        const changes = [], missed = [];
+        for (const [id, x] of Object.entries(r.people)) {
+          if (!Object.keys(x.perms).length) continue;
+          const target = pm[id] ? id : byName.get(norm(x.name));
+          if (!target) { missed.push(x.name); continue; }
+          for (const [key, v] of Object.entries(x.perms)) changes.push({ id: target, path: `perms.${key}`, value: v });
+        }
+        const people = new Set(changes.map((c) => c.id)).size;
+        if (!(await confirmBox('Uprawnienia z pliku', `Plik „${f.name}”, arkusz „${ws.name}”: uprawnienia ${people} pracowników (${changes.length} wpisów)` + (missed.length ? `; bez dopasowania w Grafiku: ${missed.length}` : '') + '. Zastąpią obecne wpisy tych uprawnień. Kontynuować?', 'Importuj'))) return;
+        if (!K.isNewPermDefs(st.data && st.data.perms)) await saveDefs({ perms: K.PERM_TYPES });
+        for (let i = 0; i < changes.length; i += 200) await setFields(changes.slice(i, i + 200));
+        st.undo = []; st.redo = [];
+        toast(`Zaimportowano uprawnienia: ${people} pracowników` + (missed.length ? ` (bez dopasowania: ${missed.length})` : ''));
       } catch (e) { toast('Import nieudany: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
     });
     document.body.append(input); input.click();
@@ -491,13 +555,16 @@ export function mountCompetence(el, ctx) {
   function cleanup() { document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste); if (unsub) { unsub(); unsub = null; } if (unsubG) { unsubG(); unsubG = null; } }
 
   const broom = (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(); draw(); } }); b.append(iconSvg('broom')); return b; })();
+  // tylko osoby z uprawnieniem, którego termin minął albo mija w ciągu 30 dni
+  const alertBtn = h('button', { class: 'btn small', title: 'Pokaż tylko pracowników z uprawnieniem po terminie albo z terminem w ciągu 30 dni (czerwone / pomarańczowe)', onclick: () => { st.onlyAlerts = !st.onlyAlerts; if (st.onlyAlerts) { st.groups.perms = true; lsSet('kp.groups', st.groups); } draw(); } }, '⚠ Terminy');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kompetencje'), ...groupBtns, broom,
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kompetencje'), ...groupBtns, alertBtn, broom,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     canWrite ? h('button', { class: 'btn small', onclick: () => addPerson() }, 'Dodaj pracownika') : null,
     canWrite ? h('button', { class: 'btn small', onclick: defsDialog }, 'Kolumny…') : null,
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
-    canWrite ? h('button', { class: 'btn small', title: 'Kolumny umiejętności (z wagami) i uprawnień z pliku Excel (arkusz „MK”), bez pracowników', onclick: doImport }, 'Umiejętności z Excela') : null, info), body);
+    canWrite ? h('button', { class: 'btn small', title: 'Kolumny umiejętności (z wagami i kolorami grup) z pliku Excel (arkusz „MK”), bez pracowników', onclick: doImport }, 'Umiejętności z Excela') : null,
+    canWrite ? h('button', { class: 'btn small', title: 'Uprawnienia pracowników (numer, wydano, ważne do) z pliku Excel (arkusz „MK”)', onclick: doImportPerms }, 'Uprawnienia z Excela') : null, info), body);
   zoomLabel.textContent = st.zoom + '%';
   start();
   return cleanup;
