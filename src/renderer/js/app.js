@@ -51,7 +51,13 @@ export const ctx = {
   home: () => go('home'),
   async loadUser() {
     try {
-      await apiCached('api_whoami', [], (u) => { ctx.user = u; });
+      // najpierw dane z pamięci (szybki start), potem świeże z serwera: gdy uprawnienia się zmieniły (np. poziom „Grafik dostęp”),
+      // pasek i bieżący ekran są budowane od nowa – inaczej obowiązywałyby stare uprawnienia do następnego uruchomienia
+      await apiCached('api_whoami', [], (u, meta) => {
+        const before = JSON.stringify(ctx.user || null);
+        ctx.user = u;
+        if (meta && !meta.cached && current && before !== 'null' && before !== JSON.stringify(u || null)) go(current);
+      });
       ctx.userError = null;
     } catch (e) {
       ctx.user = null;
