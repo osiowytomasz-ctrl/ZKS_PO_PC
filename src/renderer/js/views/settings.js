@@ -3,6 +3,7 @@ import { permissionsSummary } from '../logic/common.js';
 import { firebase } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -19,10 +20,11 @@ export async function mountSettings(el, ctx) {
     await save();
     status.className = 'muted'; status.textContent = 'Sprawdzanie połączenia…';
     try {
-      const user = await ctx.loadUser();
+      const user = await ctx.loadUser({ fresh: true });
       if (!user) throw new Error(ctx.userError || 'Brak odpowiedzi.');
       status.className = ''; status.style.color = '#1b5e20';
-      status.textContent = `Połączono jako ${user.name || user.email} (${user.email}).\nUprawnienia: ${permissionsSummary(user.permissions)}`;
+      const gl = user.grafikLevel ? `${String(user.grafikLevel).toUpperCase()} (z kolumny „Grafik dostęp”)` : `serwer nie podaje poziomu – w Apps Script nie ma nowej wersji Api.gs i Firebase.gs (program przyjmuje ${grafikAccess(grafikLevelOf(user)).label} z kolumny „Grafik”)`;
+      status.textContent = `Połączono jako ${user.name || user.email} (${user.email}).\nUprawnienia: ${permissionsSummary(user.permissions)}\nGrafik i Kompetencje: ${gl}`;
     } catch (e) {
       status.className = 'err'; status.textContent = e.message;
     }

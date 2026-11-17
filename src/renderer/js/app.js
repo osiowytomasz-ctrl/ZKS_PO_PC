@@ -49,15 +49,17 @@ export const ctx = {
   userError: null,
   go,
   home: () => go('home'),
-  async loadUser() {
+  /** [fresh] – z pominięciem pamięci (sprawdzenie połączenia w Ustawieniach, bez przebudowy ekranu). */
+  async loadUser({ fresh = false } = {}) {
     try {
       // najpierw dane z pamięci (szybki start), potem świeże z serwera: gdy uprawnienia się zmieniły (np. poziom „Grafik dostęp”),
       // pasek i bieżący ekran są budowane od nowa – inaczej obowiązywałyby stare uprawnienia do następnego uruchomienia
       await apiCached('api_whoami', [], (u, meta) => {
+        if (fresh) { ctx.user = u; return; }
         const before = JSON.stringify(ctx.user || null);
         ctx.user = u;
         if (meta && !meta.cached && current && before !== 'null' && before !== JSON.stringify(u || null)) go(current);
-      });
+      }, { force: fresh });
       ctx.userError = null;
     } catch (e) {
       ctx.user = null;
