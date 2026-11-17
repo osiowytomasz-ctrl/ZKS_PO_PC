@@ -1,6 +1,6 @@
-import { h, field, api, toast } from '../ui.js';
+import { h, field, api, toast, confirmBox } from '../ui.js';
 import { permissionsSummary } from '../logic/common.js';
-import { firebase } from '../fb.js';
+import { firebase, resetFirestoreCache } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
@@ -80,7 +80,11 @@ export async function mountSettings(el, ctx) {
       h('button', { class: 'btn', title: 'Sprawdza logowanie i zapis/odczyt w bazie Firebase', onclick: fbTest }, 'Test Firebase'),
       h('button', { class: 'btn', onclick: async () => { await save(); await ctx.loadUser(); ctx.go('home'); } }, 'Zapisz i wróć'),
       h('button', { class: 'btn', title: 'Otwiera stronę z najnowszą wersją aplikacji (plik .exe)', onclick: () => window.zks.openExternal('https://github.com/osiowytomasz-ctrl/ZKS_PO_PC/releases/tag/latest') }, 'Aktualizuj'),
-      h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną')),
+      h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną'),
+      h('button', { class: 'btn', title: 'Usuwa lokalną kopię bazy Firebase (Grafik, Harmonogram, Kompetencje, Workflow) i przeładowuje program – dane pobiorą się od nowa z serwera. Gdy na tym komputerze brakuje danych, które inni widzą.', onclick: async () => {
+        if (!(await confirmBox('Pamięć bazy', 'Usunąć lokalną kopię bazy Firebase na tym komputerze i przeładować program? Dane w bazie zostają; pobiorą się od nowa.', 'Wyczyść i przeładuj'))) return;
+        await resetFirestoreCache('ręcznie z Ustawień', true);
+      } }, 'Wyczyść pamięć bazy')),
     status, speed, fbOut,
     cfg.url && cfg.key ? holidaysPanel() : null,
     h('p', { class: 'muted' }, window.zks ? '' : '')));

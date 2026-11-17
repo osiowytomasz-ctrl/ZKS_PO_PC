@@ -47,11 +47,12 @@ export const onHarmLevel = (fn) => { harmListeners.add(fn); return () => harmLis
  * Naprawa pamięci lokalnej bazy (IndexedDB): wyłączenie Firestore, usunięcie jego pamięci i przeładowanie programu.
  * Dane są w bazie na serwerze – po przeładowaniu program pobiera je od nowa. Raz na sesję (ochrona przed pętlą przeładowań).
  */
-export async function resetFirestoreCache(reason = '') {
+export async function resetFirestoreCache(reason = '', force = false) {
   const KEY = 'zks.fb.cacheReset';
-  try { if (sessionStorage.getItem(KEY)) return false; sessionStorage.setItem(KEY, String(Date.now())); } catch { /* bez pamięci sesji */ }
+  try { if (!force && sessionStorage.getItem(KEY)) return false; sessionStorage.setItem(KEY, String(Date.now())); } catch { /* bez pamięci sesji */ }
   console.warn('Firestore: czyszczenie pamięci lokalnej –', reason);
   const s = await load();
+  if (!db) { try { await firebase(); } catch { /* bez logowania też czyścimy */ } }
   try { if (db) await s.terminate(db); } catch (e) { console.warn(e); }
   try { if (db) await s.clearIndexedDbPersistence(db); } catch (e) { console.warn('clearIndexedDbPersistence', e); }
   location.reload();
