@@ -37,7 +37,7 @@ export function holidaysPanel() {
       list.push({ date: iso, name: r.name.trim() });
     }
     try { await saveHolidays(list); toast(`Zapisano święta: ${list.length}`); await load(); }
-    catch (e) { toast('Nie zapisano świąt: ' + (e.code === 'permission-denied' ? 'brak uprawnień (GOD Harmonogramu albo zapis w Grafiku)' : e.message || e), true); }
+    catch (e) { toast('Nie zapisano świąt: ' + (e.code === 'permission-denied' ? 'brak uprawnień (GOD Harmonogramu albo MASTER / GOD Grafiku)' : e.message || e), true); }
   }
   async function load() {
     try { rows = (await loadHolidays()).map((x) => ({ text: fmtDay(x.date), iso: x.date, name: x.name })); render(); }
@@ -45,5 +45,5 @@ export function holidaysPanel() {
   }
   load();
   return h('div', {}, h('h2', { style: { marginTop: '18px' } }, 'Dni świąteczne'),
-    h('p', { class: 'muted' }, 'Wspólne dla całego programu: Harmonogram (oś czasu, kalendarze, terminy) i Grafik (czerwone dni). Zmienia GOD Harmonogramu albo osoba z prawem zapisu w Grafiku.'), box);
+    h('p', { class: 'muted' }, 'Wspólne dla całego programu: Harmonogram (oś czasu, kalendarze, terminy) i Grafik (czerwone dni). Zmienia GOD Harmonogramu albo MASTER / GOD Grafiku.'), box);
 }

@@ -10,6 +10,7 @@ import { iconSvg } from './harmIcons.js';
 import { watchGrafik, saveCells, saveMeta, importFromSheet } from '../grafikStore.js';
 import { mountGrafikSheet } from './grafikSheet.js';
 import { stationList } from '../logic/harmModel.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
@@ -33,7 +34,10 @@ function loadFilters() {
 const saveFilters = (st) => lsSet('grafik.filters', { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
 
 export function mountGrafik(el, ctx) {
-  const canWrite = ctx.level('grafik') === 'write';
+  // poziom Grafiku (GOD / MASTER / CLERIK / TOURIST – logic/grafikAccess.js)
+  const acc = ctx.grafikAcc ? ctx.grafikAcc() : grafikAccess(grafikLevelOf(ctx.user));
+  const canWrite = acc.cells;
+  const allGroups = () => (acc.groups ? { ut: true, hours: true, abs: true } : { ut: false, hours: false, abs: false });
   const today = () => isoOf(new Date());
   const st = {
     from: addDays(today(), -3), to: addDays(today(), 7), meta: null, months: {}, codes: {}, notes: {}, sel: null, editing: null,
@@ -46,7 +50,7 @@ export function mountGrafik(el, ctx) {
   const zoomLabel = h('button', { class: 'btn small', title: 'Kliknij: 100%', onclick: () => setZoom(100) }, '100%');
   // grupy kolumn jak w karcie G: urlopy (AP–AT, C, D), godziny w miesiącach (AD–AO), absencje (AU–BE)
   const groupBtns = [['ut', 'Urlopy', 'Kolumny urlopów: plan, UT z lat, wykorzystane, zaplanowane, dostępny, pozostały'], ['hours', 'Godziny', 'Godziny przepracowane w każdym miesiącu'], ['abs', 'Absencje', 'Liczba nieobecności: NŻ, v, L4, OP, Ojc, OKL, HDK, BO, BHP, SZ, Sł']]
-    .map(([k, label, title]) => { const b = h('button', { class: 'btn small', title, onclick: () => { st.groups[k] = !st.groups[k]; lsSet('grafik.groups', st.groups); draw(); } }, label); b.dataset.g = k; return b; });
+    .map(([k, label, title]) => { const b = h('button', { class: 'btn small', title: acc.groups ? title : `${label}: niedostępne (poziom ${acc.label})`, disabled: !acc.groups, onclick: () => { if (!acc.groups) return; st.groups[k] = !st.groups[k]; lsSet('grafik.groups', st.groups); draw(); } }, label); b.dataset.g = k; return b; });
 
   // ---------- dane na żywo ----------
   const neededMonths = () => [...new Set([...F.monthsBetween(st.from, st.to), ...F.monthsBetween(`${st.to.slice(0, 4)}-01-01`, `${st.to.slice(0, 4)}-12-31`)])];
@@ -58,7 +62,7 @@ export function mountGrafik(el, ctx) {
       }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy Grafiku: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły Firestore: gr_days, gr_meta)' : e.message || e)), sheetBtn()); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message || String(e)), sheetBtn()); }
   }
-  const sheetBtn = () => h('button', { class: 'btn', style: { margin: '0 12px' }, onclick: openSheet }, 'Grafik z arkusza (dawny)');
+  const sheetBtn = () => (acc.sheet ? h('button', { class: 'btn', style: { margin: '0 12px' }, onclick: openSheet }, 'Grafik z arkusza (dawny)') : null);
   function setRange(a, b) {
     if (!a || !b) return;
     if (b < a) [a, b] = [b, a];
@@ -78,7 +82,8 @@ export function mountGrafik(el, ctx) {
   const year = () => st.to.slice(0, 4);
   const summaries = () => { const m = new Map(), t = today(); for (const p of people()) if (!p.sep) m.set(p.id, F.personSummary(p, st.codes[p.id] || {}, year(), t)); return m; };
   const dates = () => F.daysBetween(st.from, st.to);
-  const columns = (g = st.groups) => {
+  const columns = (g0 = st.groups) => {
+    const g = acc.groups ? g0 : { ut: false, hours: false, abs: false };
     const y = year();
     return [
       { key: 'name', title: 'Pracownik', w: 170 }, { key: 'place', title: 'Miejsce', w: 52 },
@@ -111,17 +116,17 @@ export function mountGrafik(el, ctx) {
   let grid = [], cols = [], rows = [];
   function draw() {
     if (!st.ready) return;
-    for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' primary' : '');
+    for (const b of groupBtns) b.className = 'btn small' + (acc.groups && st.groups[b.dataset.g] ? ' primary' : '');
     if (!st.meta) {
       clear(body);
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Grafiku nie ma jeszcze w bazie.'),
-        canWrite ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z arkusza G') : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Grafiku.'), ' ', sheetBtn()));
+        acc.importG ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z arkusza G') : h('p', { class: 'muted' }, 'Import z karty G robi osoba z poziomem GOD w Grafiku.'), ' ', sheetBtn()));
       return;
     }
     sums = summaries();
     cols = columns();
     // filtry i sortowanie działają też na kolumnach ukrytych grup (jak ukryte kolumny w Harmonogramie)
-    const fcols = columns({ ut: true, hours: true, abs: true });
+    const fcols = columns(allGroups());
     for (const k of Object.keys(st.filters)) if (!fcols.some((c) => c.key === k)) delete st.filters[k];
     st.sorts = st.sorts.filter((x) => fcols.some((c) => c.key === x.key));
     const getV = (pid, c) => { const p = people().find((x) => x.id === pid); return p ? value(p, c) : ''; };
@@ -188,7 +193,7 @@ export function mountGrafik(el, ctx) {
         const fixedCell = ci < fixed;
         let txt = value(p, c), style = { borderRight: '1px solid #c8c8c8', borderBottom: '1px solid #c8c8c8', padding: '1px 4px', whiteSpace: 'nowrap', textAlign: c.key === 'name' ? 'left' : 'center' };
         const stn = F.placeStation(p.place, stList);
-        if (c.key === 'name') { txt = F.displayName(p, s ? s.remaining : 0); style = { ...style, fontWeight: 600, ...(stn ? { background: stn.bg, color: stn.color } : {}) }; }
+        if (c.key === 'name') { txt = acc.summary ? F.displayName(p, s ? s.remaining : 0) : p.name + (p.suffix ? ' ' + p.suffix : ''); style = { ...style, fontWeight: 600, ...(stn ? { background: stn.bg, color: stn.color } : {}) }; }
         if (c.ut !== undefined) style = { ...style, background: utShade(c.ut, c.utN, false) };
         if (c.key === 'place') { if (stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 }; }
         if (c.sum === 'remaining' || c.sum === 'available') { if (Number(txt) < 0) style.background = '#ff0000'; }
@@ -215,7 +220,7 @@ export function mountGrafik(el, ctx) {
     body.append(table);
     body.scrollTop = sy; body.scrollLeft = sx;
     paintSel();
-    info.textContent = `Pracowników: ${grid.filter(Boolean).length}` + (canWrite ? '' : ' · tylko odczyt') + ' · zmiany zapisują się od razu' + (Object.keys(st.filters).length ? ` · filtry: ${Object.keys(st.filters).length}` : '') + (st.undo.length ? ` · cofnij: ${st.undo.length}` : '');
+    info.textContent = `Pracowników: ${grid.filter(Boolean).length}` + ` · ${acc.label}` + (canWrite ? ' · zmiany zapisują się od razu' : ' · tylko przeglądanie') + (Object.keys(st.filters).length ? ` · filtry: ${Object.keys(st.filters).length}` : '') + (st.undo.length ? ` · cofnij: ${st.undo.length}` : '');
   }
 
   // ---------- zaznaczenie i klawiatura (jak w Excelu) ----------
@@ -245,7 +250,7 @@ export function mountGrafik(el, ctx) {
     e.preventDefault(); body.focus(); setSel(p.r, p.c, e.shiftKey); dragging = true;
   });
   body.addEventListener('mousemove', (e) => { if (!dragging || !(e.buttons & 1)) { dragging = false; return; } const p = posOf(e); if (p && st.sel && (p.r !== st.sel.r1 || p.c !== st.sel.c1) && grid[p.r]) { st.sel = { ...st.sel, r1: p.r, c1: p.c }; paintSel(); } });
-  body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name') personDialog(grid[p.r]); else beginEdit(null); });
+  body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name') { if (acc.summary) personDialog(grid[p.r]); } else beginEdit(null); });
   body.addEventListener('contextmenu', (e) => { const p = posOf(e); if (!p) return; e.preventDefault(); setSel(p.r, p.c); contextMenu(e, p); });
   body.addEventListener('keydown', (e) => {
     if (st.editing || !st.meta) return;
@@ -273,7 +278,7 @@ export function mountGrafik(el, ctx) {
 
   // ---------- zapis (od razu do bazy), cofanie ----------
   async function apply(items, label) {
-    if (!canWrite) { toast('Grafik: tylko odczyt (prawo zapisu ustawia administrator w zakładce Uzytkownicy, kolumna „Grafik”)'); return; }
+    if (!canWrite) { toast(`Grafik: tylko przeglądanie (poziom ${acc.label}; poziomy ustawia administrator w zakładce Uzytkownicy, kolumna „Grafik dostęp”)`); return; }
     const changes = [], before = [];
     for (const it of items) {
       const ch = { pid: it.p.id, iso: it.iso };
@@ -313,8 +318,9 @@ export function mountGrafik(el, ctx) {
     if (!st.sel) return;
     const c = cols[st.sel.c1], p = grid[st.sel.r1];
     if (!p) return;
-    if (c.key === 'name') { personDialog(p); return; }
+    if (c.key === 'name') { if (acc.summary) personDialog(p); return; }
     if (!c.iso && !c.edit) return;
+    if (c.edit && !acc.manage) { toast(`Urlopy zmienia poziom MASTER lub GOD (masz ${acc.label})`); return; }
     if (!canWrite) { toast('Grafik: tylko odczyt'); return; }
     const td = cellEl(st.sel.r1, st.sel.c1); if (!td) return;
     const r = td.getBoundingClientRect(), b = body.getBoundingClientRect();
@@ -381,7 +387,8 @@ export function mountGrafik(el, ctx) {
       if (canWrite) items.push([n ? 'Edytuj komentarz…' : 'Komentarz…', () => noteDialog(p, c.iso)]);
       if (canWrite && n) items.push(['Usuń komentarz', () => apply([{ p, iso: c.iso, note: '' }], 'Usunięcie komentarza')]);
     }
-    items.push(['Podsumowanie pracownika…', () => personDialog(p)]);
+    if (acc.summary) items.push(['Podsumowanie pracownika…', () => personDialog(p)]);
+    if (!items.length) return;
     const menu = h('div', { class: 'gr-menu', style: { position: 'fixed', left: e.clientX + 'px', top: e.clientY + 'px', zIndex: 9999, background: '#fff', border: '1px solid #888', boxShadow: '0 3px 10px rgba(0,0,0,.3)', minWidth: '200px' } },
       ...items.map(([label, fn]) => h('div', { style: { padding: '6px 12px', cursor: 'pointer' }, onmouseenter: (ev) => { ev.target.style.background = '#e8f0fe'; }, onmouseleave: (ev) => { ev.target.style.background = ''; }, onmousedown: (ev) => { ev.preventDefault(); menu.remove(); fn(); } }, label)));
     document.body.append(menu);
@@ -406,7 +413,7 @@ export function mountGrafik(el, ctx) {
         row('Dostępny (UT poprz. + bieżący − wykorzystane)', s.available, s.available < 0), row('Pozostało (dostępny − zaplanowane)', s.remaining, s.remaining < 0), row('Plan urlopu (suma)', s.planned), row(`Godziny ${year()}`, s.hoursToMonth[11]))),
       h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px', marginTop: '8px' } }, mt, abs),
       h('p', { class: 'muted' }, `Miejsce pracy: ${p.place || '—'}${p.nr ? ' · Nr ew.: ' + p.nr : ''}. Godziny przepracowane = suma godzin zmian z wpisów (a8 = 8, a8b2 = 10, b2c6 = 8; UT, L4 i inne nieobecności = 0).`),
-      h('div', { class: 'actions' }, canWrite ? h('button', { class: 'btn', onclick: () => { m.close(); personEdit(p); } }, 'Zmień dane…') : null, h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+      h('div', { class: 'actions' }, acc.manage ? h('button', { class: 'btn', onclick: () => { m.close(); personEdit(p); } }, 'Zmień dane…') : null, h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
   }
   function personEdit(p) {
     const y = year(), ut = (p.ut || {})[y] || {};
@@ -433,7 +440,7 @@ export function mountGrafik(el, ctx) {
    * na górze okna wybór innej kolumny, także z ukrytych grup; filtry i sortowanie zapamiętane na tym komputerze.
    */
   function openFilter(c) {
-    const fcols = columns({ ut: true, hours: true, abs: true });
+    const fcols = columns(allGroups());
     const getV = (pid, col) => { const p = people().find((x) => x.id === pid); return p ? value(p, col) : ''; };
     const all = people().filter((p) => !p.sep).map((p) => p.id);
     const cur = st.sorts.find((x) => x.key === c.key);
@@ -481,8 +488,8 @@ export function mountGrafik(el, ctx) {
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     ...groupBtns, (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
-    canWrite ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza', onclick: doImport }, 'Import z G') : null,
-    h('button', { class: 'btn small', onclick: openSheet, title: 'Dawny widok: wprost z karty G arkusza' }, 'Arkusz'), info), body);
+    acc.importG ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza (tylko GOD)', onclick: doImport }, 'Import z G') : null,
+    acc.sheet ? h('button', { class: 'btn small', onclick: openSheet, title: 'Dawny widok: wprost z karty G arkusza' }, 'Arkusz') : null, info), body);
   zoomLabel.textContent = st.zoom + '%';
   start();
   return cleanup;

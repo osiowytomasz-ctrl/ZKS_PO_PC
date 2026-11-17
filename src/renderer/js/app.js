@@ -4,6 +4,7 @@ import { startBackgroundRefresh } from './prefetch.js';
 import { permissionsSummary } from './logic/common.js';
 import { mountHome } from './views/home.js';
 import { mountCompetence } from './views/competence.js';
+import { grafikAccess, grafikLevelOf } from './logic/grafikAccess.js';
 import { mountSettings } from './views/settings.js';
 import { mountScanner } from './views/scanner.js';
 import { mountGrafik } from './views/grafik.js';
@@ -22,7 +23,7 @@ import { mountToolRoom } from './views/toolroom.js';
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
-  { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', mount: mountCompetence },
+  { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', mount: mountCompetence, visible: () => grafikAccess(grafikLevelOf(ctx.user)).competence },
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
@@ -60,6 +61,8 @@ export const ctx = {
   },
   canWrite(perm) { return !!ctx.user && (!perm || (ctx.user.permissions || {})[perm] === 'write' || (!(perm in (ctx.user.permissions || {})) && false)); },
   level(perm) { return ctx.user ? (ctx.user.permissions || {})[perm] || 'none' : 'none'; },
+  /** Uprawnienia w Grafiku i Kompetencjach (GOD / MASTER / CLERIK / TOURIST). */
+  grafikAcc() { return grafikAccess(grafikLevelOf(ctx.user)); },
 };
 
 const root = document.getElementById('app');
@@ -85,8 +88,8 @@ function topbar(title, showBack) {
   const navBtn = (label, onclick, { active = false, style = '', disabled = false, title: tip = '' } = {}) =>
     h('button', { class: 'nav ' + style + (active ? ' on' : ''), disabled, title: tip || label, onclick }, label);
   const nav = h('div', { class: 'nav-bar' });
-  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp)) {
-    const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
+  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && (!x.visible || x.visible()))) {
+    const denied = m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
     nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: m.style || '', disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
   }
   nav.append(h('span', { class: 'nav-sep' }));
@@ -114,7 +117,8 @@ export function go(id) {
   else {
     const mod = MODULES.find((m) => m.id === id);
     title = mod ? mod.title : id;
-    if (mod && mod.mount) mount = mod.mount;
+    if (mod && mod.visible && !mod.visible()) mount = (el) => el.append(h('div', { class: 'panel' }, `${mod.title}: brak dostępu.`));
+    else if (mod && mod.mount) mount = mod.mount;
     else if (mod && mod.web) mount = (el, c) => mountWeb(el, c, mod);
     else mount = (el, c) => mountPlaceholder(el, c, mod);
   }

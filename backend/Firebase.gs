@@ -10,6 +10,7 @@
  * Token ważny 1 godzinę; aplikacja odnawia go sama. Claims w tokenie (używane w regułach Firestore):
  *   plan: 'none'|'read'|'write', grafik: 'none'|'read'|'write',
  *   harm: 'god'|'master'|'clerik'|'tourist'|'none' — poziom dostępu do Harmonogramu.
+ *   grl:  'god'|'master'|'clerik'|'tourist'|'none' — poziom Grafiku i Kompetencji (kolumna „Grafik dostęp”, opis niżej).
  *
  * Poziomy Harmonogramu (kolumna „Harmonogram” w zakładce Uzytkownicy):
  *   GOD     – przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki operacji, kolory stanowisk, święta
@@ -46,13 +47,16 @@ function api_parseHarmLevel_(text) {
 }
 
 /** Mapa email → poziom z kolumny „Harmonogram” (tylko wypełnione komórki), czytana z karty za każdym razem. */
-function api_harmLevels_() {
+function api_harmLevels_() { return api_levelColumn_(HARM_COLUMN); }
+
+/** Mapa email → poziom z kolumny poziomów [name] zakładki Uzytkownicy (tylko wypełnione komórki). */
+function api_levelColumn_(name) {
   var map = {};
   var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
   if (sheet && sheet.getLastRow() >= 2) {
     var values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
     var header = values[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
-    var col = header.indexOf(HARM_COLUMN.toLowerCase());
+    var col = header.indexOf(String(name).toLowerCase());
     if (col >= 0) {
       values.slice(1).forEach(function (row) {
         var email = String(row[0] || '').trim().toLowerCase();
@@ -81,6 +85,50 @@ function api_harmDefault_(ctx, email) {
   return 'none';
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Poziomy Grafiku i Kompetencji (kolumna „Grafik dostęp” → claim `grl` w tokenie, pole `grafikLevel` w api_whoami):
+//   GOD     – wszystko (także import z karty G)
+//   MASTER  – wszystko poza importem z karty G: edycja wpisów, pracownicy, urlopy, podsumowania, widok z arkusza, Kompetencje
+//   CLERIK  – Grafik: wpisy zmian i komentarze; bez kolumn Urlopy / Godziny / Absencje, bez importu i widoku z arkusza; bez Kompetencji
+//   TOURIST – Grafik: tylko przeglądanie, bez podsumowań; bez Kompetencji
+//   ---     – brak dostępu
+// Pusta komórka: administrator = GOD, „zapis” w kolumnie Grafik = MASTER, „odczyt” = TOURIST, inaczej brak dostępu.
+// ---------------------------------------------------------------------------------------------------------------------
+var GRAFIK_LEVEL_COLUMN = 'Grafik dostęp';
+
+function api_grafikLevel_(ctx) {
+  var email = String((ctx && ctx.email) || '').trim().toLowerCase();
+  var level = api_levelColumn_(GRAFIK_LEVEL_COLUMN)[email];
+  if (level) return level;
+  if (typeof API_ADMIN_EMAIL !== 'undefined' && email === String(API_ADMIN_EMAIL).toLowerCase()) return 'god';
+  var p = (ctx && ctx.permissions) || {};
+  if (p.grafik === 'write') return 'master';
+  if (p.grafik === 'read') return 'tourist';
+  return 'none';
+}
+
+/** Wymagany poziom Grafiku (ranga: tourist < clerik < master < god); inaczej błąd. */
+function api_requireGrafikLevel_(ctx, min) {
+  var order = ['none', 'tourist', 'clerik', 'master', 'god'];
+  var lv = api_grafikLevel_(ctx);
+  if (order.indexOf(lv) < order.indexOf(min)) throw new Error('Brak uprawnień w Grafiku (wymagany poziom ' + min.toUpperCase() + ', masz ' + lv.toUpperCase() + ').');
+  return lv;
+}
+
+/** Jednorazowo (z edytora): kolumna „Grafik dostęp” z listą wyboru GOD / MASTER / CLERIK / TOURIST / ---. */
+function api_setupGrafikLevelColumn() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
+  if (!sheet) throw new Error('Brak zakładki ' + API_USERS_SHEET);
+  var lastCol = sheet.getLastColumn();
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+  var col = header.indexOf(GRAFIK_LEVEL_COLUMN.toLowerCase()) + 1;
+  if (!col) { col = lastCol + 1; sheet.getRange(1, col).setValue(GRAFIK_LEVEL_COLUMN).setFontWeight('bold'); }
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(['GOD', 'MASTER', 'CLERIK', 'TOURIST', '---'], true).setAllowInvalid(false).build();
+  sheet.getRange(2, col, rows, 1).setDataValidation(rule);
+  return 'Kolumna „' + GRAFIK_LEVEL_COLUMN + '” w kolumnie ' + col + ' zakładki ' + API_USERS_SHEET;
+}
+
 function api_firebaseToken_(ctx) {
   var props = PropertiesService.getScriptProperties();
   var email = props.getProperty('FIREBASE_CLIENT_EMAIL');
@@ -92,6 +140,7 @@ function api_firebaseToken_(ctx) {
   var now = Math.floor(Date.now() / 1000);
   var perms = (ctx && ctx.permissions) || {};
   var harm = api_harmLevel_(ctx);
+  var grl = api_grafikLevel_(ctx);
   var uid = Utilities.base64EncodeWebSafe(
     Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(ctx.email || ctx.name || 'user'))
   ).replace(/=+$/, '').slice(0, 28);
@@ -104,11 +153,11 @@ function api_firebaseToken_(ctx) {
     iat: now,
     exp: now + 3600,
     uid: uid,
-    claims: { plan: perms.plan || 'none', grafik: perms.grafik || 'none', harm: harm, name: ctx.name || '' }
+    claims: { plan: perms.plan || 'none', grafik: perms.grafik || 'none', harm: harm, grl: grl, name: ctx.name || '' }
   }));
   var unsigned = header + '.' + payload;
   var sig = api_b64url_(Utilities.computeRsaSha256Signature(unsigned, key));
-  return { token: unsigned + '.' + sig, projectId: projectId, expiresAt: (now + 3600) * 1000, uid: uid, harm: harm };
+  return { token: unsigned + '.' + sig, projectId: projectId, expiresAt: (now + 3600) * 1000, uid: uid, harm: harm, grl: grl };
 }
 
 /** Test z edytora: wpisz e-mail i uruchom – w dzienniku poziom, jaki dostanie ta osoba. */

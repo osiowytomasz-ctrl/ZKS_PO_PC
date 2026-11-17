@@ -178,14 +178,14 @@ var API_FUNCS = {
   },
   grafikExport: {
     // Cała karta G do importu Grafiku do Firebase (pracownicy, miejsca pracy, urlopy, kody, komentarze, święta).
-    perm: ['grafik', 'write'],
-    run: function () { return api_grafikExport_(); }
+    // tylko GOD (kolumna „Grafik dostęp”)
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'god'); return api_grafikExport_(); }
   },
   grafikWriteBack: {
     // Okres przejściowy: zmiany z Grafiku w Firebase zapisywane także w karcie G (graf_norm, wersja webowa, formuły arkusza).
-    perm: ['grafik', 'write'],
+    // od CLERIK (wpisy zmian); zmiany danych pracowników i tak wymagają MASTER w regułach Firestore
     write: true,
-    run: function (a) { return api_grafikWriteBack_(a[0]); }
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'clerik'); return api_grafikWriteBack_(a[0]); }
   },
   saveGrData: {
     perm: ['grafik', 'write'],
@@ -546,7 +546,9 @@ function api_whoami_(ctx) {
     email: ctx.email,
     name: ctx.name,
     roles: ctx.roles,
-    permissions: ctx.permissions
+    permissions: ctx.permissions,
+    // poziom Grafiku i Kompetencji (Firebase.gs: kolumna „Grafik dostęp”)
+    grafikLevel: typeof api_grafikLevel_ === 'function' ? api_grafikLevel_(ctx) : null
   };
 }
 

@@ -18,7 +18,10 @@ const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const GROUP = { base: ['Dane podstawowe', '#bfbfbf'], perms: ['Uprawnienia', '#bdd6ee'], skills: ['Umiejętności', '#c5e0b3'] };
 
 export function mountCompetence(el, ctx) {
-  const canWrite = ctx.level('grafik') === 'write';
+  // Kompetencje: tylko MASTER i GOD Grafiku (CLERIK i TOURIST nie widzą modułu)
+  const acc = ctx.grafikAcc ? ctx.grafikAcc() : { competence: ctx.level('grafik') === 'write' };
+  const canWrite = !!acc.competence;
+  if (!acc.competence) { el.append(h('div', { class: 'panel' }, 'Kompetencje: brak dostępu (wymagany poziom MASTER lub GOD w kolumnie „Grafik dostęp”).')); return () => {}; }
   const saved = lsGet('kp.filters', {}) || {};
   const st = {
     data: null, grafik: { meta: null, cfg: null }, gReady: false, sel: null, editing: null, undo: [], redo: [], zoom: lsGet('kp.zoom', 100),

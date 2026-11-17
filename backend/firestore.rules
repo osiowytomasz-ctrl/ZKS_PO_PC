@@ -20,7 +20,13 @@ service cloud.firestore {
     // Plan i Grafik: poziomy z claimów `plan` i `grafik` (read / write)
     function planLvl() { return request.auth == null ? 'none' : tok().get('plan', 'none'); }
     function grLvl() { return request.auth == null ? 'none' : tok().get('grafik', 'none'); }
-    function grRead() { return grLvl() in ['read', 'write'] || planLvl() in ['read', 'write'] || canView(); }
+    // poziom Grafiku i Kompetencji (claim `grl`, kolumna „Grafik dostęp”); stary token: zapis w Grafiku = master, odczyt = tourist
+    function grlLegacy() { return grLvl() == 'write' ? 'master' : (grLvl() == 'read' ? 'tourist' : 'none'); }
+    function grl() { return request.auth == null ? 'none' : tok().get('grl', grlLegacy()); }
+    function grView() { return grl() in ['tourist', 'clerik', 'master', 'god']; }
+    function grCells() { return grl() in ['clerik', 'master', 'god']; }      // wpisy zmian i komentarze
+    function grManage() { return grl() in ['master', 'god']; }               // pracownicy, urlopy, Kompetencje, święta
+    function grRead() { return grView() || planLvl() in ['read', 'write'] || canView(); }
     // tylko nowe klucze w mapie ops (bez zmiany i usuwania istniejących operacji)
     function onlyAdds() {
       let before = resource.data.get('ops', {});
@@ -48,8 +54,8 @@ service cloud.firestore {
     // czyta też Grafik i Plan, a samą listę świąt może zmienić także osoba z prawem zapisu w Grafiku.
     match /config/{doc} {
       allow read: if canView() || grRead();
-      allow create: if isGod() || (grLvl() == 'write' && request.resource.data.keys().hasOnly(['holidays']));
-      allow update: if isGod() || (grLvl() == 'write' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['holidays']));
+      allow create: if isGod() || (grManage() && request.resource.data.keys().hasOnly(['holidays']));
+      allow update: if isGod() || (grManage() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['holidays']));
       allow delete: if isGod();
     }
 
@@ -72,17 +78,16 @@ service cloud.firestore {
     // Czyta każdy z dostępem do Grafiku, Planu albo Harmonogramu (podpowiedzi zmian, godziny stanowisk); zmienia – zapis w Grafiku.
     match /gr_days/{month} {
       allow read: if grRead();
-      allow write: if grLvl() == 'write';
+      allow write: if grCells();
     }
     match /gr_meta/{doc} {
       allow read: if grRead();
-      allow write: if grLvl() == 'write';
+      allow write: if grManage();
     }
 
-    // Kompetencje operatorów (kp/main: dane, uprawnienia, matryca umiejętności) – dane kadrowe, więc tylko osoby z prawem do Grafiku
+    // Kompetencje operatorów (kp/main: dane, uprawnienia, matryca umiejętności) – dane kadrowe: tylko MASTER i GOD Grafiku
     match /kp/{doc} {
-      allow read: if grLvl() in ['read', 'write'];
-      allow write: if grLvl() == 'write';
+      allow read, write: if grManage();
     }
 
     // test połączenia z Ustawień aplikacji PC
