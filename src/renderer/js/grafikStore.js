@@ -13,13 +13,14 @@ export async function watchGrafik(months, cb, onError) {
   const { sdk, db } = await firebase();
   const st = { meta: null, months: {}, cfg: null, subs: new Map(), metaReady: false, cfgReady: false, ready: new Set() };
   const emit = () => { if (st.metaReady && st.cfgReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months }, cfg: st.cfg }); };
-  const unMeta = sdk.onSnapshot(sdk.doc(db, 'gr_meta', 'main'), (s) => { st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
+  // pusty dokument z pamięci lokalnej (komputer jeszcze nie pobrał Grafiku) to nie „brak w bazie” – czekamy na serwer
+  const unMeta = sdk.onSnapshot(sdk.doc(db, 'gr_meta', 'main'), (s) => { if (!s.exists() && s.metadata && s.metadata.fromCache) return; st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
   const unCfg = sdk.onSnapshot(sdk.doc(db, 'config', 'main'), (s) => { st.cfg = s.exists() ? s.data() : null; st.cfgReady = true; emit(); }, () => { st.cfg = null; st.cfgReady = true; emit(); });
   const setMonths = (list) => {
     const want = new Set(list);
     for (const [k, un] of st.subs) if (!want.has(k)) { un(); st.subs.delete(k); delete st.months[k]; st.ready.delete(k); }
     for (const k of want) if (!st.subs.has(k)) {
-      st.subs.set(k, sdk.onSnapshot(sdk.doc(db, 'gr_days', k), (s) => { st.months[k] = s.exists() ? s.data() : {}; st.ready.add(k); emit(); }, onError));
+      st.subs.set(k, sdk.onSnapshot(sdk.doc(db, 'gr_days', k), (s) => { if (!s.exists() && s.metadata && s.metadata.fromCache) return; st.months[k] = s.exists() ? s.data() : {}; st.ready.add(k); emit(); }, onError));
     }
     emit();
   };

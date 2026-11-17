@@ -5,7 +5,7 @@ import { firebase } from './fb.js';
 
 export async function watchCompetence(cb, onError) {
   const { sdk, db } = await firebase();
-  return sdk.onSnapshot(sdk.doc(db, 'kp', 'main'), (s) => cb(s.exists() ? s.data() : null), onError);
+  return sdk.onSnapshot(sdk.doc(db, 'kp', 'main'), (s) => (!s.exists() && s.metadata && s.metadata.fromCache) ? undefined : cb(s.exists() ? s.data() : null), onError);
 }
 
 /** Zmiany pól: [{id, path: 'name' | 'perms.pJ' | 'skills.sAE' …, value}] ('' = usunięcie pola) – jednym zapisem. */
@@ -50,7 +50,7 @@ export async function watchGrafikMeta(cb) {
   const st = { meta: null, cfg: null, n: 0 };
   const emit = () => { if (st.n >= 2) cb({ meta: st.meta, cfg: st.cfg }); };
   const once = new Set();
-  const on = (c, d, k) => sdk.onSnapshot(sdk.doc(db, c, d), (s) => { st[k] = s.exists() ? s.data() : null; if (!once.has(k)) { once.add(k); st.n++; } emit(); }, () => { st[k] = null; if (!once.has(k)) { once.add(k); st.n++; } emit(); });
+  const on = (c, d, k) => sdk.onSnapshot(sdk.doc(db, c, d), (s) => { if (!s.exists() && s.metadata && s.metadata.fromCache) return; st[k] = s.exists() ? s.data() : null; if (!once.has(k)) { once.add(k); st.n++; } emit(); }, () => { st[k] = null; if (!once.has(k)) { once.add(k); st.n++; } emit(); });
   const u1 = on('gr_meta', 'main', 'meta'), u2 = on('config', 'main', 'cfg');
   return () => { u1(); u2(); };
 }
