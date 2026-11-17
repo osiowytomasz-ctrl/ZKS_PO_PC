@@ -57,8 +57,8 @@ export function mountGrafik(el, ctx) {
   async function start() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…'));
     try {
-      st.watcher = await watchGrafik(neededMonths(), ({ meta, months, cfg }) => {
-        st.meta = meta; st.months = months; st.cfg = cfg || null; const u = F.unpackMonths(months); st.codes = u.codes; st.notes = u.notes; st.ready = true; draw();
+      st.watcher = await watchGrafik(neededMonths(), ({ meta, months, cfg, missingOnServer }) => {
+        st.meta = meta; st.months = months; st.cfg = cfg || null; st.missingOnServer = !!missingOnServer; const u = F.unpackMonths(months); st.codes = u.codes; st.notes = u.notes; st.ready = true; draw();
       }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy Grafiku: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły Firestore: gr_days, gr_meta)' : e.message || e)), sheetBtn()); });
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message || String(e)), sheetBtn()); }
   }
@@ -120,6 +120,7 @@ export function mountGrafik(el, ctx) {
     if (!st.meta) {
       clear(body);
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Grafiku nie ma jeszcze w bazie.'),
+        h('p', { class: 'muted' }, st.missingOnServer ? 'Serwer Firebase potwierdza: brak dokumentu gr_meta/main (pracownicy Grafiku).' : 'Nie udało się potwierdzić na serwerze – sprawdź połączenie z internetem.'),
         acc.importG ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z arkusza G') : h('p', { class: 'muted' }, 'Import z karty G robi osoba z poziomem GOD w Grafiku.'), ' ', sheetBtn()));
       return;
     }

@@ -1,6 +1,6 @@
 // Grafik w Firestore: gr_meta/main (pracownicy, miejsca pracy, urlopy, święta) i gr_days/{rrrr-mm} (kody i komentarze miesiąca).
 // W bazie tylko kody i komentarze – kolory i podsumowania liczy program (logic/grafikFb.js). Nasłuch na żywo tylko potrzebnych miesięcy.
-import { firebase } from './fb.js';
+import { firebase, resetFirestoreCache } from './fb.js';
 
 // Pusty wynik z pamięci lokalnej pomijamy i czekamy na serwer; potwierdzenie z serwera, że dokumentu nie ma, różni się od pamięci
 // tylko znacznikiem fromCache – bez includeMetadataChanges Firestore go nie przysyła (ekran wisiałby na „Wczytywanie…”).
@@ -16,9 +16,24 @@ import { addHolidays } from './holidayStore.js';
 export async function watchGrafik(months, cb, onError) {
   const { sdk, db } = await firebase();
   const st = { meta: null, months: {}, cfg: null, subs: new Map(), metaReady: false, cfgReady: false, ready: new Set() };
-  const emit = () => { if (st.metaReady && st.cfgReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months }, cfg: st.cfg }); };
+  const emit = () => { if (st.metaReady && st.cfgReady && [...st.subs.keys()].every((k) => st.ready.has(k))) cb({ meta: st.meta, months: { ...st.months }, cfg: st.cfg, missingOnServer: !!st.missingOnServer }); };
   // pusty dokument z pamięci lokalnej (komputer jeszcze nie pobrał Grafiku) to nie „brak w bazie” – czekamy na serwer
-  const unMeta = sdk.onSnapshot(sdk.doc(db, 'gr_meta', 'main'), WITH_META, (s) => { if (!s.exists() && s.metadata && s.metadata.fromCache) return; st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
+  const metaRef = sdk.doc(db, 'gr_meta', 'main');
+  let verified = false, fromServer = false;
+  const unMeta = sdk.onSnapshot(metaRef, WITH_META, async (s) => {
+    if (!s.exists() && s.metadata && s.metadata.fromCache) return;
+    // „brak dokumentu” z nasłuchu sprawdzamy wprost na serwerze (z pominięciem pamięci lokalnej): jeśli dane tam są,
+    // pamięć lokalna jest niespójna – czyścimy ją i przeładowujemy program; gdy już czyściliśmy w tej sesji – bierzemy dane z serwera
+    if (!s.exists() && !verified && sdk.getDocFromServer) {
+      verified = true;
+      try {
+        const srv = await sdk.getDocFromServer(metaRef);
+        if (srv.exists()) { if (await resetFirestoreCache('gr_meta/main jest na serwerze, a pamięć lokalna podaje brak')) return; fromServer = true; st.meta = srv.data(); st.metaReady = true; emit(); return; }
+        st.missingOnServer = true;
+      } catch (e) { console.warn('getDocFromServer gr_meta', e); }
+    }
+    if (!s.exists() && fromServer) return;
+    st.meta = s.exists() ? s.data() : null; st.metaReady = true; emit(); }, onError);
   const unCfg = sdk.onSnapshot(sdk.doc(db, 'config', 'main'), (s) => { st.cfg = s.exists() ? s.data() : null; st.cfgReady = true; emit(); }, () => { st.cfg = null; st.cfgReady = true; emit(); });
   const setMonths = (list) => {
     const want = new Set(list);

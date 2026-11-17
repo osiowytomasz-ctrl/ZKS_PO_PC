@@ -114,6 +114,7 @@ function topbar(title, showBack) {
 }
 
 export function go(id) {
+  try { sessionStorage.setItem('zks.current', id); } catch { /* bez pamięci sesji */ }
   if (cleanup) { try { cleanup(); } catch (e) { /* ignorujemy */ } cleanup = null; }
   current = id;
   clear(root);
@@ -142,7 +143,11 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   const cfg = await window.zks.getSettings();
   try { ctx.version = (await window.zks.appVersion?.()) || ''; } catch { ctx.version = ''; }
   if (cfg.url && cfg.key) await ctx.loadUser();
-  go(cfg.url && cfg.key ? 'home' : 'settings');
+  // po naprawie pamięci bazy (fb.js: resetFirestoreCache – przeładowanie) wracamy do tego samego modułu
+  let reopen = null;
+  try { const t = Number(sessionStorage.getItem('zks.fb.cacheReset') || 0); if (t && Date.now() - t < 60000) reopen = sessionStorage.getItem('zks.current'); } catch { /* bez pamięci sesji */ }
+  go(cfg.url && cfg.key ? (reopen && reopen !== 'settings' ? reopen : 'home') : 'settings');
+  if (reopen) setTimeout(() => toast('Naprawiono pamięć lokalną bazy – dane pobrane z serwera od nowa'), 500);
   if (cfg.url && cfg.key) {
     preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
     startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none');

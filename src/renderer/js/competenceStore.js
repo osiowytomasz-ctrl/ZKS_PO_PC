@@ -1,7 +1,7 @@
 // Kompetencje w Firestore: jeden dokument kp/main = { skills: [{key, name, weight, color}], perms: [{key, name, expiry?}],
 // people: { id: {lp, name, dept, nr, komis, machine, position, perms: {key: wartość}, skills: {key: poziom}} } } (ok. 35 KB dla 150 osób).
 // Zmiany pojedynczych pól idą ścieżką „people.id.pole”, więc równoczesna edycja różnych komórek przez dwie osoby się nie nadpisuje.
-import { firebase } from './fb.js';
+import { firebase, resetFirestoreCache } from './fb.js';
 
 // Pusty wynik z pamięci lokalnej pomijamy i czekamy na serwer; potwierdzenie z serwera, że dokumentu nie ma, różni się od pamięci
 // tylko znacznikiem fromCache – bez includeMetadataChanges Firestore go nie przysyła (ekran wisiałby na „Wczytywanie…”).
@@ -54,7 +54,16 @@ export async function watchGrafikMeta(cb) {
   const st = { meta: null, cfg: null, n: 0 };
   const emit = () => { if (st.n >= 2) cb({ meta: st.meta, cfg: st.cfg }); };
   const once = new Set();
-  const on = (c, d, k) => sdk.onSnapshot(sdk.doc(db, c, d), WITH_META, (s) => { if (!s.exists() && s.metadata && s.metadata.fromCache) return; st[k] = s.exists() ? s.data() : null; if (!once.has(k)) { once.add(k); st.n++; } emit(); }, () => { st[k] = null; if (!once.has(k)) { once.add(k); st.n++; } emit(); });
+  const fixed = new Set();
+  const on = (c, d, k) => sdk.onSnapshot(sdk.doc(db, c, d), WITH_META, async (s) => {
+    if (!s.exists() && s.metadata && s.metadata.fromCache) return;
+    if (!s.exists() && fixed.has(k)) return;
+    // „brak” z nasłuchu – sprawdzenie na serwerze; niespójna pamięć lokalna jest czyszczona (fb.js)
+    if (!s.exists() && sdk.getDocFromServer && !fixed.has(k + '?')) {
+      fixed.add(k + '?');
+      try { const srv = await sdk.getDocFromServer(sdk.doc(db, c, d)); if (srv.exists()) { if (await resetFirestoreCache(c + '/' + d + ' jest na serwerze, a pamięć lokalna podaje brak')) return; fixed.add(k); st[k] = srv.data(); if (!once.has(k)) { once.add(k); st.n++; } emit(); return; } } catch (e) { console.warn(e); }
+    }
+    st[k] = s.exists() ? s.data() : null; if (!once.has(k)) { once.add(k); st.n++; } emit(); }, () => { st[k] = null; if (!once.has(k)) { once.add(k); st.n++; } emit(); });
   const u1 = on('gr_meta', 'main', 'meta'), u2 = on('config', 'main', 'cfg');
   return () => { u1(); u2(); };
 }

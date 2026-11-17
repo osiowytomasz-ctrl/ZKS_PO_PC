@@ -42,3 +42,18 @@ export async function firebase({ fresh = false } = {}) {
 export const harmLevel = () => harm;
 /** Nasłuch zmiany poziomu (po odnowieniu tokenu); zwraca funkcję wyłączającą. */
 export const onHarmLevel = (fn) => { harmListeners.add(fn); return () => harmListeners.delete(fn); };
+
+/**
+ * Naprawa pamięci lokalnej bazy (IndexedDB): wyłączenie Firestore, usunięcie jego pamięci i przeładowanie programu.
+ * Dane są w bazie na serwerze – po przeładowaniu program pobiera je od nowa. Raz na sesję (ochrona przed pętlą przeładowań).
+ */
+export async function resetFirestoreCache(reason = '') {
+  const KEY = 'zks.fb.cacheReset';
+  try { if (sessionStorage.getItem(KEY)) return false; sessionStorage.setItem(KEY, String(Date.now())); } catch { /* bez pamięci sesji */ }
+  console.warn('Firestore: czyszczenie pamięci lokalnej –', reason);
+  const s = await load();
+  try { if (db) await s.terminate(db); } catch (e) { console.warn(e); }
+  try { if (db) await s.clearIndexedDbPersistence(db); } catch (e) { console.warn('clearIndexedDbPersistence', e); }
+  location.reload();
+  return true;
+}
