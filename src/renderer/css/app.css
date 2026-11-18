@@ -94,3 +94,10 @@ table.t tr.click:hover td { filter: brightness(.93); }
 /* Workflow: zaznaczona i edytowana komórka */
 td.wf-sel { box-shadow: inset 0 0 0 2px #1565c0; }
 td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: inset 0 0 0 2px #1565c0; cursor: text !important; outline: none; }
+/* Karta pracownika – zwarta: odstęp między wierszami tekstu 25% czcionki, wiersze tabel 125% czcionki. */
+.pcard { font-size: 13px; line-height: 1.25; }
+.pcard p, .pcard h4 { margin: 2px 0 !important; line-height: 1.25; }
+.pcard .row { gap: 0 12px !important; row-gap: 0 !important; }
+.pcard table.t { font-size: 13px; }
+.pcard table.t th, .pcard table.t td { padding: 0 6px; line-height: 1.25; height: 1.25em; }
+.pcard table.t th { position: static; }

@@ -35,10 +35,10 @@ export function competenceBlock(kp, id) {
     h('div', { class: 'row', style: { gap: '16px', flexWrap: 'wrap' } },
       ...[['Maszyna / stanowisko', p.machine], ['Stanowisko wg umowy', p.position], ['Komis wewn.', p.komis], ['Data zatrudnienia', K.fmtPerm(p.hired || '')], ['Punkty', String(K.points(p, skills))]]
         .filter(([, v]) => v).map(([k, v]) => h('span', {}, h('span', { class: 'muted' }, k + ': '), h('b', {}, v)))),
-    types.length ? h('table', { class: 't', style: { marginTop: '6px' } }, h('thead', {}, h('tr', {}, ...['Badania / uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))), h('tbody', {}, ...types.map(row)))
+    types.length ? h('table', { class: 't', style: { marginTop: '2px' } }, h('thead', {}, h('tr', {}, ...['Badania / uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))), h('tbody', {}, ...types.map(row)))
       : h('p', { class: 'muted' }, 'Brak wpisanych badań i uprawnień.'),
-    sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`,
-      style: { border: '1px solid #999', borderLeft: `8px solid ${s.color}`, padding: '2px 6px', background: K.levelColor(v) || '#fff' } }, `${s.name}: ${v}%`))) : null);
+    sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 4px', marginTop: '2px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`,
+      style: { border: '1px solid #999', borderLeft: `8px solid ${s.color}`, padding: '0 6px', background: K.levelColor(v) || '#fff' } }, `${s.name}: ${v}%`))) : null);
 }
 
 /** Sekcja Grafiku (rok [year]): urlopy, godziny w miesiącach, absencje. [codes] – iso → kod. */
@@ -49,17 +49,25 @@ export function grafikBlock(p, codes, year) {
     h('div', { class: 'row', style: { gap: '14px', flexWrap: 'wrap' } },
       ...[['UT z ' + (Number(year) - 1), ut.prev || 0], ['UT ' + year, ut.cur || 0], ['Wykorzystane', s.used], ['Zaplanowane', s.future], ['Dostępny', s.available], ['Pozostało', s.remaining], ['Godziny ' + year, s.hoursToMonth[11]]]
         .map(([k, v]) => h('span', {}, h('span', { class: 'muted' }, k + ': '), h('b', { style: red(Number(v)) }, String(v))))),
-    h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px', marginTop: '6px', flexWrap: 'wrap' } },
+    h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px', marginTop: '2px', flexWrap: 'wrap' } },
       h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Miesiąc', 'UT', 'Plan', 'Godziny', 'Narast.'].map((x) => h('th', {}, x)))),
         h('tbody', {}, ...F.MONTHS.map((mn, i) => h('tr', {}, h('td', { class: 'left' }, mn), h('td', { style: { background: s.monthPlanMet[i] ? '#ff9900' : '' } }, s.utByMonth[i] || ''), h('td', {}, s.plan[i] || ''), h('td', {}, s.hoursByMonth[i] || ''), h('td', {}, s.hoursToMonth[i] || ''))))),
-      h('table', { class: 't' }, h('tbody', {}, ...F.ABSENCES.map(([k, label]) => { const st = F.absenceStyle(k); return h('tr', {}, h('td', { class: 'left', style: { background: st.bg, color: st.color } }, `${label} (${k})`), h('td', {}, s.absences[k] || 0)); })))));
+      absenceTable(s.absences)));
+}
+
+/** Tylko absencje wykorzystane przez pracownika (liczba > 0), w kolorach Grafiku. */
+function absenceTable(abs) {
+  const used = F.ABSENCES.filter(([k]) => (abs || {})[k] > 0);
+  if (!used.length) return h('p', { class: 'muted' }, 'Brak absencji.');
+  return h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, 'Absencja'), h('th', {}, 'Dni'))),
+    h('tbody', {}, ...used.map(([k, label]) => { const st = F.absenceStyle(k); return h('tr', {}, h('td', { class: 'left', style: { background: st.bg, color: st.color } }, `${label} (${k})`), h('td', {}, abs[k])); })));
 }
 
 /**
  * Karta pracownika z bazy: [who] = {id} albo {name}; [access] – poziom Grafiku (summary – urlopy i godziny). [extra] – przyciski dodatkowe.
  */
 export async function openPersonCard(who, { access = { summary: true }, extra = [] } = {}) {
-  const body = h('div', {}, h('p', { class: 'muted' }, 'Wczytywanie karty pracownika…'));
+  const body = h('div', { class: 'pcard' }, h('p', { class: 'muted' }, 'Wczytywanie karty pracownika…'));
   const m = modal('Karta pracownika', h('div', {}, body, h('div', { class: 'actions' }, ...extra.map(([label, fn]) => h('button', { class: 'btn', onclick: () => { m.close(); fn(); } }, label)),
     h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
   try {
@@ -71,8 +79,8 @@ export async function openPersonCard(who, { access = { summary: true }, extra = 
     const year = String(new Date().getFullYear());
     clear(body);
     const stn = p ? F.placeStation(p.place, stationList(cfg)) : null;
-    const title = h('div', { class: 'row', style: { gap: '10px', alignItems: 'center', marginBottom: '6px' } },
-      h('b', { style: { fontSize: '18px', padding: '2px 8px', background: stn ? stn.bg : '', color: stn ? stn.color : '' } }, p ? p.name : (who.name || who.id || '?')),
+    const title = h('div', { class: 'row', style: { gap: '10px', alignItems: 'center', marginBottom: '2px' } },
+      h('b', { style: { fontSize: '16px', padding: '0 8px', background: stn ? stn.bg : '', color: stn ? stn.color : '' } }, p ? p.name : (who.name || who.id || '?')),
       p ? h('span', { class: 'muted' }, `${p.place ? 'stanowisko ' + p.place : 'bez stanowiska'}${p.nr ? ' · nr ' + p.nr : ''}`) : h('span', { class: 'err' }, 'nie znaleziono w Grafiku'));
     body.append(title);
     if (p && access.summary) {
@@ -80,9 +88,9 @@ export async function openPersonCard(who, { access = { summary: true }, extra = 
       const docs = await Promise.all(months.map((mk) => one('gr_days', mk)));
       const codes = {};
       months.forEach((mk, i) => { const d = docs[i]; for (const [dd, v] of Object.entries(((d && d.c) || {})[p.id] || {})) codes[`${mk}-${dd}`] = v; });
-      body.append(h('h4', { style: { margin: '6px 0 4px' } }, `Grafik ${year}`), grafikBlock(p, codes, year));
+      body.append(h('h4', { style: { margin: '4px 0 2px' } }, `Grafik ${year}`), grafikBlock(p, codes, year));
     }
-    body.append(h('h4', { style: { margin: '10px 0 4px' } }, 'Kompetencje'), competenceBlock(kp, id));
+    body.append(h('h4', { style: { margin: '4px 0 2px' } }, 'Kompetencje'), competenceBlock(kp, id));
   } catch (e) { clear(body); body.append(h('p', { class: 'err' }, 'Nie wczytano karty: ' + (e.message || e))); }
   return m;
 }
