@@ -159,6 +159,11 @@ var API_FUNCS = {
     write: true,
     run: function (a, ctx) { return mp_addDetail_(a[0], ctx); }
   },
+  mp_export: {
+    // Moduł Mistrz PO: dane WPISYWANE zakładek arkusza Mistrz_po do importu do bazy Firebase (kolumny liczone liczy program).
+    // poziom MASTER lub GOD (kolumna „Grafik dostęp”)
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'master'); return mp_export_(); }
+  },
 
   // --- Skaner ---
   getProductCodes: {

@@ -505,6 +505,38 @@ function mp_addDetail_(form, ctx) {
 // Test w edytorze (bez zapisu): sprawdza dostęp do arkusza i zakładek
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Eksport do bazy Firebase (moduł Mistrz PO w programie)
+// ---------------------------------------------------------------------------
+
+/** Zakładki i ostatnia kolumna z danymi wpisywanymi (jak SHEETS w logic/mistrz.js programu). */
+var MP_EXPORT_SHEETS = [
+  ['Rejestr operacji', 10], ['Rejestr dokumentacji', 10], ['Rejestr detali', 8], ['Lista detali', 15], ['Z.kom', 9],
+  ['Archiwum operacji', 10], ['Ar. dok', 10], ['Archiwum Lista detali', 15]
+];
+
+/** Wartość komórki do bazy: data → rrrr-mm-dd, sama godzina → gg:mm(:ss), data z godziną → „rrrr-mm-dd gg:mm”. */
+function mp_exportValue_(v, tz) {
+  if (!(v instanceof Date)) return v;
+  var hms = Utilities.formatDate(v, tz, 'HH:mm:ss').replace(/:00$/, '');
+  if (Utilities.formatDate(v, tz, 'yyyy') === '1899') return hms;
+  var d = Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  return hms === '00:00' ? d : d + ' ' + hms;
+}
+
+/** { sheets: { nazwa zakładki: [[wartości wiersza od kolumny A], …] od wiersza 1 } } – formuły i tak pomija program. */
+function mp_export_() {
+  var ss = mp_ss_(), tz = ss.getSpreadsheetTimeZone(), out = {};
+  MP_EXPORT_SHEETS.forEach(function (x) {
+    var sh = ss.getSheetByName(x[0]);
+    if (!sh || sh.getLastRow() < 1) return;
+    out[x[0]] = sh.getRange(1, 1, sh.getLastRow(), x[1]).getValues().map(function (row) {
+      return row.map(function (v) { return mp_exportValue_(v, tz); });
+    });
+  });
+  return { sheets: out, exportedAt: new Date().getTime() };
+}
+
 function mp_selfTest() {
   var problems = [];
   var ss;

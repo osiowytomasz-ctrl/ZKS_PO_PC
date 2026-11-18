@@ -69,6 +69,17 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Mistrz PO: dane wpisywane zakładek arkusza Mistrz_po (mp_meta/main, mp_rows/{zakładka_paczka}); kolumny liczone liczy program.
+    // Odczyt od CLERIK, import (zastąpienie danych) od MASTER – poziom z kolumny „Grafik dostęp” (claim grl).
+    match /mp_meta/{doc} {
+      allow read: if grCells();
+      allow write: if grManage();
+    }
+    match /mp_rows/{chunk} {
+      allow read: if grCells();
+      allow write: if grManage();
+    }
+
     // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
     match /plan_layout/{doc} {
       allow read, write: if planLvl() in ['read', 'write'];

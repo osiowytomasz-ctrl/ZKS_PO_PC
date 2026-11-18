@@ -4,6 +4,7 @@ import { startBackgroundRefresh } from './prefetch.js';
 import { permissionsSummary } from './logic/common.js';
 import { mountHome } from './views/home.js';
 import { mountCompetence } from './views/competence.js';
+import { mountMistrz } from './views/mistrz.js';
 import { grafikAccess, grafikLevelOf } from './logic/grafikAccess.js';
 import { mountSettings } from './views/settings.js';
 import { mountScanner } from './views/scanner.js';
@@ -24,6 +25,8 @@ export const MODULES = [
   { id: 'skaner', title: 'Skaner', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
   { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', mount: mountCompetence, visible: () => grafikAccess(grafikLevelOf(ctx.user)).competence },
+  // Mistrz PO: zakładki arkusza Mistrz_po z bazy Firebase (kolumny liczone liczy program); od CLERIK, import od MASTER
+  { id: 'mistrz', title: 'Mistrz PO', perm: 'grafik', mount: mountMistrz, visible: () => grafikAccess(grafikLevelOf(ctx.user)).cells },
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
