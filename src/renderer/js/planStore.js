@@ -3,7 +3,7 @@
 //  - plan_rows/{nnn}: { r: { "<wiersz>": "<JSON {v, b, f, k, runs}>" } } – po [chunk] wierszy w dokumencie; wiersz jako tekst JSON,
 //    bo Firestore nie przechowuje tablic w tablicach (komórki × fragmenty tekstu z kolorami).
 // Odczyt na żywo całego planu (kilkadziesiąt KB); zapis zmienia tylko dotknięte wiersze.
-import { firebase } from './fb.js';
+import { firebase, resetFirestoreCache } from './fb.js';
 import { api } from './ui.js';
 import * as P from './logic/plan.js';
 
@@ -50,14 +50,27 @@ export function applyToRows(g, changes) {
   return touched;
 }
 
-/** Nasłuch planu: [cb](grid | null – brak planu w bazie). */
+/**
+ * Nasłuch planu: [cb](grid | null – brak planu w bazie, info) – info: {rowDocs – ile paczek wierszy jest w bazie, server – brak potwierdzony
+ * przez serwer}. „Brak” z nasłuchu sprawdzamy wprost na serwerze: gdy dokument tam jest, pamięć lokalna jest niespójna – czyścimy ją.
+ */
 export async function watchPlan(cb, onError, email = '') {
   const { sdk, db } = await firebase();
-  let meta, metaReady = false, rowsReady = false;
+  let meta, metaReady = false, rowsReady = false, verified = false, fromServer = false, server = false;
   const docs = new Map();
-  const emit = () => { if (metaReady && rowsReady) cb(meta ? gridFromDocs(meta, [...docs.values()], email) : null); };
-  const un1 = sdk.onSnapshot(sdk.doc(db, 'plan_meta', 'main'), { includeMetadataChanges: true }, (s) => {
+  const emit = () => { if (metaReady && rowsReady) cb(meta ? gridFromDocs(meta, [...docs.values()], email) : null, { rowDocs: docs.size, server }); };
+  const metaRef = sdk.doc(db, 'plan_meta', 'main');
+  const un1 = sdk.onSnapshot(metaRef, { includeMetadataChanges: true }, async (s) => {
     if (!s.exists() && s.metadata && s.metadata.fromCache) return;
+    if (!s.exists() && fromServer) return;
+    if (!s.exists() && !verified && sdk.getDocFromServer) {
+      verified = true;
+      try {
+        const srv = await sdk.getDocFromServer(metaRef);
+        if (srv.exists()) { if (await resetFirestoreCache('plan_meta/main jest na serwerze, a pamięć lokalna podaje brak')) return; fromServer = true; meta = srv.data(); metaReady = true; emit(); return; }
+        server = true;
+      } catch (e) { console.warn('getDocFromServer plan_meta', e); }
+    }
     meta = s.exists() ? s.data() : null; metaReady = true; emit();
   }, onError);
   const un2 = sdk.onSnapshot(sdk.collection(db, 'plan_rows'), (snap) => {

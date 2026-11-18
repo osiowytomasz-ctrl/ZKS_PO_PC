@@ -41,8 +41,10 @@ export function mountPlan(el, ctx) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie planu…'));
     if (unwatchPlan) { unwatchPlan(); unwatchPlan = null; }
     try {
-      unwatchPlan = await watchPlan((g) => {
+      unwatchPlan = await watchPlan((g, info = {}) => {
         if (!g) { st.grid = null; clear(body); body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Planu nie ma jeszcze w bazie.'),
+          h('p', { class: 'muted' }, info.rowDocs ? `W bazie są wiersze planu (plan_rows: ${info.rowDocs}), ale brak dokumentu plan_meta/main – import nie dokończył się. Zaimportuj ponownie.`
+            : info.server ? 'Serwer Firebase potwierdza: brak plan_meta/main i plan_rows.' : 'Nie udało się potwierdzić na serwerze – sprawdź połączenie z internetem.'),
           ctx.level('plan') === 'write' ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z karty PLAN arkusza') : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Planie.'))); syncInfo(); return; }
         st.grid = normalizeGrid(g); st.grid.canEdit = ctx.level('plan') === 'write'; st.fresh = true;
         rebuild();
