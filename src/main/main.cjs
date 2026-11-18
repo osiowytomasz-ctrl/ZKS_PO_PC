@@ -66,6 +66,25 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith('file://')) e.preventDefault();
   });
+  // zamknięcie głównego okna kończy program – także gdy zostało ukryte okno pomocnicze (PDF, wydruk); inaczej proces wisiał w tle
+  // i kolejne uruchomienie wersji przenośnej (.exe) mogło się nie udać
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch { /* już zamknięte */ } }
+    app.quit();
+    setTimeout(() => app.exit(0), 3000).unref();
+  });
+}
+
+// Jedna kopia programu: ponowne uruchomienie pokazuje działające okno zamiast otwierać drugie (wspólna pamięć bazy, pliki ustawień)
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) { if (app.isReady()) createWindow(); return; }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show(); mainWindow.focus();
+  });
 }
 
 app.whenReady().then(() => {
