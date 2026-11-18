@@ -79,6 +79,11 @@ service cloud.firestore {
       allow read: if grCells();
       allow write: if grManage();
     }
+    // Mistrz PO: zatwierdzenia wypuszczenia dokumentu (Lista detali) – dane programu; czyta CLERIK+, zatwierdza MASTER+
+    match /mp_marks/{id} {
+      allow read: if grCells();
+      allow write: if grManage();
+    }
 
     // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
     match /plan_layout/{doc} {

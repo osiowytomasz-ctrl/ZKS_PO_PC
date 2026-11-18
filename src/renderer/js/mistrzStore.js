@@ -22,6 +22,27 @@ export async function loadMistrz() {
   return { meta, data };
 }
 
+/** Klucz detalu do zatwierdzeń (komis, nr rysunku, nr poz., kpl) – ten sam w Liście detali i jej archiwum; odporny na import. */
+export const detailKey = (v) => [v.B, v.D, v.E, v.F].map(M.eq).join('|');
+const markId = (key) => encodeURIComponent(key).replace(/\./g, '%2E').slice(0, 1400);
+
+/**
+ * Zatwierdzenia wypuszczenia dokumentu (dane programu, nie arkusza – import ich nie usuwa):
+ * mp_marks/{klucz} = { k: 'dlist', key, by, at }. Wynik: Map klucz → {by, at}.
+ */
+export async function loadMarks() {
+  const { sdk, db } = await firebase();
+  const out = new Map();
+  (await sdk.getDocs(sdk.collection(db, 'mp_marks'))).forEach((d) => { const x = d.data() || {}; if (x.key) out.set(x.key, { by: x.by || '', at: x.at || 0 }); });
+  return out;
+}
+/** Zatwierdzenie ([on] = true) albo cofnięcie zatwierdzenia wypuszczenia detalu. */
+export async function setMark(key, on, user = '') {
+  const { sdk, db } = await firebase();
+  const ref = sdk.doc(db, 'mp_marks', markId(key));
+  if (on) await sdk.setDoc(ref, { k: 'dlist', key, by: user, at: Date.now() }); else await sdk.deleteDoc(ref);
+}
+
 /** Zastępuje dane w bazie danymi z importu ({ key: [{row, v}] }); zakładki spoza importu zostają bez zmian. */
 export async function saveMistrz(data, { user = '', source = '' } = {}) {
   const { sdk, db } = await firebase();
