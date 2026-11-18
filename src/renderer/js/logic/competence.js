@@ -9,6 +9,7 @@ export const BASIC = [
   { key: 'komis', title: 'Komis wewn.', full: 'Komis wewnętrzny', w: 80 },
   { key: 'machine', title: 'Maszyna / stanowisko', full: 'Obsługiwana maszyna, stanowisko', w: 120 },
   { key: 'position', title: 'Stanowisko wg umowy', full: 'Stanowisko wg umowy', w: 140 },
+  { key: 'hired', title: 'Data zatrudn.', full: 'Data zatrudnienia (dd.mm.rrrr)', w: 84, date: true },
 ];
 
 const lc = (s) => String(s ?? '').trim().toLowerCase();

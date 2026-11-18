@@ -200,6 +200,11 @@ var API_FUNCS = {
     perm: ['plan', 'read'],
     run: function (a, ctx) { return api_getPlanGridCached_(ctx, a[0] === true); }
   },
+  planExport: {
+    // Cała karta PLAN do importu do bazy Firebase (siatka jak api_getPlanGrid + kolory autorów wszystkich użytkowników).
+    perm: ['plan', 'write'],
+    run: function () { return { grid: api_getPlanGrid(null), userColors: typeof PLAN_USER_FONT_COLORS !== 'undefined' ? PLAN_USER_FONT_COLORS : {} }; }
+  },
   savePlanData: {
     perm: ['plan', 'write'],
     write: true,

@@ -78,7 +78,7 @@ export function mountCompetence(el, ctx) {
     if (c.skill) return (p.skills || {})[c.key] ?? '';
     return p[c.key] ?? '';
   };
-  const value = (p, c) => { const v = raw(p, c); return c.perm && c.field !== 'nr' ? K.fmtPerm(v) : String(v); };
+  const value = (p, c) => { const v = raw(p, c); return (c.perm && c.field !== 'nr') || c.date ? K.fmtPerm(v) : String(v); };
 
   // ---------- dane na żywo ----------
   let unsub = null, unsubG = null;
@@ -256,6 +256,7 @@ export function mountCompetence(el, ctx) {
       if (c.ro) continue;
       let v = String(text ?? '').trim();
       if (c.skill) { v = K.parseLevel(v); if (v === null) { toast(`${c.title}: wpisz poziom 0–100 („${text}”)`, true); return; } }
+      else if (c.date) { v = K.parsePermValue(v); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast(`${c.full || c.title}: wpisz datę dd.mm.rrrr („${text}”)`, true); return; } }
       else if (c.perm && c.field !== 'nr') { v = K.parsePermValue(v); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast(`${c.perm.name} – ${c.title}: wpisz datę dd.mm.rrrr („${text}”)`, true); return; } }
       if (c.key === 'name' && !v) { toast('Nazwisko nie może być puste'); return; }
       if (c.placeCol && v && !placeStation(v, stationList(st.grafik.cfg))) { toast(`Stanowisko „${v}” nie pasuje do żadnego stanowiska Harmonogramu (np. 1Si1, 2Un2, Narz1)`, true); return; }
@@ -361,7 +362,7 @@ export function mountCompetence(el, ctx) {
     modal(`${p.name}${p.nr ? ' – ' + p.dept + ' ' + p.nr : ''}`, h('div', {},
       h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '18px' } },
         h('table', {}, h('tbody', {}, row('Wydział', p.dept), row('Nr ewidencyjny', p.nr), row('Stanowisko w Grafiku', p.inGrafik ? p.place || '—' : 'poza Grafikiem'), row('Komis wewnętrzny', p.komis),
-          row('Maszyna / stanowisko', p.machine), row('Stanowisko wg umowy', p.position), row('Punkty', K.points(p, skills()), { fontSize: '16px' }))),
+          row('Maszyna / stanowisko', p.machine), row('Stanowisko wg umowy', p.position), row('Data zatrudnienia', K.fmtPerm(p.hired || '')), row('Punkty', K.points(p, skills()), { fontSize: '16px' }))),
         h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))),
           h('tbody', {}, ...perms().filter((x) => Object.keys(K.permOf(p, x.key)).length).map((x) => {
             const pv = K.permOf(p, x.key), v = K.permValid(pv, x), a = K.validStatus(v.iso, t);

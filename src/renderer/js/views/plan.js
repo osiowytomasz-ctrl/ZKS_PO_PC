@@ -5,12 +5,14 @@
 //  - Ctrl+C / Ctrl+X / Ctrl+V – schowek zgodny z Excelem i Arkuszami Google (także wiele komórek; jedna komórka wklejona w zakres wypełnia zakres);
 //  - Delete – czyści zaznaczone komórki; Ctrl+Z / Ctrl+Y – cofnij / ponów (zmiany czekają na „Zapisz zmiany”, jak dotąd);
 //  - przeciągnięcie krawędzi nagłówka kolumny (litery) albo numeru wiersza zmienia rozmiar, dwuklik na krawędzi – dopasowanie do tekstu.
-// Szerokości kolumn, wysokości wierszy i czcionka są wspólne dla wszystkich (Firestore plan_layout/main, na żywo); powiększenie jest osobiste.
+// Szerokości kolumn są osobiste (zapisywane na tym komputerze); wysokości wierszy i czcionka – wspólne (Firestore plan_layout/main, na żywo).
+// Dane planu są w bazie Firebase (planStore.js), a każdy zapis trafia też do karty PLAN arkusza. Podświetlenie (zielona poświata) wiersza edytowanej komórki – przełącznik „Podświetl wiersz”.
 import { h, clear, api, apiCached, toast, confirmBox, alertBox } from '../ui.js';
 import * as P from '../logic/plan.js';
 import * as G from '../logic/planGrid.js';
 import { parseSheetColor } from '../logic/common.js';
 import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
+import { watchPlan, savePlan, importPlanFromSheet } from '../planStore.js';
 import { normalizeGrid, blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
 import { grafikPeople } from '../logic/harmDay.js';
 import { datePickerDialog } from './datePicker.js';
@@ -24,7 +26,7 @@ export function mountPlan(el, ctx) {
   const st = {
     grid: null, fresh: false, expanded: new Set(), changes: new Map(), saving: false,
     zoom: lsGet('plan.zoom', 100), layout: G.cleanLayout(null), local: { cols: {}, rows: {} },
-    vis: [], cols: [], autoW: [], autoH: new Map(), offs: [0], heights: [],
+    vis: [], cols: [], autoW: [], myCols: lsGet('plan.cols', {}) || {}, glow: lsGet('plan.glow', true), autoH: new Map(), offs: [0], heights: [],
     sel: null, editing: null, undo: [], redo: [], unwatch: null, layoutErr: '',
   };
   const body = h('div', { tabindex: '0', style: { flex: 1, minHeight: 0, overflow: 'auto', position: 'relative', outline: 'none', background: '#e9e9e9' } });
@@ -33,13 +35,26 @@ export function mountPlan(el, ctx) {
   const fontLabel = h('span', { class: 'muted', title: 'Wielkość czcionki tabeli – wspólna dla wszystkich' });
   const info = h('span', { class: 'muted' });
 
-  // ---------- dane ----------
-  async function load(fresh = false) {   // fresh – z arkusza (bez pamięci podręcznej serwera)
+  // ---------- dane: z bazy Firebase na żywo (karta PLAN dostaje kopię każdego zapisu) ----------
+  let unwatchPlan = null;
+  async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie planu…'));
+    if (unwatchPlan) { unwatchPlan(); unwatchPlan = null; }
     try {
-      st.changes = new Map(); st.undo = []; st.redo = [];
-      await apiCached('api_getPlanGrid', [], (g, meta) => { st.grid = normalizeGrid(g); st.fresh = !meta.cached; if (st.fresh) { st.changes = new Map(); st.undo = []; st.redo = []; } rebuild(); }, { timeoutMs: 180000, callArgs: fresh ? [true] : undefined });
+      unwatchPlan = await watchPlan((g) => {
+        if (!g) { st.grid = null; clear(body); body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Planu nie ma jeszcze w bazie.'),
+          ctx.level('plan') === 'write' ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z karty PLAN arkusza') : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Planie.'))); syncInfo(); return; }
+        st.grid = normalizeGrid(g); st.grid.canEdit = ctx.level('plan') === 'write'; st.fresh = true;
+        rebuild();
+      }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy Planu: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły Firestore: plan_meta, plan_rows)' : e.message || e), ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); },
+      (ctx.user && ctx.user.email) || '');
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
+  }
+  async function doImport() {
+    if (!(await confirmBox('Import z arkusza', 'Plan w bazie zostanie zastąpiony zawartością karty PLAN arkusza (wartości, kolory, formatowanie). Niezapisane zmiany przepadną. Kontynuować?', 'Importuj'))) return;
+    toast('Import karty PLAN…');
+    try { const r = await importPlanFromSheet(user()); st.changes = new Map(); st.undo = []; st.redo = []; toast(`Zaimportowano plan: wierszy ${r.rows}`); }
+    catch (e) { toast('Import nieudany: ' + (e.code === 'permission-denied' ? 'brak uprawnień (reguły Firestore)' : e.message || e), true); }
   }
   // wspólny układ: na żywo z bazy
   (async () => {
@@ -72,7 +87,8 @@ export function mountPlan(el, ctx) {
     if (f !== mfont) { mfont = f; mcache.clear(); measureCtx = measureCtx || document.createElement('canvas').getContext('2d'); measureCtx.font = f; }
     let w = mcache.get(s); if (w == null) { w = measureCtx.measureText(s).width; mcache.set(s, w); } return w;
   };
-  const baseColW = (c) => st.local.cols[c] ?? st.layout.cols[c] ?? st.autoW[c] ?? 80;
+  // szerokości kolumn: własne (zapisane na tym komputerze) → dawne wspólne → dopasowanie do tekstu
+  const baseColW = (c) => st.myCols[c] ?? st.layout.cols[c] ?? st.autoW[c] ?? 80;
   const rk = (r) => G.rowKey(st.grid, r);
   const ownRowH = (r) => st.local.rows[rk(r)] ?? st.layout.rows[rk(r)];
   const autoRow = (r) => {
@@ -132,11 +148,11 @@ export function mountPlan(el, ctx) {
     const corner = h('div', { title: 'Zaznacz wszystko (Ctrl+A)', onmousedown: (e) => { e.preventDefault(); selectAll(); }, style: { position: 'sticky', left: 0, zIndex: 6, width: GUTTER_W + 'px', height: headH() + 'px', background: '#d9d9d9', borderRight: '1px solid #aaa', borderBottom: '1px solid #aaa', boxSizing: 'border-box', float: 'left' } });
     head.append(corner);
     st.cols.forEach((c, ci) => {
-      const x = colLeft(ci), w = colW(c), own = (st.local.cols[c] ?? st.layout.cols[c]) != null;
+      const x = colLeft(ci), w = colW(c), own = (st.myCols[c] ?? st.layout.cols[c]) != null;
       const letter = h('div', { onmousedown: (e) => { if (e.target === letter) { e.preventDefault(); selectCol(ci, e.shiftKey); } },
         title: `Kolumna ${G.colName(c)}${own ? ' (szerokość ustawiona ręcznie)' : ''}. Przeciągnij prawą krawędź: szerokość, dwuklik na krawędzi: dopasuj`,
         style: { position: 'absolute', left: x + 'px', top: 0, width: w + 'px', height: LETTERS_H + 'px', lineHeight: LETTERS_H + 'px', textAlign: 'center', fontSize: '12px', background: '#e6e6e6', borderRight: '1px solid #aaa', borderBottom: '1px solid #aaa', boxSizing: 'border-box', color: own ? '#0b57d0' : '#333', fontWeight: own ? 700 : 400 } }, G.colName(c));
-      const grip = h('div', { title: 'Przeciągnij: szerokość kolumny (wspólna). Dwuklik: dopasuj do tekstu', style: { position: 'absolute', right: '-3px', top: 0, width: HANDLE + 1 + 'px', height: '100%', cursor: 'col-resize', zIndex: 2 },
+      const grip = h('div', { title: 'Przeciągnij: szerokość kolumny (Twoja, zapisywana na tym komputerze). Dwuklik: dopasuj do tekstu', style: { position: 'absolute', right: '-3px', top: 0, width: HANDLE + 1 + 'px', height: '100%', cursor: 'col-resize', zIndex: 2 },
         onmousedown: (e) => startResize(e, 'col', c), ondblclick: (e) => { e.stopPropagation(); setColWidth(c, null); } });
       letter.append(grip);
       head.append(letter);
@@ -187,6 +203,10 @@ export function mountPlan(el, ctx) {
     clear(selLayer);
     if (!st.sel || !st.vis.length) return;
     const { ra, rb, ca, cb } = selRect();
+    // podświetlenie (lekka zielona poświata) wiersza, w którym jest aktywna komórka – przełącznik „Podświetl wiersz”
+    if (st.glow) { const gy = headH() + st.offs[st.sel.r1];
+      selLayer.append(h('div', { style: { position: 'absolute', left: GUTTER_W + 'px', top: gy + 'px', width: Math.max(0, totalW() - GUTTER_W) + 'px', height: st.heights[st.sel.r1] + 'px',
+        background: 'rgba(0,176,80,.10)', boxShadow: '0 0 8px 2px rgba(0,176,80,.55), inset 0 0 0 1px rgba(0,176,80,.7)', boxSizing: 'border-box' } })); }
     const x = colLeft(ca), y = headH() + st.offs[ra], w = colLeft(cb + 1) - x, hh = st.offs[rb + 1] - st.offs[ra];
     selLayer.append(h('div', { style: { position: 'absolute', left: x + 'px', top: y + 'px', width: w + 'px', height: hh + 'px', border: '2px solid #1a73e8', background: ra !== rb || ca !== cb ? 'rgba(26,115,232,.10)' : 'transparent', boxSizing: 'border-box' } }));
     const ax = colLeft(st.sel.c1), ay = headH() + st.offs[st.sel.r1];
@@ -249,10 +269,11 @@ export function mountPlan(el, ctx) {
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   }
   const user = () => (ctx.user && (ctx.user.name || ctx.user.email)) || '';
+  /** Szerokość kolumny – ustawienie własne, zapisywane automatycznie na tym komputerze (null – dopasowanie do tekstu). */
   function setColWidth(c, v) {
-    st.local.cols[c] = v; if (v == null) { st.local.cols[c] = undefined; delete st.layout.cols[c]; }
+    if (v == null) { delete st.myCols[c]; delete st.layout.cols[c]; } else st.myCols[c] = v;
+    lsSet('plan.cols', st.myCols);
     relayout();
-    savePlanLayout({ cols: { [c]: v } }, user()).catch((e) => toast('Nie zapisano układu dla wszystkich: ' + (e.code === 'permission-denied' ? 'brak uprawnień (reguły Firestore)' : e.message || e), true));
   }
   function setRowHeight(r, v) {
     const k = rk(r);
@@ -552,23 +573,28 @@ export function mountPlan(el, ctx) {
   async function save() {
     if (st.saving || !st.changes.size) return;
     if (!(await confirmBox('Zapisać plan?', `Zmienione komórki: ${st.changes.size}.`, 'Zapisz'))) return;
-    const list = [...st.changes].map(([k, e]) => { const [row, col] = k.split(':').map(Number); return { row, col, value: e.type === 'text' ? P.toHtml(e.lines) : e.value }; });
+    const list = [...st.changes].map(([k, e]) => { const [row, col] = k.split(':').map(Number); return { row, col, entry: e }; });
     st.saving = true; syncInfo();
     try {
-      const r = await api('savePlanData', [list]);
-      st.saving = false; st.changes = new Map(); st.undo = []; st.redo = []; toast((r && r.message) || 'Zmiany zapisane.'); load(true);
+      const r = await savePlan(st.grid, list, user());
+      st.saving = false; st.changes = new Map(); st.undo = []; st.redo = []; if (st.grid) rebuild(); else syncInfo();
+      if (r.sheetError) toast('Zapisano w bazie, ale nie w karcie PLAN: ' + r.sheetError, true); else toast('Zmiany zapisane (baza i karta PLAN).');
     } catch (e) {
       st.saving = false; syncInfo();
-      await alertBox('Plan', 'Błąd zapisu planu: ' + e.message + (e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież plan i sprawdź, zanim zapiszesz ponownie.' : ''));
+      await alertBox('Plan', 'Błąd zapisu planu w bazie: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e) + '. Zmiany zostają na ekranie.');
     }
   }
 
   // ---------- pasek narzędzi ----------
+  const glowBtn = h('button', { class: 'btn small' + (st.glow ? ' primary' : ''), title: 'Zielona poświata wiersza, w którym jest zaznaczona komórka (ustawienie na tym komputerze)',
+    onclick: () => { st.glow = !st.glow; lsSet('plan.glow', st.glow); glowBtn.className = 'btn small' + (st.glow ? ' primary' : ''); paintSel(); } }, 'Podświetl wiersz');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, saveBtn,
-    h('button', { class: 'btn', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; load(true); } }, 'Odśwież'),
+    h('button', { class: 'btn', title: 'Wczytaj plan z bazy od nowa', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); st.undo = []; st.redo = []; load(); } }, 'Odśwież'),
+    ctx.level('plan') === 'write' ? h('button', { class: 'btn small', title: 'Zastąp plan w bazie zawartością karty PLAN arkusza', onclick: doImport }, 'Import z arkusza') : null,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'),
     h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
+    glowBtn,
     h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Powiększenie:'),
     h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Tabela (wspólne):'),
@@ -579,7 +605,7 @@ export function mountPlan(el, ctx) {
   async function resetLayout() {
     if (!(await confirmBox('Dopasować wszystko?', 'Szerokości kolumn i wysokości wierszy ustawione ręcznie wrócą do dopasowania automatycznego – dla wszystkich użytkowników.', 'Dopasuj'))) return;
     const cols = Object.fromEntries(Object.keys(st.layout.cols).map((k) => [k, null])), rows = Object.fromEntries(Object.keys(st.layout.rows).map((k) => [k, null]));
-    st.layout = { ...st.layout, cols: {}, rows: {} }; st.local = { cols: {}, rows: {} }; rebuild();
+    st.layout = { ...st.layout, cols: {}, rows: {} }; st.local = { cols: {}, rows: {} }; st.myCols = {}; lsSet('plan.cols', {}); rebuild();
     savePlanLayout({ cols, rows }, user()).catch((e) => toast('Nie zapisano układu: ' + (e.message || e), true));
   }
   // sprzątanie po wyjściu z modułu (przy pierwszym zdarzeniu po odłączeniu widoku i co minutę)
@@ -587,6 +613,7 @@ export function mountPlan(el, ctx) {
     document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste);
     document.removeEventListener('mouseup', onUp); window.removeEventListener('resize', onResize);
     if (st.unwatch) { st.unwatch(); st.unwatch = null; }
+    if (unwatchPlan) { unwatchPlan(); unwatchPlan = null; }
     clearInterval(gc);
   }
   const gc = setInterval(() => { if (!el.isConnected) cleanup(); }, 60000);

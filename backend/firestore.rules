@@ -73,6 +73,16 @@ service cloud.firestore {
     match /plan_layout/{doc} {
       allow read, write: if planLvl() in ['read', 'write'];
     }
+    // Plan: dane (plan_meta/main, plan_rows/{paczka wierszy}) – czyta każdy z dostępem do Planu, zmienia zapis w Planie;
+    // karta PLAN arkusza dostaje kopię każdego zapisu przez API (savePlanData)
+    match /plan_meta/{doc} {
+      allow read: if planLvl() in ['read', 'write'];
+      allow write: if planLvl() == 'write';
+    }
+    match /plan_rows/{chunk} {
+      allow read: if planLvl() in ['read', 'write'];
+      allow write: if planLvl() == 'write';
+    }
 
     // Grafik: kody zmian i nieobecności (gr_days/{rrrr-mm}) oraz pracownicy, miejsca pracy, urlopy, święta (gr_meta/main).
     // Czyta każdy z dostępem do Grafiku, Planu albo Harmonogramu (podpowiedzi zmian, godziny stanowisk); zmienia – zapis w Grafiku.
