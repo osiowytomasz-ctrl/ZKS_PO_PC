@@ -11,8 +11,7 @@ import { watchGrafik, saveCells, saveMeta, importFromSheet } from '../grafikStor
 import { mountGrafikSheet } from './grafikSheet.js';
 import { stationList } from '../logic/harmModel.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { competenceBlock } from './personCard.js';
-import { firebase } from '../fb.js';
+import { openPersonCard } from './personCard.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
@@ -425,23 +424,9 @@ export function mountGrafik(el, ctx) {
       h('button', { class: 'btn primary', onclick: () => { m.close(); apply([{ p, iso, note: ta.value.trim() }], 'Komentarz'); } }, 'OK'))));
     ta.focus();
   }
+  /** Podsumowanie pracownika – ta sama karta co w Kompetencjach i Planie (views/personCard.js); MASTER / GOD – „Zmień dane…”. */
   function personDialog(p) {
-    const s = F.personSummary(p, st.codes[p.id] || {}, year(), today()), ut = (p.ut || {})[year()] || {};
-    const row = (k, v, red) => h('tr', {}, h('td', { style: { padding: '2px 8px' } }, k), h('td', { style: { padding: '2px 8px', fontWeight: 700, textAlign: 'right', color: red ? '#c00000' : '#000' } }, String(v)));
-    const mt = h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Miesiąc', 'UT wykorzystane', 'Plan UT', 'Godziny', 'Godziny narastająco'].map((x) => h('th', {}, x)))),
-      h('tbody', {}, ...F.MONTHS.map((mn, i) => h('tr', {}, h('td', { class: 'left' }, mn), h('td', { style: { background: s.monthPlanMet[i] ? '#ff9900' : '' } }, s.utByMonth[i] || ''), h('td', {}, s.plan[i] || ''), h('td', {}, s.hoursByMonth[i] || ''), h('td', {}, s.hoursToMonth[i] || '')))));
-    const abs = h('table', { class: 't' }, h('tbody', {}, ...F.ABSENCES.map(([k, label]) => h('tr', {}, h('td', { class: 'left' }, `${label} (${k})`), h('td', {}, s.absences[k] || 0)))));
-    // kompetencje (badania, BHP, uprawnienia z terminami, umiejętności) – z matrycy kompetencji; dostęp MASTER / GOD
-    const kpBox = h('div', {}, h('h4', { style: { margin: '10px 0 4px' } }, 'Kompetencje'), h('p', { class: 'muted' }, 'Wczytywanie…'));
-    (async () => { try { const { sdk, db } = await firebase(); const d = await sdk.getDoc(sdk.doc(db, 'kp', 'main')); kpBox.lastChild.replaceWith(competenceBlock(d.exists() ? d.data() : null, p.id)); }
-      catch { kpBox.lastChild.replaceWith(competenceBlock(null, p.id)); } })();
-    const m = modal(`${p.name} – ${year()}`, h('div', {},
-      h('table', {}, h('tbody', {}, row(`UT z ${Number(year()) - 1}`, ut.prev || 0), row(`UT ${year()}`, ut.cur || 0), row(`Wykorzystane do dziś (UT + NŻ)`, s.used), row('Zaplanowane (UT po dziś)', s.future),
-        row('Dostępny (UT poprz. + bieżący − wykorzystane)', s.available, s.available < 0), row('Pozostało (dostępny − zaplanowane)', s.remaining, s.remaining < 0), row('Plan urlopu (suma)', s.planned), row(`Godziny ${year()}`, s.hoursToMonth[11]))),
-      h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px', marginTop: '8px' } }, mt, abs),
-      kpBox,
-      h('p', { class: 'muted' }, `Miejsce pracy: ${p.place || '—'}${p.nr ? ' · Nr ew.: ' + p.nr : ''}. Godziny przepracowane = suma godzin zmian z wpisów (a8 = 8, a8b2 = 10, b2c6 = 8; UT, L4 i inne nieobecności = 0).`),
-      h('div', { class: 'actions' }, acc.manage ? h('button', { class: 'btn', onclick: () => { m.close(); personEdit(p); } }, 'Zmień dane…') : null, h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+    openPersonCard({ id: p.id, name: p.name }, { access: acc, extra: acc.manage ? [['Zmień dane…', () => personEdit(p)]] : [] });
   }
   function personEdit(p) {
     const y = year(), ut = (p.ut || {})[y] || {};
