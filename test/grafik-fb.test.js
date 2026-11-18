@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cellStyle, headerStyle, personSummary, codeHours, workHours, isoWeek, placeStation, displayName, grafNormDays, monthsBetween, daysBetween, unpackMonths, cleanCode } from '../src/renderer/js/logic/grafikFb.js';
+import { cellStyle, headerStyle, personSummary, codeHours, workHours, isoWeek, isoWeekRange, isoWeeksInYear, monthRange, placeStation, displayName, grafNormDays, monthsBetween, daysBetween, unpackMonths, cleanCode } from '../src/renderer/js/logic/grafikFb.js';
 import { normHolidays } from '../src/renderer/js/holidayStore.js';
 import { stationList } from '../src/renderer/js/logic/harmModel.js';
 
@@ -85,4 +85,10 @@ test('godziny przepracowane, tydzień ISO, stanowisko miejsca pracy, święta', 
   assert.equal(placeStation('Xx1', st), null);
   assert.deepEqual(normHolidays(['2026-11-11', { date: '2026-01-01', name: 'Nowy Rok' }, { date: '2026-11-11', name: 'x' }, 'zła']),
     [{ date: '2026-01-01', name: 'Nowy Rok' }, { date: '2026-11-11', name: '' }]);
+});
+
+test('zakres miesiąca i tygodnia ISO', () => {
+  assert.deepEqual(monthRange(2026, 2), ['2026-02-01', '2026-02-28']); assert.deepEqual(monthRange(2028, 2), ['2028-02-01', '2028-02-29']); assert.deepEqual(monthRange(2026, 12), ['2026-12-01', '2026-12-31']);
+  assert.deepEqual(isoWeekRange(2026, 47), ['2026-11-16', '2026-11-22']); assert.deepEqual(isoWeekRange(2026, 1), ['2025-12-29', '2026-01-04']); assert.deepEqual(isoWeekRange(2026, 53), ['2026-12-28', '2027-01-03']);
+  assert.equal(isoWeeksInYear(2026), 53); assert.equal(isoWeeksInYear(2025), 52);
 });

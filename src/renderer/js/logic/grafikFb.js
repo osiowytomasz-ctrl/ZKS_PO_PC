@@ -106,6 +106,21 @@ export function isoWeek(iso) {
   return 1 + Math.round(((d - first) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
 }
 
+/** Pierwszy i ostatni dzień miesiąca [m] (1–12) roku [y]: ['2026-11-01', '2026-11-30']. */
+export function monthRange(y, m) {
+  const last = new Date(Date.UTC(Number(y), Number(m), 0)).getUTCDate(), mm = String(m).padStart(2, '0');
+  return [`${y}-${mm}-01`, `${y}-${mm}-${String(last).padStart(2, '0')}`];
+}
+
+/** Poniedziałek i niedziela tygodnia ISO [w] roku ISO [y]. */
+export function isoWeekRange(y, w) {
+  const j4 = Date.UTC(Number(y), 0, 4), wd = (new Date(j4).getUTCDay() + 6) % 7, mon = j4 + ((Number(w) - 1) * 7 - wd) * 86400000;
+  return [new Date(mon).toISOString().slice(0, 10), new Date(mon + 6 * 86400000).toISOString().slice(0, 10)];
+}
+
+/** Liczba tygodni ISO w roku (52 albo 53). */
+export const isoWeeksInYear = (y) => isoWeek(`${y}-12-28`);
+
 /** Stanowisko miejsca pracy („1Si2” → stanowisko 1Si z listy Harmonogramu, z kolorami). Wielka „I” zamiast „l” też pasuje. */
 export function placeStation(place, stations) {
   const p = String(place ?? '').trim();

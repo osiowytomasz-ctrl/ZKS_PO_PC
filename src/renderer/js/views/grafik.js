@@ -16,6 +16,8 @@ import { openPersonCard } from './personCard.js';
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** [rok ISO, tydzień ISO] dnia. */
+const weekOf = (iso) => { const w = F.isoWeek(iso), y = Number(iso.slice(0, 4)), m = iso.slice(5, 7); return [m === '01' && w > 50 ? y - 1 : m === '12' && w === 1 ? y + 1 : y, w]; };
 const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 const plDate = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const sheetDate = (iso) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;   // format nagłówka karty G
@@ -68,9 +70,29 @@ export function mountGrafik(el, ctx) {
     if (!a || !b) return;
     if (b < a) [a, b] = [b, a];
     st.from = a; st.to = b; fromIn.value = a; toIn.value = b; st.sel = null;
+    fillPickers();
     if (st.watcher) st.watcher.setMonths(neededMonths());
     draw();
   }
+  // wybór dowolnego miesiąca i dowolnego tygodnia (rok poprzedni, bieżący, następny)
+  const pickYears = () => { const y = Number(today().slice(0, 4)); return [y - 1, y, y + 1]; };
+  const ddmm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+  const monthSel = h('select', { style: { width: '140px' }, title: 'Pokaż wybrany miesiąc', onchange: () => { if (monthSel.value) setRange(...monthSel.value.split('|')); } });
+  const weekSel = h('select', { style: { width: '200px' }, title: 'Pokaż wybrany tydzień (ISO, pon–niedz)', onchange: () => { if (weekSel.value) setRange(...weekSel.value.split('|')); } });
+  function fillPickers() {
+    const cur = `${st.from}|${st.to}`;
+    clear(monthSel); monthSel.append(h('option', { value: '' }, 'Miesiąc…'));
+    clear(weekSel); weekSel.append(h('option', { value: '' }, 'Tydzień…'));
+    for (const y of pickYears()) {
+      monthSel.append(h('optgroup', { label: String(y) }, ...F.MONTHS.map((mn, i) => h('option', { value: F.monthRange(y, i + 1).join('|') }, `${mn} ${y}`))));
+      const wk = [];
+      for (let w = 1; w <= F.isoWeeksInYear(y); w++) { const [a, b] = F.isoWeekRange(y, w); wk.push(h('option', { value: `${a}|${b}` }, `tydz. ${w}/${y} · ${ddmm(a)}–${ddmm(b)}`)); }
+      weekSel.append(h('optgroup', { label: String(y) }, ...wk));
+    }
+    monthSel.value = [...monthSel.options].some((o) => o.value === cur) ? cur : '';
+    weekSel.value = [...weekSel.options].some((o) => o.value === cur) ? cur : '';
+  }
+  fillPickers();
   const preset = (label, fn, title) => h('button', { class: 'btn small', title, onclick: () => { const [a, b] = fn(today()); setRange(a, b); } }, label);
 
   // ---------- model ekranu ----------
@@ -497,7 +519,9 @@ export function mountGrafik(el, ctx) {
   el.append(h('div', { class: 'row panel' }, 'Od', fromIn, 'do', toIn,
     preset('Teraz', (t) => [addDays(t, -3), addDays(t, 7)], 'Od 3 dni wstecz do 7 dni naprzód (jak w arkuszu)'),
     preset('Miesiąc', (t) => [t.slice(0, 8) + '01', F.daysBetween(t.slice(0, 8) + '01', addDays(t.slice(0, 8) + '28', 4)).filter((d) => d.slice(0, 7) === t.slice(0, 7)).pop()]),
+    preset('Tydzień', (t) => F.isoWeekRange(...weekOf(t)), 'Bieżący tydzień (pon–niedz)'),
     preset('Rok', (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31']),
+    monthSel, weekSel,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     ...groupBtns, (() => { const b = h('button', { class: 'btn small' + (st.glow ? ' primary' : ''), title: 'Zielona poświata wiersza, w którym zmieniasz wpisy (ustawienie na tym komputerze)' }, 'Podświetl wiersz');
       b.onclick = () => { st.glow = !st.glow; lsSet('grafik.glow', st.glow); b.className = 'btn small' + (st.glow ? ' primary' : ''); paintSel(); }; return b; })(),

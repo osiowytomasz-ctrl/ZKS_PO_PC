@@ -33,8 +33,11 @@ export function competenceBlock(kp, id) {
   const sk = skills.map((s) => ({ s, v: Number((p.skills || {})[s.key]) || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v * b.s.weight - a.v * a.s.weight);
   return h('div', {},
     h('div', { class: 'row', style: { gap: '16px', flexWrap: 'wrap' } },
-      ...[['Maszyna / stanowisko', p.machine], ['Stanowisko wg umowy', p.position], ['Komis wewn.', p.komis], ['Data zatrudnienia', K.fmtPerm(p.hired || '')], ['Punkty', String(K.points(p, skills))]]
+      ...[['Maszyna / stanowisko', p.machine], ['Komis wewn.', p.komis], ['Data zatrudnienia', K.fmtPerm(p.hired || '')], ['Punkty', String(K.points(p, skills))]]
         .filter(([, v]) => v).map(([k, v]) => h('span', {}, h('span', { class: 'muted' }, k + ': '), h('b', {}, v)))),
+    // stanowisko wg umowy: opis pod tytułem, najwyżej 2 linie (dłuższy – skrócony, pełny w podpowiedzi)
+    p.position ? h('div', { style: { marginTop: '1px' } }, h('div', { class: 'muted' }, 'Stanowisko wg umowy:'),
+      h('b', { title: p.position, style: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxWidth: '520px' } }, p.position)) : null,
     types.length ? h('table', { class: 't', style: { marginTop: '2px' } }, h('thead', {}, h('tr', {}, ...['Badania / uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))), h('tbody', {}, ...types.map(row)))
       : h('p', { class: 'muted' }, 'Brak wpisanych badań i uprawnień.'),
     sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 4px', marginTop: '2px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`,
