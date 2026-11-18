@@ -63,3 +63,16 @@ test('uprawnienia: numer, wydano, ważne do – odczyt arkusza, ważność, term
   const r = parsePermsSheet(ws, '2026-11-17');
   assert.deepEqual(r.people.PO12007.perms, { bad: { valid: '2027-07-15' }, bhp: { issued: '2021-10-18' }, suw: { nr: 'O/9/1', issued: '2012-05-23' } });
 });
+
+test('poziomy ważności: uprawnienia (czerwony < 1 mies., pomarańczowy < 3 mies., zielony) oraz badania i BHP (pomarańczowy < 1 mies.)', async () => {
+  const { validLevel, personAlert, MED_TYPES, isMedKey } = await import('../src/renderer/js/logic/competence.js');
+  const t = '2026-11-18';
+  assert.equal(validLevel('2026-11-10', t), 'expired'); assert.equal(validLevel('2026-12-15', t), 'red'); assert.equal(validLevel('2027-02-10', t), 'orange'); assert.equal(validLevel('2027-03-01', t), 'green');
+  assert.equal(validLevel('2026-12-15', t, true), 'orange'); assert.equal(validLevel('2027-02-10', t, true), ''); assert.equal(validLevel('2026-11-01', t, true), 'expired');
+  assert.equal(validLevel('', t), '');
+  assert.equal(personAlert({ perms: { bad: { valid: '2027-02-10' }, suw: { valid: '2027-02-10' } } }, [{ key: 'suw', name: 'Suwnica' }], t), 'orange');
+  assert.equal(personAlert({ perms: { bhp: { valid: '2026-12-01' } } }, [], t), 'orange');
+  assert.equal(personAlert({ perms: { suw: { valid: '2026-12-01' } } }, [{ key: 'suw', name: 'Suwnica' }], t), 'red');
+  assert.equal(personAlert({ perms: { bad: { valid: '2027-12-01' } } }, [], t), '');
+  assert.ok(isMedKey('bad') && isMedKey('bhp') && !isMedKey('suw')); assert.equal(MED_TYPES.length, 2);
+});

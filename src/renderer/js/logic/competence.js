@@ -240,3 +240,42 @@ export function parsePermsSheet(ws, todayIso) {
   }
   return { people, types: [...new Set(cols.map((x) => x[1]))] };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Badania lekarskie i BHP – osobna grupa (zawsze widoczna w Uprawnieniach), poziomy ważności terminów
+// ---------------------------------------------------------------------------------------------------------------------
+/** Badania lekarskie i szkolenie BHP: numer, data wydania, data ważności – stałe typy (nie usuwa się ich w „Kolumny…”). */
+export const MED_TYPES = [{ key: 'bad', name: 'Badania lekarskie', med: true }, { key: 'bhp', name: 'Szkolenie BHP', med: true }];
+export const isMedKey = (k) => k === 'bad' || k === 'bhp';
+
+const addMonths = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+/**
+ * Poziom terminu ważności (kolor komórki „Ważne do”):
+ *  - uprawnienia: 'expired' – minął; 'red' – do 1 miesiąca; 'orange' – do 3 miesięcy; 'green' – dłużej;
+ *  - badania lekarskie i BHP ([med]): 'expired' – minął; 'orange' – do 1 miesiąca; '' – dłużej.
+ * '' – brak daty.
+ */
+export function validLevel(iso, todayIso, med = false) {
+  if (!ISO.test(String(iso || ''))) return '';
+  if (iso < todayIso) return 'expired';
+  if (med) return iso <= addMonths(todayIso, 1) ? 'orange' : '';
+  if (iso <= addMonths(todayIso, 1)) return 'red';
+  if (iso <= addMonths(todayIso, 3)) return 'orange';
+  return 'green';
+}
+/** Kolory poziomów (tło, tekst). */
+export const LEVEL_STYLE = { expired: ['#c00000', '#ffffff'], red: ['#ff0000', '#ffffff'], orange: ['#ffc000', '#000000'], green: ['#92d050', '#000000'] };
+export const LEVEL_TEXT = { expired: 'termin minął', red: 'mija w ciągu miesiąca', orange: 'mija w ciągu 3 miesięcy', green: 'ważne' };
+/** Opis poziomu (badania i BHP: pomarańczowy = do miesiąca). */
+export const levelText = (lv, med = false) => (med && lv === 'orange' ? 'mija w ciągu miesiąca' : LEVEL_TEXT[lv] || '');
+const RANK = { expired: 3, red: 2, orange: 1 };
+/** Najpilniejszy termin osoby (do „⚠ Terminy”): 'expired' > 'red' > 'orange' > ''. [defs] – uprawnienia bez badań i BHP. */
+export function personAlert(person, defs, todayIso) {
+  let worst = '';
+  const all = [...MED_TYPES, ...(defs || []).filter((d) => !isMedKey(d.key))];
+  for (const d of all) {
+    const lv = validLevel(permValid(permOf(person, d.key), d).iso, todayIso, !!d.med);
+    if ((RANK[lv] || 0) > (RANK[worst] || 0)) worst = lv;
+  }
+  return worst;
+}

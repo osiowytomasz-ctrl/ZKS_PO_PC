@@ -13,6 +13,7 @@ import * as G from '../logic/planGrid.js';
 import { parseSheetColor } from '../logic/common.js';
 import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
 import { watchPlan, savePlan, importPlanFromSheet } from '../planStore.js';
+import { openPersonCard } from './personCard.js';
 import { normalizeGrid, blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
 import { grafikPeople } from '../logic/harmDay.js';
 import { datePickerDialog } from './datePicker.js';
@@ -52,6 +53,15 @@ export function mountPlan(el, ctx) {
       (ctx.user && ctx.user.email) || '');
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message, ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); }
   }
+  // prawy przycisk na komórce z pracownikiem – karta pracownika (Grafik: urlopy, godziny; Kompetencje: badania, uprawnienia, umiejętności)
+  body.addEventListener('contextmenu', (e) => {
+    const cell = e.target.closest && e.target.closest('[data-r][data-c]'); if (!cell || !st.grid) return;
+    const r = Number(cell.dataset.r), c = Number(cell.dataset.c);
+    if (kind(r, c) !== 'worker') return;
+    const name = cellText(r, c).trim(); if (!name) return;
+    e.preventDefault();
+    openPersonCard({ name }, { access: ctx.grafikAcc ? ctx.grafikAcc() : { summary: true } });
+  });
   async function doImport() {
     if (!(await confirmBox('Import z arkusza', 'Plan w bazie zostanie zastąpiony zawartością karty PLAN arkusza (wartości, kolory, formatowanie). Niezapisane zmiany przepadną. Kontynuować?', 'Importuj'))) return;
     toast('Import karty PLAN…');

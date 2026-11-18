@@ -11,11 +11,12 @@ import { readXlsx } from '../logic/xlsxRead.js';
 import { iconSvg } from './harmIcons.js';
 import { watchCompetence, setFields, savePerson, deletePerson, saveDefs, watchGrafikMeta } from '../competenceStore.js';
 import { saveMeta } from '../grafikStore.js';
+import { openPersonCard } from './personCard.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
 const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const GROUP = { base: ['Dane podstawowe', '#bfbfbf'], perms: ['Uprawnienia', '#bdd6ee'], skills: ['Umiejętności', '#c5e0b3'] };
+const GROUP = { base: ['Dane podstawowe', '#bfbfbf'], med: ['Badania i BHP', '#f8cbad'], perms: ['Uprawnienia', '#bdd6ee'], skills: ['Umiejętności', '#c5e0b3'] };
 
 export function mountCompetence(el, ctx) {
   // Kompetencje: tylko MASTER i GOD Grafiku (CLERIK i TOURIST nie widzą modułu)
@@ -25,21 +26,22 @@ export function mountCompetence(el, ctx) {
   const saved = lsGet('kp.filters', {}) || {};
   const st = {
     data: null, grafik: { meta: null, cfg: null }, gReady: false, sel: null, editing: null, undo: [], redo: [], zoom: lsGet('kp.zoom', 100),
-    groups: { base: true, perms: false, skills: true, ...lsGet('kp.groups', {}) },
+    groups: { base: true, med: true, perms: false, skills: true, ...lsGet('kp.groups', {}) },
     filters: Object.fromEntries(Object.entries(saved.filters || {}).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, new Set(v)])),
     sorts: Array.isArray(saved.sorts) ? saved.sorts : [],
   };
   const saveFilters = () => lsSet('kp.filters', { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
   const body = h('div', { tabindex: '0', style: { flex: 1, minHeight: 0, overflow: 'auto', outline: 'none', background: '#fff', position: 'relative' } });
   const info = h('span', { class: 'muted' });
-  const zoomLabel = h('button', { class: 'btn small', title: 'Kliknij: 100%', onclick: () => setZoom(100) }, '100%');
-  const groupBtns = [['base', 'Dane', 'Dane podstawowe: wydział, komis, maszyna, stanowisko wg umowy'], ['perms', 'Uprawnienia', 'Szkolenia, badania, uprawnienia (suwnica, spawanie, wózki…) z datami'], ['skills', 'Umiejętności', 'Matryca umiejętności z wagami i punktami']]
+  const groupBtns = [['base', 'Dane', 'Dane podstawowe: wydział, komis, maszyna, stanowisko wg umowy'], ['med', 'Badania i BHP', 'Badania lekarskie i szkolenie BHP: numer, data wydania, data ważności (pomarańczowe – mija w ciągu miesiąca, czerwone – minęło)'], ['perms', 'Uprawnienia', 'Uprawnienia (suwnica, spawanie, wózki…): numer, data wydania, data ważności (czerwone – do miesiąca, pomarańczowe – do 3 miesięcy, zielone – ważne)'], ['skills', 'Umiejętności', 'Matryca umiejętności z wagami i punktami']]
     .map(([k, label, title]) => { const b = h('button', { class: 'btn small', title, onclick: () => { st.groups[k] = !st.groups[k]; lsSet('kp.groups', st.groups); draw(); } }, label); b.dataset.g = k; return b; });
 
   // ---------- model ----------
   const skills = () => (st.data && st.data.skills) || [];
   // typy uprawnień: zapisane w bazie (nowy układ: numer, wydano, ważne do) albo domyślne (stary import miał osobne kolumny arkusza)
-  const perms = () => (st.data && K.isNewPermDefs(st.data.perms) ? st.data.perms : K.PERM_TYPES);
+  // uprawnienia bez badań lekarskich i BHP (te mają własną grupę – stałe typy K.MED_TYPES)
+  const perms = () => (st.data && K.isNewPermDefs(st.data.perms) ? st.data.perms : K.PERM_TYPES).filter((d) => !K.isMedKey(d.key));
+  const permCols = (list, group) => list.flatMap((d) => K.PERM_FIELDS.map(([f, label]) => ({ key: `${d.key}.${f}`, title: label, full: `${d.name} – ${label}` + (f === 'valid' ? (d.med ? ' (pomarańczowe – mija w ciągu miesiąca, czerwone – minęło)' : ' (czerwone – do miesiąca, pomarańczowe – do 3 miesięcy, zielone – ważne)') + (d.validYears ? `; bez wpisu: wydano + ${d.validYears} lat` : '') : ''), w: f === 'nr' ? 100 : f === 'valid' ? 86 : 78, path: `perms.${d.key}.${f}`, perm: d, field: f, group })));
   // Pracownicy = lista Grafiku (gr_meta/main, ta sama kolejność i separatory pominięte) + dane kompetencji (kp/main.people[id]).
   // Osoby tylko w kompetencjach (np. z wcześniejszego importu, bez Grafiku) są na końcu z oznaczeniem „poza Grafikiem”.
   const gPeople = () => ((st.grafik.meta && st.grafik.meta.people) || []);
@@ -60,16 +62,17 @@ export function mountCompetence(el, ctx) {
   }
   const peopleMap = () => Object.fromEntries(peopleList().map((p) => [p.id, p]));
   const columns = (g = st.groups) => [
-    { key: 'lp', title: 'Lp', w: 34, ro: true },
+    { key: 'lp', title: 'Lp', full: 'Kolejność (jak w Grafiku). Wpisz nowy numer, aby przesunąć pracownika – zmienia kolejność także w Grafiku', w: 34, lpCol: true },
     { key: 'name', title: 'Nazwisko i imię', full: 'Nazwisko i imię (wspólne z Grafikiem)', w: 180, path: 'g:name' },
     { key: 'nr', title: 'Nr ew.', full: 'Numer ewidencyjny (wspólny z Grafikiem, np. PO12007)', w: 70, path: 'g:nr' },
     { key: 'place', title: 'Stanowisko', full: 'Stanowisko / miejsce pracy w Grafiku (np. 1Si1) – kolor jak w Harmonogramie. Kliknij dwukrotnie: wybór z listy', w: 64, path: 'g:place', placeCol: true },
     ...(g.base ? K.BASIC.map((b) => (b.key === 'dept' ? { ...b, ro: true, full: 'Wydział (z numeru ewidencyjnego)', group: 'base' } : { ...b, path: b.key, group: 'base' })) : []),
-    ...(g.perms ? perms().flatMap((d) => K.PERM_FIELDS.map(([f, label]) => ({ key: `${d.key}.${f}`, title: label, full: `${d.name} – ${label}` + (f === 'valid' ? ' (czerwone – minęło, pomarańczowe – mija w ciągu 30 dni' + (d.validYears ? `; bez wpisu: wydano + ${d.validYears} lat` : '') + ')' : ''), w: f === 'nr' ? 100 : 78, path: `perms.${d.key}.${f}`, perm: d, field: f, group: 'perms' }))) : []),
+    ...(g.med ? permCols(K.MED_TYPES, 'med') : []),
+    ...(g.perms ? permCols(perms(), 'perms') : []),
     ...(g.skills ? [{ key: 'pts', title: 'Punkty', full: 'Punkty = Σ poziom × waga umiejętności', w: 56, ro: true, group: 'skills' },
       ...skills().map((s) => ({ key: s.key, title: s.name, full: `${s.name} – waga ${s.weight}. Poziom 0–100 (%)`, w: 34, path: 'skills.' + s.key, skill: s, group: 'skills', vertical: true }))] : []),
   ];
-  const allColumns = () => columns({ base: true, perms: true, skills: true });
+  const allColumns = () => columns({ base: true, med: true, perms: true, skills: true });
   const raw = (p, c) => {
     if (c.key === 'lp') return p.lp ?? '';
     if (c.key === 'place') return p.place || '';
@@ -96,7 +99,7 @@ export function mountCompetence(el, ctx) {
   function draw() {
     if (!st.data || !st.gReady) return;
     for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' primary' : '');
-    { const n = peopleList().filter((p) => K.personPermStatus(p, perms(), isoToday())).length; alertBtn.className = 'btn small' + (st.onlyAlerts ? ' primary' : ''); alertBtn.textContent = `⚠ Terminy (${n})`; }
+    { const n = peopleList().filter((p) => K.personAlert(p, perms(), isoToday())).length; alertBtn.className = 'btn small' + (st.onlyAlerts ? ' primary' : ''); alertBtn.textContent = `⚠ Terminy (${n})`; }
     if (!peopleList().length) {
       clear(body);
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Brak pracowników: zaimportuj Grafik z karty G (moduł Grafik → „Import z G”) albo dodaj pracownika.'),
@@ -110,7 +113,7 @@ export function mountCompetence(el, ctx) {
     const pm = peopleMap(), getV = (id, c) => (pm[id] ? value(pm[id], c) : '');
     let ids = peopleList().map((p) => p.id);
     ids = visibleRows(ids, fcols, st.filters, getV);
-    if (st.onlyAlerts) ids = ids.filter((id) => K.personPermStatus(pm[id], perms(), isoToday()));
+    if (st.onlyAlerts) ids = ids.filter((id) => K.personAlert(pm[id], perms(), isoToday()));
     if (st.sorts.length) ids = sortRows(ids, fcols, st.sorts, getV);
     const rows = ids.map((id) => pm[id]);
     const stList = stationList(st.grafik.cfg), t = isoToday();
@@ -163,15 +166,14 @@ export function mountCompetence(el, ctx) {
         if (c.key === 'pts') style = { ...style, fontWeight: 700, background: '#e2efda' };
         if (c.skill) { const bg = K.levelColor(raw(p, c)); if (bg) style = { ...style, background: bg }; }
         if (c.perm && c.field === 'valid') {
-          const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), a = K.validStatus(pv.iso, t);
-          if (a === 'expired') style = { ...style, background: '#ff0000', color: '#fff', fontWeight: 700 };
-          else if (a === 'soon') style = { ...style, background: '#ffc000', fontWeight: 700 };
+          const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), lv = K.validLevel(pv.iso, t, !!c.perm.med), ls = K.LEVEL_STYLE[lv];
+          if (ls) style = { ...style, background: ls[0], color: ls[1], fontWeight: lv === 'green' ? 400 : 700 };
           if (pv.computed) style = { ...style, fontStyle: 'italic' };
         }
         if (ci < FIX) style = { ...style, position: 'sticky', left: leftOf(ci) + 'px', zIndex: 2 };
         const td = h('td', { style, 'data-r': ri, 'data-c': ci }, txt);
         if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.nr : ''}${p.inGrafik ? ' · stanowisko w Grafiku: ' + (p.place || 'brak') : ' · POZA GRAFIKIEM (prawy przycisk: dodaj do Grafiku)'}. Dwuklik: karta pracownika`;
-        else if (c.perm && c.field === 'valid' && raw(p, c)) { const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), a = K.validStatus(pv.iso, t); td.title = `${c.perm.name}: ważne do ${K.fmtPerm(pv.iso)}` + (pv.computed ? ` (wyliczone: wydano + ${c.perm.validYears} lat)` : '') + (a === 'expired' ? ' – MINĘŁO' : a === 'soon' ? ' – mija w ciągu 30 dni' : ''); }
+        else if (c.perm && c.field === 'valid' && raw(p, c)) { const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), lv = K.validLevel(pv.iso, t, !!c.perm.med); td.title = `${c.perm.name}: ważne do ${K.fmtPerm(pv.iso)}` + (pv.computed ? ` (wyliczone: wydano + ${c.perm.validYears} lat)` : '') + (lv ? ' – ' + K.levelText(lv, !!c.perm.med) : ''); }
         else if (txt.length > 10) td.title = txt;
         tr.append(td);
       });
@@ -203,7 +205,7 @@ export function mountCompetence(el, ctx) {
   let dragging = false;
   body.addEventListener('mousedown', (e) => { if (st.editing) return; const p = posOf(e); if (!p || e.button !== 0) return; e.preventDefault(); body.focus(); setSel(p.r, p.c, e.shiftKey); dragging = true; });
   body.addEventListener('mousemove', (e) => { if (!dragging || !(e.buttons & 1)) { dragging = false; return; } const p = posOf(e); if (p && st.sel && (p.r !== st.sel.r1 || p.c !== st.sel.c1)) { st.sel = { ...st.sel, r1: p.r, c1: p.c }; paintSel(); } });
-  body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name' || cols[p.c].ro) personCard(grid[p.r]); else beginEdit(null); });
+  body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name' || (cols[p.c].ro && !cols[p.c].lpCol)) personCard(grid[p.r]); else beginEdit(null); });
   body.addEventListener('contextmenu', (e) => { const p = posOf(e); if (!p) return; e.preventDefault(); setSel(p.r, p.c); contextMenu(e, grid[p.r]); });
   body.addEventListener('keydown', (e) => {
     if (st.editing || !st.data) return;
@@ -227,7 +229,7 @@ export function mountCompetence(el, ctx) {
       default: if (!ctrl && !e.altKey && e.key.length === 1) { e.preventDefault(); beginEdit(e.key); }
     }
   });
-  const selCells = () => { const { r0, c0, r1, c1 } = st.sel, out = []; for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) if (!cols[c].ro && grid[r]) out.push({ p: grid[r], c: cols[c] }); return out; };
+  const selCells = () => { const { r0, c0, r1, c1 } = st.sel, out = []; for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) if (!cols[c].ro && !cols[c].lpCol && grid[r]) out.push({ p: grid[r], c: cols[c] }); return out; };
 
   // ---------- zapis, cofanie ----------
   /**
@@ -252,8 +254,10 @@ export function mountCompetence(el, ctx) {
   async function apply(items, label) {
     if (!canWrite) { toast('Kompetencje: tylko odczyt (zapis: prawo zapisu w Grafiku)'); return; }
     const changes = [], before = [];
+    const lpItem = items.find((x) => x.c.lpCol);
+    if (lpItem) { await moveTo(lpItem.p, lpItem.text); return; }
     for (const { p, c, text } of items) {
-      if (c.ro) continue;
+      if (c.ro || c.lpCol) continue;
       let v = String(text ?? '').trim();
       if (c.skill) { v = K.parseLevel(v); if (v === null) { toast(`${c.title}: wpisz poziom 0–100 („${text}”)`, true); return; } }
       else if (c.date) { v = K.parsePermValue(v); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast(`${c.full || c.title}: wpisz datę dd.mm.rrrr („${text}”)`, true); return; } }
@@ -338,7 +342,7 @@ export function mountCompetence(el, ctx) {
     const data = parseTsv(e.clipboardData.getData('text/plain')); if (!data.length) return;
     const { r0, c0, r1, c1 } = st.sel, items = [];
     if (data.length === 1 && data[0].length === 1 && (r0 !== r1 || c0 !== c1)) { for (const x of selCells()) items.push({ ...x, text: data[0][0] }); }
-    else data.forEach((row, i) => { const p = grid[Math.min(r0, r1) + i]; if (!p) return; row.forEach((v, j) => { const c = cols[Math.min(c0, c1) + j]; if (c && !c.ro) items.push({ p, c, text: v }); }); });
+    else data.forEach((row, i) => { const p = grid[Math.min(r0, r1) + i]; if (!p) return; row.forEach((v, j) => { const c = cols[Math.min(c0, c1) + j]; if (c && !c.ro && !c.lpCol) items.push({ p, c, text: v }); }); });
     apply(items, `Wklejenie: ${items.length}`);
   }
   document.addEventListener('copy', onCopy); document.addEventListener('cut', onCut); document.addEventListener('paste', onPaste);
@@ -354,25 +358,11 @@ export function mountCompetence(el, ctx) {
     const off = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', off, true); } };
     setTimeout(() => document.addEventListener('mousedown', off, true), 0);
   }
+  /** Karta pracownika – wspólna z Grafikiem i Planem (views/personCard.js): urlopy, godziny, absencje, badania, uprawnienia, umiejętności. */
   function personCard(p) {
     if (!p) return;
-    const t = isoToday();
-    const row = (k, v, style = {}) => h('tr', {}, h('td', { style: { padding: '2px 8px', color: '#555' } }, k), h('td', { style: { padding: '2px 8px', fontWeight: 600, ...style } }, String(v ?? '')));
-    const sk = skills().map((s) => ({ s, v: Number((p.skills || {})[s.key]) || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v * b.s.weight - a.v * a.s.weight);
-    modal(`${p.name}${p.nr ? ' – ' + p.dept + ' ' + p.nr : ''}`, h('div', {},
-      h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '18px' } },
-        h('table', {}, h('tbody', {}, row('Wydział', p.dept), row('Nr ewidencyjny', p.nr), row('Stanowisko w Grafiku', p.inGrafik ? p.place || '—' : 'poza Grafikiem'), row('Komis wewnętrzny', p.komis),
-          row('Maszyna / stanowisko', p.machine), row('Stanowisko wg umowy', p.position), row('Data zatrudnienia', K.fmtPerm(p.hired || '')), row('Punkty', K.points(p, skills()), { fontSize: '16px' }))),
-        h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))),
-          h('tbody', {}, ...perms().filter((x) => Object.keys(K.permOf(p, x.key)).length).map((x) => {
-            const pv = K.permOf(p, x.key), v = K.permValid(pv, x), a = K.validStatus(v.iso, t);
-            return h('tr', {}, h('td', { class: 'left' }, x.name), h('td', { class: 'left' }, pv.nr || ''), h('td', {}, K.fmtPerm(pv.issued || '')),
-              h('td', { style: { background: a === 'expired' ? '#ff0000' : a === 'soon' ? '#ffc000' : '', color: a === 'expired' ? '#fff' : '', fontWeight: a ? 700 : 400, fontStyle: v.computed ? 'italic' : 'normal' } },
-                K.fmtPerm(v.iso) + (a === 'expired' ? ' – minęło' : a === 'soon' ? ' – mija wkrótce' : '')));
-          })))),
-      h('h3', { style: { margin: '10px 0 4px' } }, 'Umiejętności'),
-      sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`, style: { border: '1px solid #999', borderLeft: `8px solid ${s.color}`, padding: '2px 6px', background: K.levelColor(v) || '#fff' } }, `${s.name}: ${v}%`)))
-        : h('p', { class: 'muted' }, 'Brak wpisanych umiejętności.')), { wide: true });
+    const extra = canWrite ? [...(p.inGrafik ? [['Zmień stanowisko…', () => beginEditPlace(p)]] : []), ['Usuń pracownika…', () => removePerson(p)]] : [];
+    openPersonCard({ id: p.id, name: p.name }, { access: ctx.grafikAcc ? ctx.grafikAcc() : { summary: true }, extra });
   }
   const beginEditPlace = (p) => { const c = cols.find((x) => x.placeCol) || columns().find((x) => x.placeCol); placeDialog(p.place, (v) => apply([{ p, c, text: v }], `${p.name} · stanowisko`), p.id); };
   /**
@@ -442,14 +432,55 @@ export function mountCompetence(el, ctx) {
       } }, 'Dodaj'))));
     name.focus();
   }
+  /**
+   * Zmiana Lp: pracownik przechodzi na wskazane miejsce na liście Grafiku (kolejność wspólna dla Grafiku, Kompetencji, Planu) –
+   * pomocne przy układaniu obsady maszyn (grupy stanowisk razem). Separatory zostają tam, gdzie są.
+   */
+  async function moveTo(p, text) {
+    if (!p.inGrafik) { toast('Kolejność zmienia się tylko u osób z Grafiku'); return; }
+    const n = Math.round(Number(String(text).trim()));
+    const order = peopleList().filter((x) => x.inGrafik);
+    if (!Number.isFinite(n) || n < 1) { toast('Wpisz numer porządkowy (1, 2, 3…)'); return; }
+    const to = Math.min(n, order.length), from = order.findIndex((x) => x.id === p.id) + 1;
+    if (to === from) return;
+    const list = gPeople().slice(), i = list.findIndex((g) => g.id === p.id);
+    const [me] = list.splice(i, 1);
+    // miejsce: przed osobą, która ma teraz numer [to] (przy przesuwaniu w dół – za nią)
+    const target = order[to - 1]; let j = list.findIndex((g) => g.id === target.id);
+    if (to > from) j += 1;
+    list.splice(j, 0, me);
+    try { await saveMeta({ people: list }); toast(`${p.name}: Lp ${from} → ${to}`); }
+    catch (e) { toast('Nie zapisano kolejności: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+  }
+  /** Usuwanie pracownika: cztery kolejne potwierdzenia z ostrzeżeniami (na końcu trzeba wpisać nazwisko). */
   async function removePerson(p) {
-    const msg = p.inGrafik ? `Usunąć ${p.name} z Grafiku i Kompetencji? Wpisy zmian w Grafiku zostaną w bazie, ale osoba zniknie z tabel.` : `Usunąć ${p.name} z Kompetencji?`;
-    if (!(await confirmBox('Usuń pracownika', msg, 'Usuń'))) return;
+    const steps = [
+      ['Usuń pracownika (1/4)', `Czy na pewno usunąć ${p.name}${p.nr ? ' (' + p.nr + ')' : ''}?\n\n⚠ Osoba zniknie z Grafiku i z Kompetencji – u wszystkich użytkowników, na PC i na telefonach.`],
+      ['Usuń pracownika (2/4)', `⚠ OSTRZEŻENIE: ${p.name} zniknie z tabel Grafiku (wiersz, kolory stanowiska, urlopy, plan urlopów) oraz z obsady stanowiska ${p.place || ''} w Harmonogramie i Planie.\n\n⚠ Wpisy zmian w Grafiku zostaną w bazie, ale nie będą nigdzie widoczne.`],
+      ['Usuń pracownika (3/4)', `⚠ OSTRZEŻENIE: zostaną usunięte wszystkie dane kompetencji ${p.name}: badania lekarskie, BHP, uprawnienia z numerami i datami, umiejętności i punkty, data zatrudnienia.\n\n⚠ Tej operacji NIE MOŻNA cofnąć przyciskiem „Cofnij”.`],
+    ];
+    for (const [title, text] of steps) if (!(await confirmBox(title, text, 'Dalej'))) { toast('Usuwanie przerwane'); return; }
+    const typed = await promptName(p.name);
+    if (typed == null) { toast('Usuwanie przerwane'); return; }
+    if (typed.trim().toLowerCase() !== String(p.name).trim().toLowerCase()) { toast('Nazwisko się nie zgadza – usuwanie przerwane', true); return; }
     try {
       if (p.inGrafik) await saveMeta({ people: gPeople().filter((g) => g.id !== p.id) });
       if (kpPeople()[p.id]) await deletePerson(p.id);
-      st.sel = null; toast('Usunięto');
+      st.sel = null; toast(`Usunięto: ${p.name}`);
     } catch (e) { toast('Nie usunięto: ' + (e.message || e), true); }
+  }
+  /** Ostatnie (4/4) potwierdzenie: wpisanie nazwiska. Zwraca wpisany tekst albo null (Anuluj). */
+  function promptName(name) {
+    return new Promise((resolve) => {
+      const inp = h('input', { style: { width: '100%', padding: '6px' }, placeholder: name });
+      let done = false; const fin = (v) => { if (done) return; done = true; m.close(); resolve(v); };
+      const m = modal('Usuń pracownika (4/4)', h('div', {},
+        h('p', { class: 'err' }, `⚠ OSTATNIE OSTRZEŻENIE: usuwasz ${name} na stałe z Grafiku i Kompetencji.`),
+        h('p', {}, 'Aby potwierdzić, wpisz dokładnie nazwisko i imię pracownika:'), inp,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => fin(null) }, 'Anuluj'), h('button', { class: 'btn primary', style: { background: '#c00000', borderColor: '#c00000' }, onclick: () => fin(inp.value) }, 'Usuń na stałe'))),
+        { onClose: () => fin(null) });
+      setTimeout(() => inp.focus(), 50);
+    });
   }
   /** Kolumny umiejętności (nazwa, waga, kolor grupy) i uprawnień (nazwa, pilnowanie terminu). */
   function defsDialog() {
@@ -468,6 +499,8 @@ export function mountCompetence(el, ctx) {
           h('td', {}, 'ważne ', cell(x, 'validYears', '50px', 'number'), ' lat od wydania (0 – tylko wpisana data)'),
           h('td', {}, h('button', { class: 'btn small', onclick: () => { pr.splice(i, 1); render(); } }, 'Usuń'))))))),
         h('button', { class: 'btn small', onclick: () => { pr.push({ key: 'u' + Date.now().toString(36), name: '' }); render(); } }, 'Dodaj uprawnienie'),
+        h('div', { class: 'row', style: { marginTop: '10px', gap: '6px' } }, h('span', { class: 'muted' }, 'Z pliku Excel (arkusz „MK”):'),
+          h('button', { class: 'btn small', onclick: () => { m.close(); doImport(); } }, 'Umiejętności z Excela'), h('button', { class: 'btn small', onclick: () => { m.close(); doImportPerms(); } }, 'Uprawnienia z Excela')),
         h('p', { class: 'muted' }, 'Każde uprawnienie ma trzy kolumny: numer, data wydania, data ważności. Termin ważności jest czerwony, gdy minął, i pomarańczowy, gdy mija w ciągu 30 dni.'));
     };
     render();
@@ -551,22 +584,19 @@ export function mountCompetence(el, ctx) {
     document.body.append(input); input.click();
   }
 
-  const setZoom = (v) => { st.zoom = Math.max(50, Math.min(200, v)); lsSet('kp.zoom', st.zoom); zoomLabel.textContent = st.zoom + '%'; draw(); };
+  const setZoom = (v) => { st.zoom = Math.max(50, Math.min(200, v)); lsSet('kp.zoom', st.zoom); draw(); };   // Ctrl + kółko myszy
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(st.zoom + (e.deltaY < 0 ? 10 : -10)); } }, { passive: false });
   function cleanup() { document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste); if (unsub) { unsub(); unsub = null; } if (unsubG) { unsubG(); unsubG = null; } }
 
   const broom = (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(); draw(); } }); b.append(iconSvg('broom')); return b; })();
   // tylko osoby z uprawnieniem, którego termin minął albo mija w ciągu 30 dni
-  const alertBtn = h('button', { class: 'btn small', title: 'Pokaż tylko pracowników z uprawnieniem po terminie albo z terminem w ciągu 30 dni (czerwone / pomarańczowe)', onclick: () => { st.onlyAlerts = !st.onlyAlerts; if (st.onlyAlerts) { st.groups.perms = true; lsSet('kp.groups', st.groups); } draw(); } }, '⚠ Terminy');
+  const alertBtn = h('button', { class: 'btn small', title: 'Pokaż tylko pracowników z terminem do odnowienia: uprawnienia – do 3 miesięcy, badania i BHP – do miesiąca, albo po terminie', onclick: () => { st.onlyAlerts = !st.onlyAlerts; if (st.onlyAlerts) { st.groups.med = true; st.groups.perms = true; lsSet('kp.groups', st.groups); } draw(); } }, '⚠ Terminy');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kompetencje'), ...groupBtns, alertBtn, broom,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     canWrite ? h('button', { class: 'btn small', onclick: () => addPerson() }, 'Dodaj pracownika') : null,
     canWrite ? h('button', { class: 'btn small', onclick: defsDialog }, 'Kolumny…') : null,
-    h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
-    canWrite ? h('button', { class: 'btn small', title: 'Kolumny umiejętności (z wagami i kolorami grup) z pliku Excel (arkusz „MK”), bez pracowników', onclick: doImport }, 'Umiejętności z Excela') : null,
-    canWrite ? h('button', { class: 'btn small', title: 'Uprawnienia pracowników (numer, wydano, ważne do) z pliku Excel (arkusz „MK”)', onclick: doImportPerms }, 'Uprawnienia z Excela') : null, info), body);
-  zoomLabel.textContent = st.zoom + '%';
+    h('span', { class: 'grow' }), info), body);
   start();
   return cleanup;
 }
