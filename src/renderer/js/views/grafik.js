@@ -44,7 +44,8 @@ export function mountGrafik(el, ctx) {
   const today = () => isoOf(new Date());
   const st = {
     from: addDays(today(), -3), to: addDays(today(), 7), meta: null, months: {}, codes: {}, notes: {}, sel: null, editing: null,
-    filters: {}, sorts: [], ...loadFilters(), zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null, widths: lsGet('grafik.widths', {}) || {}, glow: lsGet('grafik.glow', true),
+    filters: {}, sorts: [], ...loadFilters(), zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null, widths: lsGet('grafik.widths', {}) || {}, glow: true,   // podświetlenie wiersza zawsze włączone
+
   };
   const body = h('div', { tabindex: '0', class: 'gr', style: { flex: 1, minHeight: 0, overflow: 'auto', outline: 'none', background: '#fff', position: 'relative' } });
   const info = h('span', { class: 'muted' });
@@ -261,7 +262,7 @@ export function mountGrafik(el, ctx) {
     body.querySelectorAll('td.gsel, td.gglow').forEach((td) => { td.classList.remove('gsel', 'gglow'); td.style.outline = ''; td.style.boxShadow = ''; });
     if (!st.sel) return;
     const { r0, c0, r1, c1 } = st.sel, ra = Math.min(r0, r1), rb = Math.max(r0, r1), ca = Math.min(c0, c1), cb = Math.max(c0, c1);
-    // podświetlenie (lekka zielona poświata) wiersza edytowanej komórki – przełącznik „Podświetl wiersz”
+    // podświetlenie (lekka zielona poświata) wiersza edytowanej komórki – zawsze włączone
     if (st.glow) body.querySelectorAll(`td[data-r="${r1}"]`).forEach((td) => { td.classList.add('gglow'); td.style.boxShadow = 'inset 0 0 0 999px rgba(0,176,80,.10), inset 0 2px 0 rgba(0,176,80,.75), inset 0 -2px 0 rgba(0,176,80,.75), 0 0 6px rgba(0,176,80,.45)'; });
     for (let r = ra; r <= rb; r++) for (let c = ca; c <= cb; c++) { const td = cellEl(r, c); if (td) { td.classList.add('gsel'); td.style.boxShadow = 'inset 0 0 0 999px rgba(26,115,232,.18)' + (st.glow && r === r1 ? ', inset 0 2px 0 rgba(0,176,80,.75), inset 0 -2px 0 rgba(0,176,80,.75)' : ''); } }
     const a = cellEl(r1, c1); if (a) { a.style.outline = '2px solid #0b57d0'; a.style.outlineOffset = '-2px'; a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
@@ -523,8 +524,7 @@ export function mountGrafik(el, ctx) {
     preset('Rok', (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31']),
     monthSel, weekSel,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
-    ...groupBtns, (() => { const b = h('button', { class: 'btn small' + (st.glow ? ' primary' : ''), title: 'Zielona poświata wiersza, w którym zmieniasz wpisy (ustawienie na tym komputerze)' }, 'Podświetl wiersz');
-      b.onclick = () => { st.glow = !st.glow; lsSet('grafik.glow', st.glow); b.className = 'btn small' + (st.glow ? ' primary' : ''); paintSel(); }; return b; })(),
+    ...groupBtns,
     (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     acc.importG ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza (tylko GOD)', onclick: doImport }, 'Import z G') : null,

@@ -33,11 +33,8 @@ export function competenceBlock(kp, id) {
   const sk = skills.map((s) => ({ s, v: Number((p.skills || {})[s.key]) || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v * b.s.weight - a.v * a.s.weight);
   return h('div', {},
     h('div', { class: 'row', style: { gap: '16px', flexWrap: 'wrap' } },
-      ...[['Maszyna / stanowisko', p.machine], ['Komis wewn.', p.komis], ['Data zatrudnienia', K.fmtPerm(p.hired || '')], ['Punkty', String(K.points(p, skills))]]
+      ...[['Data zatrudnienia', K.fmtPerm(p.hired || '')], ['Punkty', String(K.points(p, skills))]]
         .filter(([, v]) => v).map(([k, v]) => h('span', {}, h('span', { class: 'muted' }, k + ': '), h('b', {}, v)))),
-    // stanowisko wg umowy: opis pod tytułem, najwyżej 2 linie (dłuższy – skrócony, pełny w podpowiedzi)
-    p.position ? h('div', { style: { marginTop: '1px' } }, h('div', { class: 'muted' }, 'Stanowisko wg umowy:'),
-      h('b', { title: p.position, style: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxWidth: '520px' } }, p.position)) : null,
     types.length ? h('table', { class: 't', style: { marginTop: '2px' } }, h('thead', {}, h('tr', {}, ...['Badania / uprawnienie', 'Nr', 'Wydano', 'Ważne do'].map((x) => h('th', {}, x)))), h('tbody', {}, ...types.map(row)))
       : h('p', { class: 'muted' }, 'Brak wpisanych badań i uprawnień.'),
     sk.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 4px', marginTop: '2px' } }, ...sk.map(({ s, v }) => h('span', { title: `waga ${s.weight} · punkty ${v * s.weight}`,
@@ -50,12 +47,27 @@ export function grafikBlock(p, codes, year) {
   const red = (v) => (v < 0 ? { color: '#c00000' } : {});
   return h('div', {},
     h('div', { class: 'row', style: { gap: '14px', flexWrap: 'wrap' } },
-      ...[['UT z ' + (Number(year) - 1), ut.prev || 0], ['UT ' + year, ut.cur || 0], ['Wykorzystane', s.used], ['Zaplanowane', s.future], ['Dostępny', s.available], ['Pozostało', s.remaining], ['Godziny ' + year, s.hoursToMonth[11]]]
+      ...[['UT z ' + (Number(year) - 1), ut.prev || 0], ['UT ' + year, ut.cur || 0], ['Wykorzystane', s.used], ['Zaplanowane', s.future], ['Dostępny', s.available], ['Pozostało', s.remaining]]
         .map(([k, v]) => h('span', {}, h('span', { class: 'muted' }, k + ': '), h('b', { style: red(Number(v)) }, String(v))))),
     h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px', marginTop: '2px', flexWrap: 'wrap' } },
       h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Miesiąc', 'UT', 'Plan', 'Godziny', 'Narast.'].map((x) => h('th', {}, x)))),
         h('tbody', {}, ...F.MONTHS.map((mn, i) => h('tr', {}, h('td', { class: 'left' }, mn), h('td', { style: { background: s.monthPlanMet[i] ? '#ff9900' : '' } }, s.utByMonth[i] || ''), h('td', {}, s.plan[i] || ''), h('td', {}, s.hoursByMonth[i] || ''), h('td', {}, s.hoursToMonth[i] || ''))))),
       absenceTable(s.absences)));
+}
+
+/**
+ * Nagłówek karty: nazwisko (w kolorze stanowiska) i numer; pod nim miejsce · maszyna · komis (bez etykiet);
+ * niżej „Stanowisko wg umowy” – opis najwyżej w 2 liniach (pełny w podpowiedzi).
+ */
+function headerBlock(p, kpp, stn, who) {
+  const name = h('div', { class: 'row', style: { gap: '10px', alignItems: 'center' } },
+    h('b', { style: { fontSize: '16px', padding: '0 8px', background: stn ? stn.bg : '', color: stn ? stn.color : '' } }, p ? p.name : (who.name || who.id || '?')),
+    p ? (p.nr ? h('b', {}, p.nr) : null) : h('span', { class: 'err' }, 'nie znaleziono w Grafiku'));
+  const info = [p && p.place, kpp && kpp.machine, kpp && kpp.komis].filter(Boolean);
+  return h('div', { style: { marginBottom: '2px' } }, name,
+    info.length ? h('div', {}, ...info.flatMap((v, i) => [i ? h('span', { class: 'muted' }, ' · ') : '', h('b', {}, v)])) : null,
+    kpp && kpp.position ? h('div', {}, h('div', { class: 'muted' }, 'Stanowisko wg umowy:'),
+      h('b', { title: kpp.position, style: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', maxWidth: '520px' } }, kpp.position)) : null);
 }
 
 /** Tylko absencje wykorzystane przez pracownika (liczba > 0), w kolorach Grafiku. */
@@ -82,10 +94,7 @@ export async function openPersonCard(who, { access = { summary: true }, extra = 
     const year = String(new Date().getFullYear());
     clear(body);
     const stn = p ? F.placeStation(p.place, stationList(cfg)) : null;
-    const title = h('div', { class: 'row', style: { gap: '10px', alignItems: 'center', marginBottom: '2px' } },
-      h('b', { style: { fontSize: '16px', padding: '0 8px', background: stn ? stn.bg : '', color: stn ? stn.color : '' } }, p ? p.name : (who.name || who.id || '?')),
-      p ? h('span', { class: 'muted' }, `${p.place ? 'stanowisko ' + p.place : 'bez stanowiska'}${p.nr ? ' · nr ' + p.nr : ''}`) : h('span', { class: 'err' }, 'nie znaleziono w Grafiku'));
-    body.append(title);
+    body.append(headerBlock(p, (kp && kp.people || {})[id], stn, who));
     if (p && access.summary) {
       const months = F.monthsBetween(`${year}-01-01`, `${year}-12-31`);
       const docs = await Promise.all(months.map((mk) => one('gr_days', mk)));

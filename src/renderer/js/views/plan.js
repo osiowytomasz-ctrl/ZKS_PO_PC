@@ -6,7 +6,7 @@
 //  - Delete – czyści zaznaczone komórki; Ctrl+Z / Ctrl+Y – cofnij / ponów (zmiany czekają na „Zapisz zmiany”, jak dotąd);
 //  - przeciągnięcie krawędzi nagłówka kolumny (litery) albo numeru wiersza zmienia rozmiar, dwuklik na krawędzi – dopasowanie do tekstu.
 // Szerokości kolumn są osobiste (zapisywane na tym komputerze); wysokości wierszy i czcionka – wspólne (Firestore plan_layout/main, na żywo).
-// Dane planu są w bazie Firebase (planStore.js), a każdy zapis trafia też do karty PLAN arkusza. Podświetlenie (zielona poświata) wiersza edytowanej komórki – przełącznik „Podświetl wiersz”.
+// Dane planu są w bazie Firebase (planStore.js), a każdy zapis trafia też do karty PLAN arkusza. Wiersz edytowanej komórki ma zawsze zieloną poświatę.
 import { h, clear, api, apiCached, toast, confirmBox, alertBox } from '../ui.js';
 import * as P from '../logic/plan.js';
 import * as G from '../logic/planGrid.js';
@@ -27,7 +27,7 @@ export function mountPlan(el, ctx) {
   const st = {
     grid: null, fresh: false, expanded: new Set(), changes: new Map(), saving: false,
     zoom: lsGet('plan.zoom', 100), layout: G.cleanLayout(null), local: { cols: {}, rows: {} },
-    vis: [], cols: [], autoW: [], myCols: lsGet('plan.cols', {}) || {}, glow: lsGet('plan.glow', true), autoH: new Map(), offs: [0], heights: [],
+    vis: [], cols: [], autoW: [], myCols: lsGet('plan.cols', {}) || {}, glow: true, autoH: new Map(), offs: [0], heights: [],
     sel: null, editing: null, undo: [], redo: [], unwatch: null, layoutErr: '',
   };
   const body = h('div', { tabindex: '0', style: { flex: 1, minHeight: 0, overflow: 'auto', position: 'relative', outline: 'none', background: '#e9e9e9' } });
@@ -215,7 +215,7 @@ export function mountPlan(el, ctx) {
     clear(selLayer);
     if (!st.sel || !st.vis.length) return;
     const { ra, rb, ca, cb } = selRect();
-    // podświetlenie (lekka zielona poświata) wiersza, w którym jest aktywna komórka – przełącznik „Podświetl wiersz”
+    // podświetlenie (lekka zielona poświata) wiersza, w którym jest aktywna komórka – zawsze włączone
     if (st.glow) { const gy = headH() + st.offs[st.sel.r1];
       selLayer.append(h('div', { style: { position: 'absolute', left: GUTTER_W + 'px', top: gy + 'px', width: Math.max(0, totalW() - GUTTER_W) + 'px', height: st.heights[st.sel.r1] + 'px',
         background: 'rgba(0,176,80,.10)', boxShadow: '0 0 8px 2px rgba(0,176,80,.55), inset 0 0 0 1px rgba(0,176,80,.7)', boxSizing: 'border-box' } })); }
@@ -598,15 +598,12 @@ export function mountPlan(el, ctx) {
   }
 
   // ---------- pasek narzędzi ----------
-  const glowBtn = h('button', { class: 'btn small' + (st.glow ? ' primary' : ''), title: 'Zielona poświata wiersza, w którym jest zaznaczona komórka (ustawienie na tym komputerze)',
-    onclick: () => { st.glow = !st.glow; lsSet('plan.glow', st.glow); glowBtn.className = 'btn small' + (st.glow ? ' primary' : ''); paintSel(); } }, 'Podświetl wiersz');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, saveBtn,
     h('button', { class: 'btn', title: 'Wczytaj plan z bazy od nowa', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); st.undo = []; st.redo = []; load(); } }, 'Odśwież'),
     ctx.level('plan') === 'write' ? h('button', { class: 'btn small', title: 'Zastąp plan w bazie zawartością karty PLAN arkusza', onclick: doImport }, 'Import z arkusza') : null,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'),
     h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
-    glowBtn,
     h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Powiększenie:'),
     h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Tabela (wspólne):'),
