@@ -7,16 +7,49 @@ import { parseInsertPath, parseContour } from './toolGeometry.js';
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
 
-/** Połowa konturu z dawnej kolumny T (punkty w 0,1 mm): prawa strona (x ≥ 0) w kolejności zapisu, bez powtórzeń → wiersze {z, r, rad} w mm. */
+/**
+ * Połowa konturu (obrys zewnętrzny) z dowolnego konturu w 0,1 mm – także z liniami pomocniczymi wewnątrz (krawędzie skrawające itp.):
+ * dla każdego poziomu Z największa odległość od osi; uskoki (dwa promienie na tym samym Z) zachowane. Wynik: wiersze {z, r, rad} w mm.
+ */
 export function halfFromContour(points) {
+  const P = (points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (P.length < 2) return [];
+  const segs = [];
+  for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; if (a.x !== b.x || a.y !== b.y) segs.push([a, b]); }
+  const zs = [...new Set(P.map((p) => p.y))].sort((a, b) => a - b);
+  const at = (s, z) => { const [a, b] = s; return Math.abs(a.x + ((b.x - a.x) * (z - a.y)) / (b.y - a.y)); };
+  const env = (z, side) => { // side −1: tuż poniżej z, +1: tuż powyżej
+    let r = -1;
+    for (const s of segs) {
+      const lo = Math.min(s[0].y, s[1].y), hi = Math.max(s[0].y, s[1].y);
+      if (lo === hi) continue;
+      if (side < 0 ? lo < z && z <= hi : lo <= z && z < hi) r = Math.max(r, at(s, side < 0 ? Math.min(z, hi) : Math.max(z, lo)));
+    }
+    return r;
+  };
   const out = [];
-  for (const p of points || []) {
-    if (p.x < 0) continue;
-    const row = { z: fmt(p.y / 10), r: fmt(p.x / 10), rad: '' };
-    const last = out[out.length - 1];
-    if (!last || last.z !== row.z || last.r !== row.r) out.push(row);
-  }
-  return out;
+  const push = (z, r) => { if (r < 0) return; const row = { z: fmt(z / 10), r: fmt(r / 10), rad: '' }; const l = out[out.length - 1]; if (!l || l.z !== row.z || l.r !== row.r) out.push(row); };
+  zs.forEach((z, i) => {
+    const below = i > 0 ? env(z, -1) : -1, above = i < zs.length - 1 ? env(z, 1) : -1;
+    let flat = -1;
+    for (const s of segs) if (s[0].y === z && s[1].y === z) flat = Math.max(flat, Math.abs(s[0].x), Math.abs(s[1].x));
+    const lvl = P.filter((p) => p.y === z).reduce((m, p) => Math.max(m, Math.abs(p.x)), -1);
+    if (i === 0) { push(z, Math.max(above, 0)); return; }
+    if (i === zs.length - 1) { push(z, below); if (Math.max(flat, lvl) > below + 1e-9) push(z, Math.max(flat, lvl)); return; }
+    push(z, below);
+    const top = Math.max(flat, lvl);
+    if (top > Math.max(below, above) + 1e-9) push(z, top);
+    push(z, above);
+  });
+  // punkty pośrednie na prostej (ten sam promień albo ten sam Z co sąsiedzi) są zbędne
+  const between = (v, a, b) => (v - a) * (v - b) <= 0;
+  return out.filter((p, i) => {
+    if (i === 0 || i === out.length - 1) return true;
+    const a = out[i - 1], b = out[i + 1];
+    if (p.r === a.r && p.r === b.r) return !between(+p.z, +a.z, +b.z);
+    if (p.z === a.z && p.z === b.z) return !between(+p.r, +a.r, +b.r);
+    return true;
+  });
 }
 /** Połowa z zapisanej ścieżki SVG (kolumna V): punkty z x ≥ 0 (łuki rozbite na odcinki). */
 export const halfFromSvg = (path) => halfFromContour(svgToContour(path));
@@ -84,4 +117,14 @@ export function dims(rows) {
   if (!pts.length) return { diameter: 0, length: 0 };
   const ys = pts.map((p) => p.y);
   return { diameter: 2 * Math.max(...pts.map((p) => Math.abs(p.x))), length: Math.max(...ys) - Math.min(...ys) };
+}
+
+/**
+ * Pełny kontur (punkty w 0,1 mm, np. z kolumny T albo z danych D:N) → ścieżka SVG w mm bez żadnych zmian: ta sama kolejność punktów,
+ * także celowe linie przechodzące z X+ na X- (rzut boczny: nakrętka ER, krawędzie skrawające, czubek wiertła).
+ */
+export function contourToSvg(points) {
+  const P = (points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (P.length < 2) return '';
+  return P.map((p, i) => `${i ? 'L' : 'M'} ${fmt(p.x / 10)} ${fmt(p.y / 10)}`).join(' ') + ' Z';
 }

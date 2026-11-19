@@ -267,6 +267,13 @@ var API_FUNCS = {
     write: true,
     run: function (a, ctx) { return nd_saveContourV_(a[0], a[1], ctx); }
   },
+  ndContourData: {
+    run: function () { return nd_contourData_(); }
+  },
+  ndSaveContoursV: {
+    write: true,
+    run: function (a, ctx) { return nd_saveContoursV_(a[0], ctx); }
+  },
   getStAllowedLocations: {
     run: function () { return getStAllowedLocations(); }
   },

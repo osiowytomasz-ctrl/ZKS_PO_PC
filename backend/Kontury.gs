@@ -60,3 +60,55 @@ function nd_saveContourV_(code, path, ctx) {
   }
   throw new Error('Nie ma narzędzia ' + code + ' w arkuszu ' + STOCKSHEET + '.');
 }
+
+// ---------- generator konturów z danych (zamiast formuły w PSWT!AW) ----------
+// Program liczy kontur z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (kolumny A:C – wartości z formuł tej zakładki).
+//   ndContourData:   { run: function () { return nd_contourData_(); } },
+//   ndSaveContoursV: { write: true, run: function (a, ctx) { return nd_saveContoursV_(a[0], ctx); } },
+
+/** Dane do generatora: mocowania { kod: {left, right} } i parametry narzędzi z PSWT { kod (małe litery): {C, D … N} }. */
+function nd_contourData_() {
+  var ss = SpreadsheetApp.getActive();
+  var mounts = {}, params = {};
+  var k = ss.getSheetByName('kontury');
+  if (k && k.getLastRow() > 1) {
+    k.getRange(2, 1, k.getLastRow() - 1, 3).getDisplayValues().forEach(function (r) {
+      var code = String(r[0] || '').trim();
+      if (code) mounts[code] = { left: String(r[1] || ''), right: String(r[2] || '') };
+    });
+  }
+  var p = ss.getSheetByName('PSWT');
+  if (p && p.getLastRow() > 1) {
+    var keys = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
+    p.getRange(2, 2, p.getLastRow() - 1, 13).getDisplayValues().forEach(function (r) {
+      var code = nd_norm_(r[0]);
+      if (!code || !String(r[2] || '').trim()) return;
+      var o = {};
+      for (var i = 1; i < keys.length; i++) o[keys[i]] = String(r[i] || '').trim();
+      params[code] = o;
+    });
+  }
+  return { mounts: mounts, params: params };
+}
+
+/** Zapis wielu konturów naraz: { kod: ścieżka SVG } do kolumny V (jeden zapis kolumny). Wynik: { saved, missing: [kody] }. */
+function nd_saveContoursV_(items, ctx) {
+  api_requireGrafikLevel_(ctx, 'master');
+  items = items || {};
+  var want = {};
+  Object.keys(items).forEach(function (c) {
+    var path = String(items[c] || '').trim();
+    if (path && !/^M[\s\d\-.,MLAQZ]+$/i.test(path)) throw new Error('Kontur ' + c + ' nie jest ścieżką SVG.');
+    want[nd_norm_(c)] = path;
+  });
+  var r = nd_rows_();
+  var codes = r.sheet.getRange(r.first, 1, r.count, 1).getDisplayValues();
+  var range = r.sheet.getRange(r.first, ND_V_COL, r.count, 1);
+  var v = range.getValues(), saved = 0, found = {};
+  for (var i = 0; i < r.count; i++) {
+    var c = nd_norm_(codes[i][0]);
+    if (c && Object.prototype.hasOwnProperty.call(want, c)) { v[i][0] = want[c]; found[c] = true; saved++; }
+  }
+  range.setValues(v);
+  return { saved: saved, missing: Object.keys(want).filter(function (c) { return !found[c]; }) };
+}

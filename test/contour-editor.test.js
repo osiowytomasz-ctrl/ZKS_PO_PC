@@ -36,3 +36,10 @@ test('zaokrąglenie: łuk styczny, promień przycięty do połowy krótszego odc
   const big = E.toSvg([{ z: '0', r: '10' }, { z: '4', r: '10', rad: '50' }]);
   assert.ok(big.includes('L 10 2 A 2 2 0 0 1'), big);
 });
+
+test('pełny kontur bez zmian – linie rzutu bocznego (X+ → X-) zostają', () => {
+  const er = [{ x: -95, y: 0 }, { x: 95, y: 0 }, { x: 80, y: 340 }, { x: -80, y: 340 }, { x: 80, y: 340 }, { x: 95, y: 360 }, { x: -95, y: 360 }];
+  const svg = E.contourToSvg(er);
+  assert.equal(svg, 'M -9.5 0 L 9.5 0 L 8 34 L -8 34 L 8 34 L 9.5 36 L -9.5 36 Z');
+  assert.deepEqual(E.svgToContour(svg), er);
+});

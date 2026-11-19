@@ -1,19 +1,20 @@
 // Narzędziownia → Kontury: edytor / kreator konturów narzędzi. Użytkownik wpisuje połowę konturu (od osi na zewnątrz: Z wzdłuż osi,
 // R – promień, opcjonalnie zaokrąglenie w punkcie), program rysuje cały kontur (odbicie lustrzane) obok dawnego z kolumny T i zapisuje go
 // jako ścieżkę SVG w mm do kolumny V arkusza ND_CACHE (MASTER, GOD). Kolumna T się nie zmienia.
-import { h, clear, api, toast, confirmBox } from '../ui.js';
+import { h, clear, api, toast, confirmBox, modal } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { statusLine } from './toolViews.js';
+import { fullContour } from '../logic/contourGen.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 export function mountContours(el, ctx) {
   const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
-  const st = { tools: [], details: new Map(), v: {}, q: '', only: '', tool: null, rows: [], dirty: false };
+  const st = { tools: [], details: new Map(), v: {}, mounts: {}, params: {}, q: '', only: '', tool: null, rows: [], dirty: false, full: null, fullLabel: '' };
   const status = statusLine();
   const listBox = h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0, border: '1px solid #ccc', background: '#fff' } });
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
@@ -29,16 +30,25 @@ export function mountContours(el, ctx) {
       st.tools = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim()).sort((a, b) => String(a.productCode).localeCompare(String(b.productCode), 'pl', { numeric: true }));
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
       try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
+      try { const cd = (await api('ndContourData', [], { timeoutMs: 180000 })) || {}; st.mounts = cd.mounts || {}; st.params = cd.params || {}; }
+      catch (e) { st.mounts = {}; st.params = {}; status.set('Nie wczytano danych PSWT / zakładki „kontury” (Kontury.gs: ndContourData): ' + e.message, 'error'); }
       drawList();
     } catch (e) { clear(listBox).append(h('div', { class: 'err', style: { padding: '8px' } }, 'Nie wczytano narzędzi: ' + e.message)); }
   }
   const tOf = (t) => (st.details.get(normCode(t.productCode)) || {}).columnAY || '';
   const vOf = (t) => st.v[normCode(t.productCode)] || '';
+  /** Kontur z danych (PSWT D:N + mocowanie z zakładki „kontury”) w 0,1 mm albo null. */
+  const genOf = (t) => {
+    const p = st.params[normCode(t.productCode)];
+    if (!p) return null;
+    const pts = G.parseContour(fullContour(p, st.mounts) || '');
+    return pts.length >= 3 && G.bounds(pts).maxX - G.bounds(pts).minX > 0 ? pts : null;
+  };
 
   function drawList() {
     const q = st.q.toLowerCase();
     const items = st.tools.filter((t) => (!q || String(t.productCode).toLowerCase().includes(q) || description(t).toLowerCase().includes(q))
-      && (!st.only || (st.only === 'T' ? tOf(t) : st.only === 'V' ? vOf(t) : !tOf(t) && !vOf(t))));
+      && (!st.only || (st.only === 'T' ? tOf(t) : st.only === 'V' ? vOf(t) : st.only === 'G' ? genOf(t) : !tOf(t) && !vOf(t))));
     clear(listBox);
     for (const t of items.slice(0, 600)) {
       const on = st.tool && st.tool.productCode === t.productCode;
@@ -54,9 +64,11 @@ export function mountContours(el, ctx) {
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
     st.tool = t; st.dirty = false;
-    st.rows = vOf(t) ? E.halfFromSvg(vOf(t)) : E.halfFromContour(G.parseContour(tOf(t)));
+    const g = genOf(t), tp = G.parseContour(tOf(t));
+    const src = vOf(t) ? [E.svgToContour(vOf(t)), 'kolumna V'] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
+    setFull(src && src[0], src && src[1]);
     if (!st.rows.length) st.rows = [{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }];
-    status.set(vOf(t) ? 'Wczytano połowę z kolumny V.' : tOf(t) ? 'Wczytano połowę z kolumny T (do poprawienia).' : 'Brak konturu – wpisz punkty od początku.', 'neutral');
+    status.set(src ? `Wczytano pełny kontur (${src[1]}) – bez zmian, z liniami rzutu bocznego. Zmiana punktów w tabeli przełącza na kontur z połowy (odbicie).` : 'Brak konturu – wpisz punkty od początku.', 'neutral');
     drawList(); drawEditor();
   }
 
@@ -67,14 +79,19 @@ export function mountContours(el, ctx) {
     editBox.append(h('div', {}, h('b', { style: { fontSize: '15px' } }, t.productCode), h('div', { class: 'muted', style: { fontSize: '12px' } }, description(t)),
       h('div', { style: { fontSize: '12px' } }, `Φ ${t.columnF || '—'} · L ${t.columnJ || '—'} · Ms ${t.columnM || '—'} · Mk ${t.columnN || '—'}`)));
     editBox.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px' } },
-      h('button', { class: 'btn small', disabled: !tOf(t), title: 'Połowa (x ≥ 0) dawnego konturu z kolumny T', onclick: () => setRows(E.halfFromContour(G.parseContour(tOf(t))), 'Wczytano połowę z kolumny T.') }, 'Z kolumny T'),
-      h('button', { class: 'btn small', disabled: !vOf(t), onclick: () => setRows(E.halfFromSvg(vOf(t)), 'Wczytano połowę z kolumny V.') }, 'Z kolumny V'),
+      h('button', { class: 'btn small', disabled: !tOf(t), title: 'Połowa (x ≥ 0) dawnego konturu z kolumny T', onclick: () => { setFull(G.parseContour(tOf(t)), 'kolumna T'); st.dirty = true; status.set('Wczytano pełny kontur z kolumny T (bez zmian).', 'neutral'); drawEditor(); } }, 'Z kolumny T'),
+      h('button', { class: 'btn small', disabled: !vOf(t), onclick: () => { setFull(E.svgToContour(vOf(t)), 'kolumna V'); status.set('Wczytano pełny kontur z kolumny V.', 'neutral'); drawEditor(); } }, 'Z kolumny V'),
+      h('button', { class: 'btn small', disabled: !genOf(t), title: 'Kontur policzony z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (jak dawna formuła)', onclick: () => { setFull(genOf(t), 'dane D:N'); st.dirty = true; status.set('Wczytano pełny kontur policzony z danych (D:N) – z liniami rzutu bocznego.', 'neutral'); drawEditor(); } }, 'Z danych (D:N)'),
       h('button', { class: 'btn small', onclick: () => setRows([{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }], 'Wyczyszczono.') }, 'Od nowa'),
       h('button', { class: 'btn small', onclick: () => { st.rows.push({ z: '', r: '', rad: '' }); st.dirty = true; drawEditor(); } }, '+ punkt')));
     editBox.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Połowa konturu od osi na zewnątrz, w kolejności obrysu: Z – pozycja wzdłuż osi (mm, 0 jak w kolumnie T), R – promień od osi (mm), Zaokr. – promień zaokrąglenia w tym punkcie (mm, puste – ostry narożnik). Druga połowa powstaje sama (odbicie lustrzane).'));
+    st.noteEl = null;
+    if (st.full) editBox.append(st.noteEl = h('div', { style: { background: '#fff3e0', border: '1px solid #ef6c00', padding: '4px 6px', fontSize: '12px' } },
+      `Tryb: pełny kontur (${st.fullLabel}) zapisywany bez zmian – z liniami rzutu bocznego (np. nakrętka ER). Tabela pokazuje tylko obrys; zmiana punktu przełącza na kontur z połowy (odbicie lustrzane, bez linii wewnętrznych).`,
+      ' ', h('button', { class: 'btn small', onclick: () => { st.full = null; st.dirty = true; status.set('Przełączono na kontur z połowy (odbicie).', 'neutral'); drawEditor(); } }, 'Użyj połowy z tabeli')));
     const tb = h('tbody', {});
     st.rows.forEach((r, i) => {
-      const inp = (k, w) => h('input', { type: 'text', value: r[k] ?? '', inputmode: 'decimal', style: { width: w, padding: '2px 4px' }, oninput: (e) => { r[k] = e.target.value; st.dirty = true; drawPreview(); } });
+      const inp = (k, w) => h('input', { type: 'text', value: r[k] ?? '', inputmode: 'decimal', style: { width: w, padding: '2px 4px' }, oninput: (e) => { r[k] = e.target.value; st.dirty = true; if (st.full) { st.full = null; if (st.noteEl) st.noteEl.remove(); } drawPreview(); } });
       tb.append(h('tr', {}, h('td', { class: 'muted' }, String(i + 1)), h('td', {}, inp('z', '70px')), h('td', {}, inp('r', '70px')), h('td', {}, inp('rad', '60px')),
         h('td', { style: { whiteSpace: 'nowrap' } },
           h('button', { class: 'btn small', title: 'W górę', disabled: i === 0, onclick: () => { [st.rows[i - 1], st.rows[i]] = [st.rows[i], st.rows[i - 1]]; st.dirty = true; drawEditor(); } }, '↑'),
@@ -85,16 +102,22 @@ export function mountContours(el, ctx) {
     editBox.append(h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['#', 'Z [mm]', 'R [mm]', 'Zaokr.', ''].map((x) => h('th', {}, x)))), tb), errBox);
     drawPreview();
   }
-  function setRows(rows, msg) { st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
+  function setRows(rows, msg) { st.full = null; st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
+  /** Pełny kontur bez zmian (T / V / dane) – tabela pokazuje jego obrys (połowę) tylko do podglądu i ewentualnej edycji. */
+  function setFull(points, label) {
+    st.full = points && points.length >= 3 ? points : null; st.fullLabel = label || '';
+    st.rows = st.full ? E.halfFromContour(st.full) : [];
+  }
 
   function drawPreview() {
     const t = st.tool;
-    const errs = t ? E.validate(st.rows) : [];
+    const errs = t && !st.full ? E.validate(st.rows) : [];
     errBox.textContent = errs.join('\n');
-    const svg = t && !errs.length ? E.toSvg(st.rows) : '';
+    const svg = !t ? '' : st.full ? E.contourToSvg(st.full) : !errs.length ? E.toSvg(st.rows) : '';
     svgOut.value = svg;
     const layers = [];
     if (t && tOf(t)) layers.push({ pts: G.parseContour(tOf(t)), stroke: '#888', fill: 'none', dash: '6 4', label: 'kolumna T (dawny)' });
+    if (t && genOf(t)) layers.push({ pts: genOf(t), stroke: '#ef6c00', fill: 'none', dash: '4 3', label: 'z danych D:N' });
     if (t && vOf(t)) layers.push({ pts: E.svgToContour(vOf(t)), stroke: '#2e7d32', fill: 'none', dash: '2 3', label: 'kolumna V (zapisany)' });
     if (svg) layers.push({ pts: E.svgToContour(svg), stroke: '#1565c0', fill: 'rgba(21,101,192,.18)', dash: '', label: 'nowy kontur' });
     const all = layers.flatMap((l) => l.pts);
@@ -106,10 +129,10 @@ export function mountContours(el, ctx) {
     out += `<line x1="${X(0)}" y1="4" x2="${X(0)}" y2="${H - 4}" stroke="#d50000" stroke-width="1" stroke-dasharray="10 4 2 4"/>`;
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => X(p.x) + ',' + Y(p.y)).join(' ')}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''}/>`;
     // punkty wpisanej połowy z numerami
-    if (svg) E.fullPoints(st.rows).slice(0, st.rows.length).forEach((p, i) => { out += `<circle cx="${X(p.x * 10)}" cy="${Y(p.y * 10)}" r="3" fill="#1565c0"/><text x="${(+X(p.x * 10) + 5).toFixed(1)}" y="${(+Y(p.y * 10) - 4).toFixed(1)}" font-size="11" fill="#1565c0">${i + 1}</text>`; });
+    if (svg && !st.full) E.fullPoints(st.rows).slice(0, st.rows.length).forEach((p, i) => { out += `<circle cx="${X(p.x * 10)}" cy="${Y(p.y * 10)}" r="3" fill="#1565c0"/><text x="${(+X(p.x * 10) + 5).toFixed(1)}" y="${(+Y(p.y * 10) - 4).toFixed(1)}" font-size="11" fill="#1565c0">${i + 1}</text>`; });
     out += layers.map((l, i) => `<text x="8" y="${16 + i * 14}" font-size="11" fill="${l.stroke}">— ${esc(l.label)}</text>`).join('') + '</svg>';
     preview.innerHTML = out;
-    const d = svg ? E.dims(st.rows) : null;
+    const d = svg ? (() => { const b2 = G.bounds(E.svgToContour(svg)); return { diameter: Math.max(Math.abs(b2.minX), Math.abs(b2.maxX)) / 5, length: (b2.maxY - b2.minY) / 10 }; })() : null;
     info.textContent = d ? `Nowy kontur: największa średnica ${d.diameter.toFixed(2)} mm, długość ${d.length.toFixed(2)} mm` + (t.columnF ? ` · katalog: Φ ${t.columnF}` : '') + (t.columnJ ? `, L ${t.columnJ}` : '') : '';
   }
 
@@ -127,11 +150,46 @@ export function mountContours(el, ctx) {
     } catch (e) { status.set('Nie zapisano: ' + e.message, 'error'); }
   }
 
+  /** Hurtem: kontury z danych dla narzędzi bez konturu w kolumnie V – podgląd liczby i zapis do V. */
+  async function bulk() {
+    const scope = h('select', {}, h('option', { value: 'noV' }, 'bez konturu w kolumnie V'), h('option', { value: 'none' }, 'bez konturu w T i w V'));
+    const info2 = h('div', { style: { whiteSpace: 'pre-wrap', fontSize: '13px', margin: '8px 0' } });
+    const pickList = () => st.tools.filter((t) => !vOf(t) && (scope.value === 'noV' || !(tOf(t) && G.parseContour(tOf(t)).length >= 3))).map((t) => ({ t, g: genOf(t) })).filter((x) => x.g);
+    const count = () => {
+      const l = pickList(), by = {};
+      for (const x of l) { const k = `${x.t.columnD || '?'} / ${x.t.columnE || '?'}`; by[k] = (by[k] || 0) + 1; }
+      info2.textContent = `Do zapisania: ${l.length} konturów.\n` + Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, n]) => `  ${k}: ${n}`).join('\n');
+      go.disabled = !l.length;
+    };
+    const go = h('button', { class: 'btn primary', onclick: async () => {
+      const l = pickList();
+      if (!(await confirmBox('Kolumna V', `Zapisać ${l.length} konturów policzonych z danych do kolumny V arkusza ND_CACHE?`, 'Zapisz'))) return;
+      go.disabled = true;
+      let saved = 0;
+      try {
+        for (let i = 0; i < l.length; i += 300) {
+          const items = Object.fromEntries(l.slice(i, i + 300).map((x) => [x.t.productCode, E.contourToSvg(x.g)]));
+          const r = await api('ndSaveContoursV', [items], { timeoutMs: 180000 });
+          saved += r.saved || 0;
+          for (const [c, v] of Object.entries(items)) st.v[normCode(c)] = v;
+          info2.textContent = `Zapisano ${saved} z ${l.length}…`;
+        }
+        m.close(); status.set(`Zapisano ${saved} konturów z danych w kolumnie V.`); drawList(); drawPreview();
+      } catch (e) { info2.textContent += '\nBłąd: ' + e.message; go.disabled = false; }
+    } }, 'Zapisz do kolumny V');
+    scope.onchange = count;
+    const m = modal('Kontury z danych – hurtem', h('div', {}, h('p', { style: { margin: 0 } }, 'Program liczy kontur z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (tak jak dawna formuła w PSWT, bez obciążania arkusza) i zapisuje go do kolumny V jako SVG w mm – cały, bez zmian, z liniami rzutu bocznego.'),
+      h('label', { class: 'row' }, 'Narzędzia: ', scope), info2,
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), go)), { wide: true });
+    count();
+  }
+
   const search = h('input', { type: 'search', placeholder: 'Szukaj kodu / opisu', style: { width: '100%', padding: '4px 8px' }, oninput: (e) => { st.q = e.target.value; drawList(); } });
   const only = h('select', { style: { width: '100%' }, onchange: (e) => { st.only = e.target.value; drawList(); } },
-    h('option', { value: '' }, 'Wszystkie narzędzia'), h('option', { value: 'T' }, 'z konturem w kolumnie T'), h('option', { value: 'V' }, 'z konturem w kolumnie V'), h('option', { value: '-' }, 'bez konturu'));
+    h('option', { value: '' }, 'Wszystkie narzędzia'), h('option', { value: 'T' }, 'z konturem w kolumnie T'), h('option', { value: 'V' }, 'z konturem w kolumnie V'), h('option', { value: '-' }, 'bez konturu'), h('option', { value: 'G' }, 'z konturem z danych (D:N)'));
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kontury narzędzi'), h('span', { class: 'grow muted' }, 'Wpisz połowę konturu – program tworzy cały kontur i zapisuje go w kolumnie V (SVG, mm).'),
+    canSave ? h('button', { class: 'btn', title: 'Kontury z danych (PSWT D:N) dla wielu narzędzi naraz', onclick: () => bulk() }, 'Z danych hurtem…') : null,
     h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), status,
   h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),

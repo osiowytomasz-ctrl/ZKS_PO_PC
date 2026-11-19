@@ -19,7 +19,8 @@ export function parseContour(text) {
     if (p.length < 2) continue;
     const xs = p[0].trim(), ys = p[1].trim();
     if (!xs || !ys) continue;
-    const x = Number(xs), y = Number(ys);
+    // arkusz zapisuje ułamki z przecinkiem dziesiętnym (65,8_450; także „-102,”)
+    const x = Number(xs.replace(',', '.')), y = Number(ys.replace(',', '.'));
     if (Number.isFinite(x) && Number.isFinite(y)) out.push(pt(x, y));
   }
   return out;
