@@ -91,7 +91,7 @@ export async function mountSettings(el, ctx) {
     status, speed, fbOut,
     // Dostęp: klucze do programu (administrator) i kody do Grafiku na telefonie (MASTER, GOD)
     cfg.url && cfg.key && (grafikAccess(grafikLevelOf(ctx.user)).manage) ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Dostęp'),
-      h('p', { class: 'muted' }, 'Klucze dostępu do programu (PC i Android) nadaje administrator. Kody iPhone – osobiste kody pracowników do Grafiku do wglądu w przeglądarce telefonu (strona …/exec?p=grafik).'),
+      h('p', { class: 'muted' }, 'Klucze dostępu do programu (PC i Android) nadaje administrator. Kody iPhone – osobiste kody pracowników do Grafiku i Planu do wglądu w przeglądarce telefonu (strona …/exec?p=grafik).'),
       h('div', { class: 'row' },
         grafikLevelOf(ctx.user) === 'god' ? h('button', { class: 'btn', title: 'Konta z zakładki Uzytkownicy: klucze, nowi użytkownicy (tylko administrator)', onclick: () => openUsersAdmin() }, 'Użytkownicy i klucze') : null,
         h('button', { class: 'btn', title: 'Osobiste kody pracowników do Grafiku na telefonie (iPhone, przeglądarka)', onclick: async () => {

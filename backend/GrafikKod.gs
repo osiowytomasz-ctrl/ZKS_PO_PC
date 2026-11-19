@@ -1,11 +1,12 @@
 /**
- * GrafikKod.gs — Grafik do wglądu w przeglądarce telefonu (iPhone, Android) z dostępem na osobisty kod pracownika.
+ * GrafikKod.gs — Grafik i Plan do wglądu w przeglądarce telefonu (iPhone, Android) z dostępem na osobisty kod pracownika.
  *
  * Strona: adres wdrożenia API (to samo, co w Ustawieniach programu PC / Androida) + "?p=grafik".
  * Pracownik wpisuje swój kod (8 cyfr); serwer sprawdza go i zwraca TYLKO kody zmian i komentarze z bazy Firebase
- * (gr_meta/main – nazwiska i miejsca pracy, gr_days – wpisy), bez urlopów, godzin i absencji. Strona niczego nie zmienia.
+ * (gr_meta/main – nazwiska i miejsca pracy, gr_days – wpisy), bez urlopów, godzin i absencji, oraz Plan (plan_meta, plan_rows).
+ * Strona niczego nie zmienia.
  *
- * Kody nadaje i usuwa MASTER / GOD w programie PC (Grafik → „Kody iPhone”). W bazie jest tylko skrót kodu (SHA-256):
+ * Kody nadaje i usuwa MASTER / GOD w programie PC (Ustawienia → Dostęp → „Kody iPhone”). W bazie jest tylko skrót kodu (SHA-256):
  *   gr_codes/main: { codes: { <skrót>: { pid, name, by, at, last } } }
  *
  * Wdrożenie (robi właściciel skryptu):
@@ -37,18 +38,7 @@ function grk_page_() {
  * Wynik: { who, pid, from, to, days, people: [{id, name, place, sep}], codes: {pid: {iso: kod}}, notes: {pid: {iso: tekst}}, holidays }.
  */
 function grk_view(code, from, to) {
-  var c = String(code || '').replace(/\D/g, '');
-  var cache = CacheService.getScriptCache();
-  var fails = Number(cache.get('grk_fail') || 0);
-  if (fails >= GRK_FAIL_LIMIT) throw new Error('Za dużo błędnych prób. Spróbuj ponownie za kilka minut.');
-  var hash = grk_hash_(c);
-  var codes = (grk_doc_('gr_codes/main') || {}).codes || {};
-  var me = c.length >= 8 ? codes[hash] : null;
-  if (!me) {
-    cache.put('grk_fail', String(fails + 1), GRK_FAIL_SECONDS);
-    throw new Error('Nieprawidłowy kod.');
-  }
-  try { grk_touch_(hash); } catch (e) { console.warn('grk_touch_ ' + e); }
+  var me = grk_me_(code);
 
   var re = /^\d{4}-\d{2}-\d{2}$/;
   if (!re.test(String(from)) || !re.test(String(to)) || from > to) throw new Error('Zły zakres dat.');
@@ -81,6 +71,69 @@ function grk_view(code, from, to) {
   var holidays = (meta.holidays || []).concat((cfg.holidays || []).map(function (x) { return typeof x === 'string' ? x : (x && x.date) || ''; }))
     .filter(function (x) { return x; });
   return { who: me.name || '', pid: me.pid || '', from: days[0], to: days[days.length - 1], days: days, people: people, codes: codesOut, notes: notesOut, holidays: holidays };
+}
+
+/** Sprawdzenie kodu (licznik błędnych prób, zapis ostatniego użycia); wynik: { pid, name, … } z gr_codes/main. */
+function grk_me_(code) {
+  var c = String(code || '').replace(/\D/g, '');
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get('grk_fail') || 0);
+  if (fails >= GRK_FAIL_LIMIT) throw new Error('Za dużo błędnych prób. Spróbuj ponownie za kilka minut.');
+  var hash = grk_hash_(c);
+  var codes = (grk_doc_('gr_codes/main') || {}).codes || {};
+  var me = c.length >= 8 ? codes[hash] : null;
+  if (!me) {
+    cache.put('grk_fail', String(fails + 1), GRK_FAIL_SECONDS);
+    throw new Error('Nieprawidłowy kod.');
+  }
+  try { grk_touch_(hash); } catch (e) { console.warn('grk_touch_ ' + e); }
+  return me;
+}
+
+/**
+ * Plan do wglądu (ten sam kod co Grafik): plan_meta/main + plan_rows (wiersze jako JSON {v, b, f, k, runs}) i wspólne szerokości kolumn
+ * (plan_layout/main). Wynik: { who, cols: [nr kolumny], widths: {kolumna: px}, rows: [{v, b, f, runs}], dates: [{row, iso}] }.
+ * Kolumny ukryte (rodzaj „hidden” w wierszu 0) i przed firstVisibleCol pomijane – jak w programie.
+ */
+function grk_plan(code) {
+  var me = grk_me_(code);
+  var meta = grk_doc_('plan_meta/main');
+  if (!meta) throw new Error('Planu nie ma jeszcze w bazie.');
+  var n = Number(meta.nRows) || 0, raw = {};
+  grk_list_('plan_rows').forEach(function (d) { var r = d.r || {}; Object.keys(r).forEach(function (k) { raw[k] = r[k]; }); });
+  var rows = [], dates = [], width = 0;
+  for (var i = 0; i < n; i++) {
+    var x = null;
+    try { x = raw[i] ? JSON.parse(raw[i]) : null; } catch (e) { x = null; }
+    x = x || {};
+    rows.push({ v: x.v || [], b: x.b || [], f: x.f || [], k: x.k || [], runs: x.runs || [] });
+    width = Math.max(width, (x.v || []).length);
+    (x.k || []).forEach(function (kind, c) {
+      if (kind !== 'date') return;
+      var t = String(x.v[c] == null ? '' : x.v[c]).trim(), m = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(t);
+      var iso = m ? m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2) : (/^\d{4}-\d{2}-\d{2}$/.test(t) ? t : '');
+      if (iso) dates.push({ row: i, iso: iso });
+    });
+  }
+  var first = Number(meta.firstVisibleCol == null ? 1 : meta.firstVisibleCol), head = (rows[0] && rows[0].k) || [], cols = [];
+  for (var c = first; c < width; c++) if (head[c] !== 'hidden') cols.push(c);
+  rows.forEach(function (r) { delete r.k; });
+  var layout = grk_doc_('plan_layout/main') || {};
+  return { who: me.name || '', cols: cols, widths: layout.cols || {}, rows: rows, dates: dates };
+}
+
+/** Wszystkie dokumenty kolekcji (stronami po 300). */
+function grk_list_(collection) {
+  var out = [], token = '';
+  do {
+    var r = UrlFetchApp.fetch(grk_base_() + collection + '?pageSize=300' + (token ? '&pageToken=' + encodeURIComponent(token) : ''),
+      { headers: { Authorization: 'Bearer ' + grk_token_() }, muteHttpExceptions: true });
+    if (r.getResponseCode() !== 200) throw new Error('Błąd bazy (' + r.getResponseCode() + '): ' + r.getContentText().slice(0, 200));
+    var j = JSON.parse(r.getContentText() || '{}');
+    (j.documents || []).forEach(function (d) { out.push(grk_fields_(d.fields || {})); });
+    token = j.nextPageToken || '';
+  } while (token);
+  return out;
 }
 
 function grk_hash_(code) {

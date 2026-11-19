@@ -49,8 +49,8 @@ export async function openGrafikCodes({ people, user }) {
     try { await write(r.pid, null); toast('Dostęp odebrany: ' + r.name); } catch (e) { toast('Nie zapisano: ' + (e.message || e), true); }
   };
 
-  const m = modal('Kody iPhone – Grafik do wglądu na telefonie', h('div', {},
-    h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Każdy pracownik ma osobny kod (8 cyfr). Po wpisaniu kodu widzi cały grafik (zmiany i komentarze, bez urlopów, godzin i absencji), bez możliwości zmian.'),
+  const m = modal('Kody iPhone – Grafik i Plan do wglądu na telefonie', h('div', {},
+    h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Każdy pracownik ma osobny kod (8 cyfr). Po wpisaniu kodu widzi cały grafik (zmiany i komentarze, bez urlopów, godzin i absencji) i Plan – bez możliwości zmian.'),
     link ? h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Adres strony: ', h('code', { style: { userSelect: 'all' } }, link)) : null,
     h('div', { class: 'row' }, search), list,
     h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true, onClose: () => stop() });
