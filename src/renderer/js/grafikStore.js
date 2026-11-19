@@ -1,5 +1,6 @@
 // Grafik w Firestore: gr_meta/main (pracownicy, miejsca pracy, urlopy, święta) i gr_days/{rrrr-mm} (kody i komentarze miesiąca).
 // W bazie tylko kody i komentarze – kolory i podsumowania liczy program (logic/grafikFb.js). Nasłuch na żywo tylko potrzebnych miesięcy.
+import { queueInBatch, grafikQueueItems } from './syncStore.js';
 import { firebase, resetFirestoreCache } from './fb.js';
 
 // Pusty wynik z pamięci lokalnej pomijamy i czekamy na serwer; potwierdzenie z serwera, że dokumentu nie ma, różni się od pamięci
@@ -69,14 +70,10 @@ export async function saveCells(changes, rows) {
     if (Object.keys(doc.n).length) data.n = doc.n;
     b.set(sdk.doc(db, 'gr_days', mk), data, { merge: true });
   }
+  // do arkusza (karta G) – nie od razu: kolejka wysyłki „Do arkusza” (MASTER, GOD), w tym samym zapisie
+  queueInBatch(sdk, db, b, 'grafik', grafikQueueItems(changes, rows));
   await b.commit();
-  // okres przejściowy: to samo w karcie G (błąd arkusza nie cofa zapisu w bazie – tylko informacja)
-  let sheet = null;
-  if (rows) {
-    const wb = changes.filter((ch) => rows[ch.pid]).map((ch) => ({ row: rows[ch.pid], iso: ch.iso, ...(ch.code !== undefined ? { value: ch.code } : {}), ...(ch.note !== undefined ? { note: ch.note } : {}) }));
-    if (wb.length) sheet = api('grafikWriteBack', [wb]).then((r) => r, (e) => ({ error: e.message || String(e) }));
-  }
-  return { sheet };
+  return { sheet: null };
 }
 
 /** Zmiana danych pracowników / świąt (gr_meta/main, scalanie pól). */

@@ -69,6 +69,13 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Kolejka wysyłki do arkusza (sync/grafik, sync/plan): dopisuje każdy, kto zapisuje w Grafiku lub Planie; wysyłkę (usunięcie
+    // wysłanych pozycji) robi MASTER lub GOD – programy pokazują przycisk tylko im, a sam zapis do arkusza sprawdza też serwer.
+    match /sync/{name} {
+      allow read: if grRead() || planLvl() in ['read', 'write'];
+      allow write: if grCells() || planLvl() == 'write';
+    }
+
     // Pomiary (karta pomiaru): karty czyta i dodaje każdy zalogowany użytkownik programu; zmiana i usuwanie (import z arkusza) – tylko GOD.
     // Szkic karty w trakcie wypełniania – tylko właściciel (dokument o id = uid z tokenu).
     match /karta/{id} {

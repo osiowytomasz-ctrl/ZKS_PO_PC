@@ -12,6 +12,7 @@ import { mountGrafikSheet } from './grafikSheet.js';
 import { stationList } from '../logic/harmModel.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPersonCard } from './personCard.js';
+import { syncButton } from '../syncStore.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
@@ -340,7 +341,6 @@ export function mountGrafik(el, ctx) {
       const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row]));
       const r = await saveCells(changes, rowsMap);
       st.undo.push({ label, before, after: changes }); if (st.undo.length > 100) st.undo.shift(); st.redo = [];
-      if (r.sheet) r.sheet.then((x) => { if (x && x.error) toast('Zapisano w bazie, ale nie w karcie G: ' + x.error, true); });
     } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
   }
   async function undoRedo(from, to) {
@@ -527,6 +527,8 @@ export function mountGrafik(el, ctx) {
     monthSel, weekSel,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     ...groupBtns,
+    // wysyłka do karty G – na żądanie (MASTER, GOD); świeci, gdy są zmiany do wysłania
+    acc.manage ? syncButton('grafik', 'G', { h, toast, confirmBox }) : null,
     (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     acc.importG ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza (tylko GOD)', onclick: doImport }, 'Import z G') : null,

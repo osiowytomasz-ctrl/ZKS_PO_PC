@@ -22,7 +22,7 @@ export function grafikAccess(level) {
     groups: r >= 3,          // kolumny Urlopy / Godziny / Absencje
     summary: r >= 2,         // podsumowanie pracownika i „UT=” przy nazwisku (TOURIST – bez podsumowań)
     manage: r >= 3,          // dane pracowników (miejsce, urlopy, plan), święta
-    sheet: r >= 3,           // dawny widok z arkusza
+    sheet: r >= 4,           // dawny widok z arkusza (pobieranie z arkusza – tylko GOD)
     importG: r >= 4,         // import z karty G
     competence: r >= 3,      // moduł Kompetencje (widoczny i edytowalny)
   };

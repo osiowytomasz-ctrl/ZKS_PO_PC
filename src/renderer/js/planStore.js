@@ -3,6 +3,7 @@
 //  - plan_rows/{nnn}: { r: { "<wiersz>": "<JSON {v, b, f, k, runs}>" } } – po [chunk] wierszy w dokumencie; wiersz jako tekst JSON,
 //    bo Firestore nie przechowuje tablic w tablicach (komórki × fragmenty tekstu z kolorami).
 // Odczyt na żywo całego planu (kilkadziesiąt KB); zapis zmienia tylko dotknięte wiersze.
+import { queueInBatch, planQueueItems } from './syncStore.js';
 import { firebase, resetFirestoreCache } from './fb.js';
 import { api } from './ui.js';
 import * as P from './logic/plan.js';
@@ -92,10 +93,11 @@ export async function savePlan(g, changes, user = '') {
   const b = sdk.writeBatch(db);
   for (const [id, patch] of byChunk) b.update(sdk.doc(db, 'plan_rows', id), patch);
   b.set(sdk.doc(db, 'plan_meta', 'main'), { updatedAt: Date.now(), updatedBy: user }, { merge: true });
-  await b.commit();
+  // do arkusza (karta PLAN) – nie od razu: kolejka wysyłki „Do arkusza” (MASTER, GOD), w tym samym zapisie
   const list = changes.map(({ row, col, entry }) => ({ row, col, value: entry.type === 'text' ? P.toHtml(entry.lines) : entry.value }));
-  try { const r = await api('savePlanData', [list]); return { message: r && r.message }; }
-  catch (e) { return { sheetError: e.message || String(e) }; }
+  queueInBatch(sdk, db, b, 'plan', planQueueItems(list));
+  await b.commit();
+  return { message: 'Zapisano w bazie' };
 }
 
 /** Import całej karty PLAN do bazy (zastępuje plan w bazie). */

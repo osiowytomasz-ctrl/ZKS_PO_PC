@@ -15,7 +15,11 @@ import { watchPlanLayout, savePlanLayout } from '../planLayout.js';
 import { watchPlan, savePlan, importPlanFromSheet } from '../planStore.js';
 import { openPersonCard } from './personCard.js';
 import { normalizeGrid, blockOf, shiftOfText, withShift, SHIFT_NAMES, SHIFT_ROMAN, SHIFTS, normShift, workersForShift, komisHistory, komisSuggestions, komisFragment, isKomisColumn } from '../logic/planHints.js';
-import { grafikPeople } from '../logic/harmDay.js';
+import { firebaseDayPeople } from '../logic/harmDay.js';
+import { syncButton } from '../syncStore.js';
+import { firebase } from '../fb.js';
+import * as GF from '../logic/grafikFb.js';
+import { grafikLevelOf } from '../logic/grafikAccess.js';
 import { datePickerDialog } from './datePicker.js';
 
 const LETTERS_H = 22, GUTTER_W = 46, HANDLE = 5;
@@ -46,7 +50,7 @@ export function mountPlan(el, ctx) {
         if (!g) { st.grid = null; clear(body); body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Planu nie ma jeszcze w bazie.'),
           h('p', { class: 'muted' }, info.rowDocs ? `W bazie są wiersze planu (plan_rows: ${info.rowDocs}), ale brak dokumentu plan_meta/main – import nie dokończył się. Zaimportuj ponownie.`
             : info.server ? 'Serwer Firebase potwierdza: brak plan_meta/main i plan_rows.' : 'Nie udało się potwierdzić na serwerze – sprawdź połączenie z internetem.'),
-          ctx.level('plan') === 'write' ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z karty PLAN arkusza') : h('p', { class: 'muted' }, 'Import robi osoba z prawem zapisu w Planie.'))); syncInfo(); return; }
+          isGod() ? h('button', { class: 'btn primary', onclick: doImport }, 'Import z karty PLAN arkusza') : h('p', { class: 'muted' }, 'Import z arkusza robi osoba z poziomem GOD (kolumna „Grafik dostęp”).'))); syncInfo(); return; }
         st.grid = normalizeGrid(g); st.grid.canEdit = ctx.level('plan') === 'write'; st.fresh = true;
         rebuild();
       }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy Planu: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły Firestore: plan_meta, plan_rows)' : e.message || e), ' ', h('button', { class: 'btn small', onclick: load }, 'Ponów'))); },
@@ -62,6 +66,16 @@ export function mountPlan(el, ctx) {
     e.preventDefault();
     openPersonCard({ name }, { access: ctx.grafikAcc ? ctx.grafikAcc() : { summary: true } });
   });
+  const lvl = () => grafikLevelOf(ctx.user);
+  const isGod = () => lvl() === 'god';
+  const isMaster = () => lvl() === 'god' || lvl() === 'master';
+  /** Pracownicy z wpisem w Grafiku w dniu [iso] – z bazy Firebase (kształt jak dawniej z karty G). */
+  async function grafikDayFb(iso) {
+    const { sdk, db } = await firebase();
+    const [meta, month] = await Promise.all([sdk.getDoc(sdk.doc(db, 'gr_meta', 'main')), sdk.getDoc(sdk.doc(db, 'gr_days', iso.slice(0, 7)))]);
+    const codes = GF.unpackMonths({ [iso.slice(0, 7)]: month.exists() ? month.data() : {} }).codes;
+    return firebaseDayPeople(meta.exists() ? meta.data().people : [], codes, iso, [], GF.cellStyle, GF.placeStation);
+  }
   async function doImport() {
     if (!(await confirmBox('Import z arkusza', 'Plan w bazie zostanie zastąpiony zawartością karty PLAN arkusza (wartości, kolory, formatowanie). Niezapisane zmiany przepadną. Kontynuować?', 'Importuj'))) return;
     toast('Import karty PLAN…');
@@ -380,7 +394,8 @@ export function mountPlan(el, ctx) {
   }
   // Grafik dnia (pracownicy z wpisami) – pobierany raz na dzień
   const grCache = new Map();
-  const grafikDay = (iso) => { if (!grCache.has(iso)) grCache.set(iso, api('getGrData', [iso, iso]).then(grafikPeople).catch((e) => { grCache.delete(iso); throw e; })); return grCache.get(iso); };
+  // podpowiedzi pracowników: Grafik z bazy Firebase (gr_meta, gr_days) – bez arkusza
+  const grafikDay = (iso) => { if (!grCache.has(iso)) grCache.set(iso, grafikDayFb(iso).catch((e) => { grCache.delete(iso); throw e; })); return grCache.get(iso); };
   /** Data (rrrr-mm-dd) i zmiana ('a'|'b'|'c') bloku, w którym jest wiersz [r] – z uwzględnieniem niezapisanych zmian. */
   function blockDayShift(r) {
     const b = blockOf(st.grid, r); if (!b) return { iso: '', shift: null };
@@ -601,7 +616,9 @@ export function mountPlan(el, ctx) {
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, saveBtn,
     h('button', { class: 'btn', title: 'Wczytaj plan z bazy od nowa', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); st.undo = []; st.redo = []; load(); } }, 'Odśwież'),
-    ctx.level('plan') === 'write' ? h('button', { class: 'btn small', title: 'Zastąp plan w bazie zawartością karty PLAN arkusza', onclick: doImport }, 'Import z arkusza') : null,
+    // pobieranie z arkusza – tylko GOD; wysyłka do karty PLAN – na żądanie (MASTER, GOD), przycisk świeci, gdy są zmiany
+    isGod() ? h('button', { class: 'btn small', title: 'Zastąp plan w bazie zawartością karty PLAN arkusza', onclick: doImport }, 'Import z arkusza') : null,
+    isMaster() ? syncButton('plan', 'PLAN', { h, toast, confirmBox }) : null,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'),
     h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Powiększenie:'),

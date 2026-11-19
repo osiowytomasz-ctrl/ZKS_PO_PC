@@ -1,7 +1,5 @@
 // Pobieranie z wyprzedzeniem i odświeżanie w tle: Grafik ma być gotowy, zanim użytkownik w niego wejdzie (Harmonogram jest w Firebase).
 // Najwolniejszy jest serwer (Apps Script), więc ukrywamy jego czas, a nie próbujemy go skracać po stronie aplikacji.
-import { apiCached } from './ui.js';
-import { defaultRange } from './logic/grafik.js';
 
 export const GR_MAX_AGE = 30000;      // dane Grafiku młodsze niż 30 s są świeże (można edytować od razu)
 export const HARM_MAX_AGE = 120000;   // Harmonogram jest tylko do odczytu
@@ -13,7 +11,8 @@ let lastRun = 0;
 export function prefetchHot(canGrafik = true) {
   lastRun = Date.now();
   const quiet = (p) => p.catch(() => {});
-  if (canGrafik) { const [s, e] = defaultRange(); quiet(apiCached('getGrData', [s, e], () => {}, { maxAge: GR_MAX_AGE / 2, silent: true })); }
+  // Grafik jest w bazie Firebase – bez automatycznego pobierania z arkusza (karta G tylko na żądanie GOD: import / dawny widok)
+  void quiet; void canGrafik;
 }
 
 /** Start po zalogowaniu: pierwsze pobranie od razu, potem co 90 s i po powrocie do okna (najwyżej raz na 20 s). */
