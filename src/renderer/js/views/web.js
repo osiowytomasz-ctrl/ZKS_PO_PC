@@ -1,5 +1,5 @@
 import { h } from '../ui.js';
-import { api } from '../ui.js';
+import { kartaCall } from '../pomiaryStore.js';
 
 /** Funkcje, które strona Pomiary może wołać (jak GasCalls.allowed w aplikacji na Androida). */
 export const GAS_ALLOWED = new Set([
@@ -24,7 +24,8 @@ export function mountWeb(el, ctx, mod) {
     const d = e.data;
     if (d.type === 'gas-call') {
       if (!GAS_ALLOWED.has(d.fn)) return reply(d.id, false, { message: `Funkcja „${d.fn}” nie jest dostępna w aplikacji.` });
-      try { reply(d.id, true, await api(d.fn, Array.isArray(d.args) ? d.args : [])); }
+      // Pomiary: wszystko w bazie Firebase (karta, karta_draft) – bez arkusza
+      try { reply(d.id, true, await kartaCall(d.fn, Array.isArray(d.args) ? d.args : [], ctx.user && ctx.user.email)); }
       catch (err) { reply(d.id, false, { message: err.message || 'Błąd serwera.' }); }
     } else if (d.type === 'save-file') {
       window.zks.saveFile(String(d.name || 'plik'), String(d.mime || ''), String(d.base64 || ''));

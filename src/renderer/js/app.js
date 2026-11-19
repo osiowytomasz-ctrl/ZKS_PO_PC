@@ -30,7 +30,7 @@ export const MODULES = [
   { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
   { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
   { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
-  // Harmonogram z bazy Firebase. Dawny widok z arkusza Google (views/harm.js, getHarmData z karty harm_1) jest wyłączony.
+  // Harmonogram z bazy Firebase (Grafik też z bazy – gr_meta, gr_days); dawny widok z arkusza Google usunięty.
   { id: 'harmonogram-fb', title: 'Harmonogram', mount: mountHarmLive },
   { id: 'help', title: 'Help', mount: mountHelp },
   { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },

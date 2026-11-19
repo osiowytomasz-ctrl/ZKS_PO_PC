@@ -159,6 +159,10 @@ var API_FUNCS = {
     write: true,
     run: function (a, ctx) { return mp_addDetail_(a[0], ctx); }
   },
+  karta_export: {
+    // Pomiary: jednorazowe przeniesienie kart z arkusza „Karty pomiarowe” do bazy Firebase (tylko GOD w kolumnie „Grafik dostęp”)
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'god'); return api_kartaExport_(); }
+  },
   mp_scanInfo: {
     // Skaner: podgląd rejestrów prosto z arkusza Mistrz_po (wartości formuł z arkusza) – dokumenty komisu, operacje przewodnika, detale komisu.
     run: function (a) { return mp_scanInfo_(a[0] || {}); }
@@ -1740,4 +1744,29 @@ function api_scanPartInfo_(code) {
     if (role) { var t = pick(r); t.role = role; out.tools.push(t); }
   });
   return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// Pomiary: eksport kart z arkusza „Karty pomiarowe” (KARTA_SHEET_ID, KARTA_SHEET_NAME z Code_Karta.js) – do importu do Firebase
+// ---------------------------------------------------------------------------
+var API_KARTA_FIELDS = ['komis', 'klient', 'nrId', 'nazwaWyrobu', 'nrRys', 'autorRaportu', 'colJ', 'colK', 'colL', 'support',
+  'lvl1Header', 'lvl1Vals', 'lvl2Header', 'lvl2Vals', 'lvl3Header', 'lvl3Vals', 'lvl4Header', 'lvl4Vals', 'lvl5Header', 'lvl5Vals', 'lvl6Header', 'lvl6Vals',
+  'coneAngle', 'flangeCount', 'weldsCount', 'flangeUpperFaceIn', 'flangeLowerFaceIn', 'lvlDims', 'uwagi', 'signWykonal', 'signWykonalData', 'signSprawdzil', 'signSprawdzilData'];
+
+/** { rows: [{ row, lp, data, komis, … signSprawdzilData }] } – wszystkie niepuste wiersze (wartości jak wyświetla arkusz). */
+function api_kartaExport_() {
+  var sheet = SpreadsheetApp.openById(KARTA_SHEET_ID).getSheetByName(KARTA_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return { rows: [] };
+  var width = Math.min(35, sheet.getMaxColumns());
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getDisplayValues();
+  var rows = [];
+  data.forEach(function (r, i) {
+    while (r.length < 35) r.push('');
+    if (!r[0] && !r[2] && !r[5] && !r[6]) return;
+    var o = { row: i + 2, lp: r[0], data: r[1] };
+    API_KARTA_FIELDS.forEach(function (k, j) { o[k] = r[2 + j]; });
+    rows.push(o);
+  });
+  return { rows: rows };
 }

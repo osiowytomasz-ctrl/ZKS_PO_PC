@@ -1,10 +1,10 @@
 // Harmonogram (baza Firebase): widok klasyczny jak w arkuszu. Jedna tabela: z lewej dane (kolumny jak w pliku), z prawej oś czasu z paskami w tych samych wierszach.
 // Dane twarde edytujesz w komórkach; Start, Koniec i klucz liczy program. Przycisk „Ukryj dane” chowa kolumny z listy ukrywanych (domyślnie „czerwone”).
-import { h, clear, api, apiCached, modal, toast, columnFilterDialog, confirmBox } from '../ui.js';
+import { h, clear, modal, toast, columnFilterDialog, confirmBox } from '../ui.js';
 import { datePickerDialog, calendarButton } from './datePicker.js';
 import * as H from '../logic/harm.js';
 import { visibleRows, filterOptions, sortRows, rangeFilter, isRangeFilter } from '../logic/tableFilter.js';
-import { buildHarmData, parseGrafik, daysByKeyOf, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX, lpCompare } from '../logic/harmModel.js';
+import { buildHarmData, stationList, DEFAULT_STATIONS, fmtDt, arrangeRows, subParent, subOps, reorderIds, reorderPlan, withKomisRows, isKomisId, KOMIS_PREFIX, lpCompare } from '../logic/harmModel.js';
 import { watchHarm, saveSettings, setOpsSource, undoLast, onUndoChange, restoreBackup, applyTree, archiveOps, loadArchive, restoreFromArchive, updateOps, startSandbox, stopSandbox } from '../harmStore.js';
 import { planDrag, canDrag, isLocked, cycles as dragCycles } from '../logic/harmDrag.js';
 import { archiveCandidates } from '../logic/harmArchive.js';
@@ -15,9 +15,11 @@ import { iconSvg } from './harmIcons.js';
 import { parseSheetColor } from '../logic/common.js';
 import { INTERVALS, DEFAULT_INTERVAL, intervalOf, axisStartMs, buildCells, holidayMap, sampleLabel, MAX_SHIFT_DAYS } from '../logic/harmAxis.js';
 import { parseDateTime } from '../logic/harmImport.js';
-import { dayOf, daySlots, grafikPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../logic/harmDay.js';
+import { dayOf, daySlots, firebaseDayPeople, matchOperators, shiftWindows, operatorSegments, uncoveredSegments, dayTasks } from '../logic/harmDay.js';
 import { shareDialog } from './harmShare.js';
 import { firebase, harmLevel, onHarmLevel } from '../fb.js';
+import { watchGrafik } from '../grafikStore.js';
+import * as F from '../logic/grafikFb.js';
 import { harmAccess, legacyLevel } from '../logic/harmAccess.js';
 import { findIssues, issuesByOp, conflictPath } from '../logic/harmIssues.js';
 
@@ -30,7 +32,6 @@ const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czci
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* brak pamięci przeglądarki */ } };
 const ZAK_BAR = '#93c47d';
-const GRAFIK_REFRESH_MS = 60000;   // odświeżanie grafiku z arkusza (było 20 s – zbędne obciążenie Apps Script)
 
 // Filtry i sortowanie kolumn zapamiętane na tym komputerze (wartości filtra jako listy; tylko znane kolumny)
 function loadFilters() {
@@ -106,7 +107,7 @@ export function mountHarmLive(el, appCtx) {
   const shownCols = () => COLS.filter((c) => !(st.compact && st.hideSet.has(c.key)));
 
   // ---------- dane: baza + grafik z arkusza ----------
-  let stop = null, grJson = '', grTimer = null;
+  let stop = null, grJson = '';
   const recompute = () => {
     if (!st.m) return;
     if (!acc().view) { st.data = null; clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Brak dostępu do Harmonogramu (poziom ---). Poziom ustawia administrator w zakładce Uzytkownicy, kolumna „Harmonogram”.')); return; }
@@ -118,24 +119,33 @@ export function mountHarmLive(el, appCtx) {
   // seria zmian z bazy (np. kilka paczek naraz) liczona i rysowana raz
   let recomputeTimer = null;
   const recomputeSoon = () => { if (recomputeTimer) return; recomputeTimer = setTimeout(() => { recomputeTimer = null; recompute(); }, 30); };
-  const applyGrafik = (g, quiet) => {
-    const j = JSON.stringify(g);
-    if (j === grJson) return;
-    grJson = j; st.days = daysByKeyOf(parseGrafik(g)); recompute();
-    if (!quiet) toast('Grafik zaktualizowany');
-  };
+  // Grafik z bazy Firebase (gr_meta, gr_days) – na żywo, bez odpytywania arkusza: miejsca pracy z kodami na każdy dzień (jak karta graf_norm)
+  // od 3 miesięcy wstecz do 12 miesięcy naprzód; st.gr – ostatni stan Grafiku (operatorzy w oknie dnia)
+  let grWatch = null, grFirst = true;
   async function loadGrafik() {
-    try { await apiCached('getGrafNorm', [], (g) => applyGrafik(g, true), { timeoutMs: 180000, maxAge: 0, force: true, callArgs: ['fresh'] }); } catch (e) { toast('Grafik: ' + e.message); }
-    if (grTimer) clearInterval(grTimer);
-    // grafik z arkusza (Apps Script): co 60 s i tylko przy widocznym oknie; po powrocie do okna – od razu (gdy minęła minuta)
-    let lastFetch = Date.now();
-    const pull = async () => { lastFetch = Date.now(); try { applyGrafik(await api('getGrafNorm', ['fresh'], { timeoutMs: 60000 }), false); } catch { /* następna próba za minutę */ } };
-    grTimer = setInterval(() => {
-      if (!el.isConnected) { clearInterval(grTimer); document.removeEventListener('visibilitychange', onVisible); if (stop) stop(); return; }
-      if (!document.hidden) pull();
-    }, GRAFIK_REFRESH_MS);
-    const onVisible = () => { if (!el.isConnected) { document.removeEventListener('visibilitychange', onVisible); return; } if (!document.hidden && Date.now() - lastFetch > GRAFIK_REFRESH_MS) pull(); };
-    document.addEventListener('visibilitychange', onVisible);
+    if (grWatch) { grWatch.stop(); grWatch = null; }
+    const t = new Date(), y = t.getFullYear(), m = t.getMonth();
+    const iso = (yy, mm) => new Date(Date.UTC(yy, mm, 1)).toISOString().slice(0, 10);
+    const months = F.monthsBetween(iso(y, m - 3), iso(y, m + 12));
+    try {
+      grWatch = await watchGrafik(months, ({ meta, months: docs }) => {
+        if (!el.isConnected) { if (grWatch) grWatch.stop(); return; }
+        const codes = F.unpackMonths(docs).codes;
+        const lastDay = (mk) => new Date(Date.UTC(Number(mk.slice(0, 4)), Number(mk.slice(5, 7)), 0)).toISOString().slice(0, 10);
+        const isos = months.flatMap((mk) => F.daysBetween(mk + '-01', lastDay(mk)));
+        st.gr = { people: (meta && meta.people) || [], codes };
+        // jak karta graf_norm z arkusza: tylko miejsca z wpisem i dni z co najmniej jednym wpisem
+        const days = {};
+        for (const [iso, slots] of Object.entries(F.grafNormDays(st.gr.people, codes, isos))) {
+          const f = Object.fromEntries(Object.entries(slots).filter(([, v]) => String(v).trim()));
+          if (Object.keys(f).length) days[iso] = f;
+        }
+        const j = JSON.stringify(days);
+        if (j === grJson) return;
+        grJson = j; st.days = days; recompute();
+        if (!grFirst) toast('Grafik zaktualizowany'); grFirst = false;
+      }, (e) => toast('Grafik z bazy: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e)));
+    } catch (e) { toast('Grafik z bazy: ' + (e.message || e)); }
   }
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Łączenie z bazą…'));
@@ -759,8 +769,10 @@ export function mountHarmLive(el, appCtx) {
     m.root.style.width = 'min(1000px, 96vw)'; m.root.style.maxWidth = '96vw';
 
     // operatorzy z karty G (Grafik): po kolei na wypełnione miejsca pracy; brak uprawnienia albo dnia w grafiku nie blokuje okna
-    api('getGrData', [day.iso, day.iso]).then((gr) => {
-      const people = grafikPeople(gr);
+    // operatorzy z Grafiku w bazie Firebase (po kolei na wypełnione miejsca pracy)
+    Promise.resolve(st.gr).then((gr) => {
+      if (!gr) throw new Error('Grafik z bazy jeszcze się wczytuje');
+      const people = firebaseDayPeople(gr.people, gr.codes, day.iso, stationList(st.m && st.m.cfg), F.cellStyle, F.placeStation);
       const res = matchOperators(people, order);
       operators = res.bySlot; render();
       const diff = [...res.bySlot.values()].filter((v) => !v.same).length;
@@ -1347,4 +1359,6 @@ export function mountHarmLive(el, appCtx) {
     h('span', { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' } }, issuesBtn, levelTag, simBtn, undoBtn, hideBtn, broomBtn, addBtn, shareBtn, gearBtn, refreshBtn)), simBar, pathBar, body);
   syncTools(); syncIssues(); syncSim();
   load();
+  // po wyjściu z modułu: zamknięcie nasłuchu Harmonogramu i Grafiku (bazy Firebase)
+  const life = setInterval(() => { if (el.isConnected) return; clearInterval(life); if (stop) stop(); if (grWatch) { grWatch.stop(); grWatch = null; } }, 3000);
 }

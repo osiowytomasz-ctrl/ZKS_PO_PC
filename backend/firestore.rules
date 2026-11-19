@@ -69,6 +69,16 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Pomiary (karta pomiaru): karty czyta i dodaje każdy zalogowany użytkownik programu; zmiana i usuwanie (import z arkusza) – tylko GOD.
+    // Szkic karty w trakcie wypełniania – tylko właściciel (dokument o id = uid z tokenu).
+    match /karta/{id} {
+      allow read, create: if request.auth != null;
+      allow update, delete: if isGod() || grl() == 'god';
+    }
+    match /karta_draft/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Mistrz PO: dane wpisywane zakładek arkusza Mistrz_po (mp_meta/main, mp_rows/{zakładka_paczka}); kolumny liczone liczy program.
     // Odczyt od CLERIK, import (zastąpienie danych) od MASTER – poziom z kolumny „Grafik dostęp” (claim grl).
     match /mp_meta/{doc} {

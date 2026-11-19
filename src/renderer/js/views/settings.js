@@ -3,6 +3,7 @@ import { permissionsSummary } from '../logic/common.js';
 import { firebase, resetFirestoreCache } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
+import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 
 export async function mountSettings(el, ctx) {
@@ -87,5 +88,12 @@ export async function mountSettings(el, ctx) {
       } }, 'Wyczyść pamięć bazy')),
     status, speed, fbOut,
     cfg.url && cfg.key ? holidaysPanel() : null,
+    // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
+    cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
+      h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),
+      h('button', { class: 'btn', onclick: async () => {
+        if (!(await confirmBox('Pomiary', 'Przenieść wszystkie karty z arkusza „Karty pomiarowe” do bazy? Karty już przeniesione zostaną nadpisane danymi z arkusza; karty zapisane w programie zostają.', 'Przenieś'))) return;
+        try { toast('Przeniesiono kart: ' + (await importKartyFromSheet(ctx.user && ctx.user.email))); } catch (e) { toast('Nie przeniesiono: ' + (e.message || e), true); }
+      } }, 'Przenieś karty z arkusza do bazy')) : null,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
 }

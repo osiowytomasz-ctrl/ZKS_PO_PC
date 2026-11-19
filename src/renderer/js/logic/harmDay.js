@@ -136,3 +136,20 @@ export function dayTasks(rows, result, start, end) {
   }
   return { tasks, byStation, komis: [...komis.values()].map((e) => ({ ...e, stations: [...e.stations] })) };
 }
+
+/**
+ * Operatorzy dnia z Grafiku w bazie Firebase (gr_meta, gr_days) – w tym samym kształcie co grafikPeople z karty G:
+ * pracownicy w kolejności Grafiku z wpisem na ten dzień, kolory wpisu jak w Grafiku i kolor stanowiska przy nazwisku.
+ * [people] – gr_meta.people, [codes] – osoba → { rrrr-mm-dd: kod }, [stations] – stanowiska Harmonogramu (kolory).
+ */
+export function firebaseDayPeople(people, codes, iso, stations, cellStyle, placeStation) {
+  const out = [];
+  for (const p of people || []) {
+    if (!p || p.sep || !String(p.name || '').trim()) continue;
+    const text = String(((codes || {})[p.id] || {})[iso] ?? '').trim();
+    if (!text) continue;
+    const cs = cellStyle(text, iso, {}), stn = placeStation(p.place, stations);
+    out.push({ name: p.name, fullName: p.name, text, value: text, bg: cs.bg || '', color: cs.color || '', nameBg: stn ? stn.bg : '', nameColor: stn ? stn.color : '' });
+  }
+  return out;
+}
