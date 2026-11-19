@@ -104,14 +104,21 @@ export function mountContours(el, ctx) {
       h('button', { class: 'btn small', onclick: () => setRows([{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }], 'Wyczyszczono.') }, 'Od nowa'),
       h('button', { class: 'btn small', onclick: () => { st.rows.push({ z: '', r: '', rad: '' }); st.dirty = true; drawEditor(); } }, '+ punkt')));
     editBox.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Połowa konturu od osi na zewnątrz, w kolejności obrysu: Z – pozycja wzdłuż osi (mm, 0 jak w kolumnie T), R – promień od osi (mm), Zaokr. – promień zaokrąglenia w tym punkcie (mm, puste – ostry narożnik). Druga połowa powstaje sama (odbicie lustrzane).'));
-    st.noteEl = null;
-    if (st.full) editBox.append(st.noteEl = h('div', { style: { background: '#fff3e0', border: '1px solid #ef6c00', padding: '4px 6px', fontSize: '12px' } },
-      `Tryb: pełny kontur (${st.fullLabel}) zapisywany bez zmian – z liniami rzutu bocznego (np. nakrętka ER). Tabela pokazuje tylko obrys; zmiana punktu przełącza na kontur z połowy (odbicie lustrzane, bez linii wewnętrznych).`,
-      ' ', h('button', { class: 'btn small', onclick: () => { st.full = null; st.dirty = true; status.set('Przełączono na kontur z połowy (odbicie).', 'neutral'); drawEditor(); } }, 'Użyj połowy z tabeli')));
+    st.noteHost = h('div', {});
     st.tableHost = h('div', {});
-    editBox.append(st.tableHost, errBox);
+    editBox.append(st.noteHost, st.tableHost, errBox);
+    showNote();
     drawTable();
     drawPreview();
+  }
+  /** Informacja o trybie pełnego konturu (źródło: kolumna T / V / dane D:N). */
+  function showNote() {
+    if (!st.noteHost) return;
+    clear(st.noteHost);
+    st.noteEl = null;
+    if (st.full) st.noteHost.append(st.noteEl = h('div', { style: { background: '#fff3e0', border: '1px solid #ef6c00', padding: '4px 6px', fontSize: '12px' } },
+      `Tryb: pełny kontur (${st.fullLabel}) zapisywany bez zmian – z liniami rzutu bocznego (np. nakrętka ER). Tabela pokazuje tylko obrys; zmiana punktu przełącza na kontur z połowy (odbicie lustrzane, bez linii wewnętrznych).`,
+      ' ', h('button', { class: 'btn small', onclick: () => { st.full = null; st.dirty = true; status.set('Przełączono na kontur z połowy (odbicie).', 'neutral'); drawEditor(); } }, 'Użyj połowy z tabeli')));
   }
   function drawTable() {
     if (!st.tableHost) return;
@@ -158,12 +165,14 @@ export function mountContours(el, ctx) {
           st.test = st.test || { ...base };
           st.test[k] = e.target.value;
           e.target.style.background = st.test[k] !== base[k] ? '#fff3e0' : '';
-          if (st.fullLabel === 'dane D:N' || !st.full) { const g = genOf(t); if (g) { setFull(g, 'dane D:N'); drawTable(); } }
+          // nowy kontur zawsze z wpisanych danych (bez przebudowy pól – kursor zostaje w polu)
+          const g = genOf(t);
+          if (g) { setFull(g, 'dane D:N'); st.dirty = true; showNote(); drawTable(); }
           refresh(); drawPreview();
         } });
       grid.append(h('span', { class: 'muted' }, `${k} · ${label}`), inp);
     }
-    box.append(grid, sheetInfo, h('button', { class: 'btn small', style: { marginTop: '4px' }, onclick: () => { st.test = null; const g = genOf(t); if (g && st.fullLabel === 'dane D:N') setFull(g, 'dane D:N'); drawEditor(); } }, 'Przywróć z arkusza'));
+    box.append(grid, sheetInfo, h('button', { class: 'btn small', style: { marginTop: '4px' }, onclick: () => { st.test = null; const g = genOf(t); if (g) setFull(g, 'dane D:N'); drawEditor(); } }, 'Przywróć z arkusza'));
     refresh();
     return box;
   }
