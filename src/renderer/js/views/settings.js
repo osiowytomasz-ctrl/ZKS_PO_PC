@@ -5,6 +5,8 @@ import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
 import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { openGrafikCodes } from './grafikCodes.js';
+import { openUsersAdmin } from './usersAdmin.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -87,6 +89,19 @@ export async function mountSettings(el, ctx) {
         await resetFirestoreCache('ręcznie z Ustawień', true);
       } }, 'Wyczyść pamięć bazy')),
     status, speed, fbOut,
+    // Dostęp: klucze do programu (administrator) i kody do Grafiku na telefonie (MASTER, GOD)
+    cfg.url && cfg.key && (grafikAccess(grafikLevelOf(ctx.user)).manage) ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Dostęp'),
+      h('p', { class: 'muted' }, 'Klucze dostępu do programu (PC i Android) nadaje administrator. Kody iPhone – osobiste kody pracowników do Grafiku do wglądu w przeglądarce telefonu (strona …/exec?p=grafik).'),
+      h('div', { class: 'row' },
+        grafikLevelOf(ctx.user) === 'god' ? h('button', { class: 'btn', title: 'Konta z zakładki Uzytkownicy: klucze, nowi użytkownicy (tylko administrator)', onclick: () => openUsersAdmin() }, 'Użytkownicy i klucze') : null,
+        h('button', { class: 'btn', title: 'Osobiste kody pracowników do Grafiku na telefonie (iPhone, przeglądarka)', onclick: async () => {
+          try {
+            const { sdk, db } = await firebase();
+            const m = await sdk.getDoc(sdk.doc(db, 'gr_meta', 'main'));
+            const people = (m.exists() && m.data().people) || [];
+            await openGrafikCodes({ people: () => people, user: ctx.user });
+          } catch (e) { toast('Kody iPhone: ' + (e.message || e), true); }
+        } }, 'Kody iPhone'))) : null,
     cfg.url && cfg.key ? holidaysPanel() : null,
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
     cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),

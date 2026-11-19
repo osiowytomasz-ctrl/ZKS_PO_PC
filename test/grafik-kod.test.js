@@ -35,3 +35,10 @@ test('wiersze okna kodów', () => {
   assert.deepEqual(rows.map((r) => [r.pid, r.code && r.code.hash]), [['a', 'h1'], ['b', null]]);
   assert.deepEqual(hashesOf({ ...codes, h3: { pid: 'a' } }, 'a'), ['h1', 'h3']);
 });
+
+test('Użytkownicy i klucze: adres e-mail i tekst do przekazania', async () => {
+  globalThis.window = globalThis.window || {};
+  const { validEmail, shareText } = await import('../src/renderer/js/views/usersAdmin.js');
+  assert.ok(validEmail(' Jan.K@firma.pl ')); assert.ok(!validEmail('jan@firma')); assert.ok(!validEmail('a b@c.pl'));
+  assert.equal(shareText(' https://x/exec ', ' K1 '), 'Adres API: https://x/exec\nKlucz: K1');
+});
