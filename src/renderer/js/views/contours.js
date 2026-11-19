@@ -8,7 +8,10 @@ import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { statusLine } from './toolViews.js';
-import { fullContour } from '../logic/contourGen.js';
+import { fullContour, bodyContour, mounting } from '../logic/contourGen.js';
+
+const PARAMS = [['D', 'Grupa narzędzi'], ['E', 'Rodzaj narzędzia'], ['F', 'Fi_mniejsze'], ['G', 'Pochylenie płytki'], ['H', 'Promień'], ['I', 'Fi_większe'],
+  ['J', 'Długość 1'], ['K', 'Długość robocza'], ['L', 'Ząb / num. gwint. / zbieżność / ap'], ['M', 'Mocowanie początkowe'], ['N', 'Mocowanie końcowe']];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -38,8 +41,10 @@ export function mountContours(el, ctx) {
   const tOf = (t) => (st.details.get(normCode(t.productCode)) || {}).columnAY || '';
   const vOf = (t) => st.v[normCode(t.productCode)] || '';
   /** Kontur z danych (PSWT D:N + mocowanie z zakładki „kontury”) w 0,1 mm albo null. */
+  /** Parametry D:N narzędzia: z arkusza PSWT albo – dla wybranego narzędzia – zmienione do sprawdzenia (bez zapisu). */
+  const paramsOf = (t) => (st.tool && t && st.tool.productCode === t.productCode && st.test ? st.test : st.params[normCode(t.productCode)]);
   const genOf = (t) => {
-    const p = st.params[normCode(t.productCode)];
+    const p = paramsOf(t);
     if (!p) return null;
     const pts = G.parseContour(fullContour(p, st.mounts) || '');
     return pts.length >= 3 && G.bounds(pts).maxX - G.bounds(pts).minX > 0 ? pts : null;
@@ -63,7 +68,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false;
+    st.tool = t; st.dirty = false; st.test = null;
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = vOf(t) ? [E.svgToContour(vOf(t)), 'kolumna V'] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
     setFull(src && src[0], src && src[1]);
@@ -78,8 +83,9 @@ export function mountContours(el, ctx) {
     if (!t) { editBox.append(h('p', { class: 'muted' }, 'Wybierz narzędzie z listy po lewej.')); drawPreview(); return; }
     editBox.append(h('div', {}, h('b', { style: { fontSize: '15px' } }, t.productCode), h('div', { class: 'muted', style: { fontSize: '12px' } }, description(t)),
       h('div', { style: { fontSize: '12px' } }, `Φ ${t.columnF || '—'} · L ${t.columnJ || '—'} · Ms ${t.columnM || '—'} · Mk ${t.columnN || '—'}`)));
+    editBox.append(paramsPanel(t));
     editBox.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px' } },
-      h('button', { class: 'btn small', disabled: !tOf(t), title: 'Połowa (x ≥ 0) dawnego konturu z kolumny T', onclick: () => { setFull(G.parseContour(tOf(t)), 'kolumna T'); st.dirty = true; status.set('Wczytano pełny kontur z kolumny T (bez zmian).', 'neutral'); drawEditor(); } }, 'Z kolumny T'),
+      h('button', { class: 'btn small', disabled: !tOf(t), title: 'Pełny kontur z kolumny T (bez zmian)', onclick: () => { setFull(G.parseContour(tOf(t)), 'kolumna T'); st.dirty = true; status.set('Wczytano pełny kontur z kolumny T (bez zmian).', 'neutral'); drawEditor(); } }, 'Z kolumny T'),
       h('button', { class: 'btn small', disabled: !vOf(t), onclick: () => { setFull(E.svgToContour(vOf(t)), 'kolumna V'); status.set('Wczytano pełny kontur z kolumny V.', 'neutral'); drawEditor(); } }, 'Z kolumny V'),
       h('button', { class: 'btn small', disabled: !genOf(t), title: 'Kontur policzony z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (jak dawna formuła)', onclick: () => { setFull(genOf(t), 'dane D:N'); st.dirty = true; status.set('Wczytano pełny kontur policzony z danych (D:N) – z liniami rzutu bocznego.', 'neutral'); drawEditor(); } }, 'Z danych (D:N)'),
       h('button', { class: 'btn small', onclick: () => setRows([{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }], 'Wyczyszczono.') }, 'Od nowa'),
@@ -89,6 +95,13 @@ export function mountContours(el, ctx) {
     if (st.full) editBox.append(st.noteEl = h('div', { style: { background: '#fff3e0', border: '1px solid #ef6c00', padding: '4px 6px', fontSize: '12px' } },
       `Tryb: pełny kontur (${st.fullLabel}) zapisywany bez zmian – z liniami rzutu bocznego (np. nakrętka ER). Tabela pokazuje tylko obrys; zmiana punktu przełącza na kontur z połowy (odbicie lustrzane, bez linii wewnętrznych).`,
       ' ', h('button', { class: 'btn small', onclick: () => { st.full = null; st.dirty = true; status.set('Przełączono na kontur z połowy (odbicie).', 'neutral'); drawEditor(); } }, 'Użyj połowy z tabeli')));
+    st.tableHost = h('div', {});
+    editBox.append(st.tableHost, errBox);
+    drawTable();
+    drawPreview();
+  }
+  function drawTable() {
+    if (!st.tableHost) return;
     const tb = h('tbody', {});
     st.rows.forEach((r, i) => {
       const inp = (k, w) => h('input', { type: 'text', value: r[k] ?? '', inputmode: 'decimal', style: { width: w, padding: '2px 4px' }, oninput: (e) => { r[k] = e.target.value; st.dirty = true; if (st.full) { st.full = null; if (st.noteEl) st.noteEl.remove(); } drawPreview(); } });
@@ -99,9 +112,43 @@ export function mountContours(el, ctx) {
           h('button', { class: 'btn small', title: 'Wstaw punkt poniżej', onclick: () => { st.rows.splice(i + 1, 0, { z: '', r: '', rad: '' }); st.dirty = true; drawEditor(); } }, '+'),
           h('button', { class: 'btn small', title: 'Usuń punkt', onclick: () => { st.rows.splice(i, 1); st.dirty = true; drawEditor(); } }, '✕'))));
     });
-    editBox.append(h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['#', 'Z [mm]', 'R [mm]', 'Zaokr.', ''].map((x) => h('th', {}, x)))), tb), errBox);
-    drawPreview();
+    clear(st.tableHost).append(h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['#', 'Z [mm]', 'R [mm]', 'Zaokr.', ''].map((x) => h('th', {}, x)))), tb));
   }
+  /** Parametry D:N z PSWT – do wglądu; zmiana tylko do sprawdzenia konturu (nie zapisuje się w arkuszu). */
+  function paramsPanel(t) {
+    const base = st.params[normCode(t.productCode)];
+    const box = h('details', { open: true, style: { border: '1px solid #ccc', borderRadius: '6px', padding: '4px 6px', background: '#fafafa' } });
+    const sheetInfo = h('div', { style: { fontSize: '11px' } });
+    const refresh = () => {
+      const p = paramsOf(t) || {};
+      const m = mounting(st.mounts, p.M, p.C);
+      const body = bodyContour(p, (m && m.left) || '');
+      sheetInfo.textContent = (st.test ? 'Zmienione do sprawdzenia (arkusz bez zmian). ' : '')
+        + `Mocowanie ${p.M || '—'}: ${m ? (m.synthetic ? 'wyliczone ze wzoru (brak w zakładce „kontury”)' : 'z zakładki „kontury”') : 'brak w zakładce „kontury”'} · `
+        + (body ? 'reguła korpusu: jest' : `brak reguły korpusu dla ${p.D || '?'} / ${p.E || '?'}`);
+      sheetInfo.style.color = body || m ? '#1b5e20' : '#c62828';
+    };
+    box.append(h('summary', { style: { cursor: 'pointer', fontWeight: 600, fontSize: '12px' } }, 'Parametry z arkusza PSWT (D:N) – do sprawdzenia, bez zapisu'));
+    if (!base) { box.append(h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Brak narzędzia w arkuszu PSWT (albo dane nie wczytane).')); return box; }
+    if (base.C) box.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Opis: ' + base.C));
+    const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 6px', alignItems: 'center', fontSize: '12px' } });
+    for (const [k, label] of PARAMS) {
+      const cur = (st.test || base)[k] ?? '';
+      const inp = h('input', { type: 'text', value: cur, style: { padding: '1px 4px', width: '100%', background: st.test && st.test[k] !== base[k] ? '#fff3e0' : '' },
+        oninput: (e) => {
+          st.test = st.test || { ...base };
+          st.test[k] = e.target.value;
+          e.target.style.background = st.test[k] !== base[k] ? '#fff3e0' : '';
+          if (st.fullLabel === 'dane D:N' || !st.full) { const g = genOf(t); if (g) { setFull(g, 'dane D:N'); drawTable(); } }
+          refresh(); drawPreview();
+        } });
+      grid.append(h('span', { class: 'muted' }, `${k} · ${label}`), inp);
+    }
+    box.append(grid, sheetInfo, h('button', { class: 'btn small', style: { marginTop: '4px' }, onclick: () => { st.test = null; const g = genOf(t); if (g && st.fullLabel === 'dane D:N') setFull(g, 'dane D:N'); drawEditor(); } }, 'Przywróć z arkusza'));
+    refresh();
+    return box;
+  }
+
   function setRows(rows, msg) { st.full = null; st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
   /** Pełny kontur bez zmian (T / V / dane) – tabela pokazuje jego obrys (połowę) tylko do podglądu i ewentualnej edycji. */
   function setFull(points, label) {

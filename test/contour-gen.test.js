@@ -43,3 +43,19 @@ test('brak reguły i brak mocowania → null; wariant F0815 z apostrofem', () =>
   assert.equal(C.fullContour({ D: 'tok', E: 'nóż', M: 'XX' }, mounts), null);
   assert.equal(C.mounting({ "ABS040'": { left: 'a', right: 'b' } }, 'ABS040', 'oprawka F0815').left, 'a');
 });
+
+test('mocowania ABS / WEL wyliczane, gdy brak ich w zakładce „kontury”', () => {
+  const lib = { WEL010: { left: '0_-200;-50_-200;-50_0', right: '50_0;50_-200;0_-200' }, WEL020: { left: '0_-300;-100_-300;-100_0', right: '100_0;100_-300;0_-300' } };
+  assert.deepEqual(C.synthMount(lib, 'ABS040'), { left: '0_-200;100_-200;100_0;-200_0', right: '200_0;-100_0;-100_-200;0_-200', synthetic: true });
+  assert.equal(C.synthMount(lib, 'WEL016').left, '0_-260;-80_-260;-80_0'); // 200 + (300-200)·(16-10)/(20-10)
+  assert.equal(C.mounting(lib, 'WEL010').left, lib.WEL010.left); // z zakładki ma pierwszeństwo
+  assert.equal(C.mirrorLeft('0_-260;-80_-260;-80_0'), '80_0;80_-260;0_-260');
+  // wiertło w Weldonie (wariant ER) rysuje własny chwyt – wyliczonego mocowania nie dokładamy
+  const drill = { D: 'wie', E: 'WĘG', F: '12', J: '102', K: '55', M: 'WEL012' };
+  assert.ok(C.fullContour(drill, lib).startsWith('0_-412.5;'));
+});
+
+test('frez fazowy (dopisana reguła): walec Ø I, stożek pod kątem G do Ø F', () => {
+  const b = C.bodyContour({ D: 'fre', E: 'faz', F: '63', G: '45', I: '79', J: '40', K: '40', M: 'FRE022' }, '0_0;0_0;0_0;0_0');
+  assert.equal(b, ';0_0;-395_0;-395_320;-315_400;315_400;395_320;395_0;0_0;');
+});

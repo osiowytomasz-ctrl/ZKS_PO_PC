@@ -40,12 +40,13 @@ export function bodyContour(p, av = '') {
   const avY = lastY(av);
   const t30 = round0((Math.tan(Math.PI / 6) * F * 10) / 2);
 
-  const erDrill = M.toUpperCase() === 'ER_032' || M3 === 'WEL'; // wiertło HSS w tulejce ER_032 albo w oprawce Weldon (wersja z kolumny T)
-  if (D === 'wie' && E === 'hss' && !erDrill) {
+  const erDrill = M.toUpperCase() === 'ER_032' || M3 === 'WEL'; // wiertło w tulejce ER_032 albo w oprawce Weldon (wersja z kolumny T)
+  const drill = E === 'hss' || E === 'węg'; // wiertła węglikowe – ta sama reguła co HSS (dawna formuła nie miała reguły) // wiertło HSS w tulejce ER_032 albo w oprawce Weldon (wersja z kolumny T)
+  if (D === 'wie' && drill && !erDrill) {
     const a = 5 * F, top = J * 10 - t30, w = (J - K) * 10;
     return pts([[a, avY], [a, w], [-a, w], [-a, top], [0, J * 10], [a, top], [-a, top], [a, top], [a, w], [-a, w], [-a, avY]]);
   }
-  if (D === 'wie' && E === 'hss') { // ER_032 / WEL…
+  if (D === 'wie' && drill) { // ER_032 / WEL…
     const b = -7.5 * K, a = 5 * F;
     return pts([[0, b], [-a, b], [-a, b + (J - K) * 10], [a, b + (J - K) * 10], [a, b + J * 10], [0, b + J * 10 + t30], [-a, b + J * 10], [-a, b + (J - K) * 10],
       [a, b + (J - K) * 10], [a, b], [0, b]], { lead: false, tail: false });
@@ -88,6 +89,13 @@ export function bodyContour(p, av = '') {
   if (D === 'fre' && (E === 'hss' || E === 'węg')) {
     const c = E === 'hss' ? 3 : 3.5, b = -c * F * 10, a = (F * 10) / 2, w = (-c * F + J - K) * 10, t = (-c * F + J) * 10;
     return pts([[0, b], [a, b], [a, w], [-a, w], [-a, t], [a, t], [a, w], [-a, w], [-a, b], [0, b]], { lead: false, tail: false });
+  }
+  if (D === 'fre' && (E === 'faz' || E === 'plu')) {
+    // reguła dopisana (dawna formuła jej nie miała): walec Ø I (Fi_większe), na czole stożek pod kątem G (pochylenie) do Ø F; w Weldonie niżej o głębokość
+    const off = M3 === 'WEL' ? minY(av) : 0, big = (I || F) * 5, small = F * 5, ang = G > 0 && G < 90 ? G : 90;
+    const hc = ang === 90 ? 0 : (big - small) / Math.tan((ang * Math.PI) / 180);
+    const top = J * 10 + off, w = (J - K) * 10 + off;
+    return pts([[0, off], [-big, off], [-big, Math.max(off, top - hc)], [-small, top], [small, top], [big, Math.max(off, top - hc)], [big, off], [0, off]]);
   }
   if (D === 'opr' && E === 'prz' && (N3 === 'ABS' || N3 === 'MHD')) return pts([[(-F * 10) / 2, J * 10], [(F * 10) / 2, J * 10]]);
   const erHolder = M2 === 'ER' || (M3 === 'WEL' && N3 === 'T__'); // tulejka ER albo przedłużka Weldon → termo (wersja z kolumny T)
@@ -147,16 +155,52 @@ export function bodyContour(p, av = '') {
   return '';
 }
 
-/** Mocowanie z zakładki „kontury” (kod z kolumny M; dla narzędzi z „F0815” w opisie – wariant z apostrofem). */
+/** Prawa część mocowania = lewa w odwrotnej kolejności, z X ze zmienionym znakiem (jak w zakładce „kontury”). */
+export function mirrorLeft(left) {
+  return txt(left).split(';').filter(Boolean).reverse().map((p) => { const [x, y] = p.split('_'); return f(-nv(x)) + '_' + y; }).join(';');
+}
+/**
+ * Mocowania ABS i WEL liczone, gdy brak ich w zakładce „kontury” (wzory tej zakładki): ABSddd – z samej średnicy;
+ * WELddd – głębokość osadzenia interpolowana z rozmiarów WEL, które są w zakładce.
+ */
+export function synthMount(mounts, M) {
+  const code = txt(M).toUpperCase(), m = /^(ABS|WEL)(\d{3})$/.exec(code);
+  if (!m) return null;
+  const d = Number(m[2]);
+  if (!d) return null;
+  let left;
+  if (m[1] === 'ABS') left = `0_${f(-d * 5)};${f(d * 2.5)}_${f(-d * 5)};${f(d * 2.5)}_0;${f(-d * 5)}_0`;
+  else {
+    const known = Object.entries(mounts).map(([k, v]) => [/^WEL(\d{3})$/.exec(k.toUpperCase()), v]).filter(([x, v]) => x && Number(x[1]) && minY(v.left) < 0)
+      .map(([x, v]) => [Number(x[1]), -minY(v.left)]).sort((a, b) => a[0] - b[0]);
+    if (!known.length) return null;
+    let depth;
+    if (known.length === 1) depth = (known[0][1] * d) / known[0][0];
+    else {
+      let i = known.findIndex(([kd]) => kd >= d);
+      if (i <= 0) i = i === 0 ? 1 : known.length - 1;
+      const [d1, h1] = known[i - 1], [d2, h2] = known[i];
+      depth = h1 + ((h2 - h1) * (d - d1)) / (d2 - d1);
+    }
+    depth = Math.round(depth);
+    left = `0_${f(-depth)};${f(-d * 5)}_${f(-depth)};${f(-d * 5)}_0`;
+  }
+  return { left, right: mirrorLeft(left), synthetic: true };
+}
+/** Mocowanie z zakładki „kontury” (kod z kolumny M; dla narzędzi z „F0815” w opisie – wariant z apostrofem); brak – ABS / WEL ze wzoru. */
 export function mounting(mounts, M, opis = '') {
   const key = txt(M) + (txt(opis).includes('F0815') ? "'" : '');
-  return mounts[key] || mounts[key.toUpperCase()] || null;
+  const found = mounts[key] || mounts[key.toUpperCase()];
+  if (found && (found.left || found.right)) return found;
+  return synthMount(mounts, M) || found || null;
 }
 
 /** Pełny kontur (dawne PSWT!AY = AV + (AW albo „;”) + AX); null, gdy brak i mocowania, i reguły korpusu. */
 export function fullContour(p, mounts) {
-  const m = mounting(mounts, p.M, p.C) || { left: '', right: '' };
-  const body = bodyContour(p, m.left);
+  let m = mounting(mounts, p.M, p.C) || { left: '', right: '' };
+  let body = bodyContour(p, m.left);
+  // reguły bez „;” na początku (wariant ER, frezy HSS/WĘG) rysują własny chwyt poniżej zera – wyliczonego mocowania nie dokładamy
+  if (m.synthetic && body && !body.startsWith(';')) { m = { left: '', right: '' }; body = bodyContour(p, ''); }
   if (!body && !m.left && !m.right) return null;
   return m.left + (body || ';') + m.right;
 }
