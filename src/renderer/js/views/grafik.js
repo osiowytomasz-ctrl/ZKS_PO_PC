@@ -57,7 +57,8 @@ export function mountGrafik(el, ctx) {
     .map(([k, label, title]) => { const b = h('button', { class: 'btn small', title: acc.groups ? title : `${label}: niedostępne (poziom ${acc.label})`, disabled: !acc.groups, onclick: () => { if (!acc.groups) return; st.groups[k] = !st.groups[k]; lsSet('grafik.groups', st.groups); draw(); } }, label); b.dataset.g = k; return b; });
 
   // ---------- dane na żywo ----------
-  const neededMonths = () => [...new Set([...F.monthsBetween(st.from, st.to), ...F.monthsBetween(`${st.to.slice(0, 4)}-01-01`, `${st.to.slice(0, 4)}-12-31`)])];
+  // dni z widoku + cały bieżący rok (podsumowanie urlopów zawsze za bieżący rok)
+  const neededMonths = () => [...new Set([...F.monthsBetween(st.from, st.to), ...F.monthsBetween(`${today().slice(0, 4)}-01-01`, `${today().slice(0, 4)}-12-31`)])];
   async function start() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…'));
     try {
@@ -103,7 +104,8 @@ export function mountGrafik(el, ctx) {
   const stations = () => stationList(st.cfg);
   const code = (pid, iso) => ((st.codes[pid] || {})[iso] ?? '');
   const note = (pid, iso) => ((st.notes[pid] || {})[iso] ?? '');
-  const year = () => st.to.slice(0, 4);
+  // rok podsumowań urlopów: zawsze bieżący – dni następnego roku w widoku to tylko prognoza (nie wchodzą do wykorzystanych / zaplanowanych)
+  const year = () => today().slice(0, 4);
   const summaries = () => { const m = new Map(), t = today(); for (const p of people()) if (!p.sep) m.set(p.id, F.personSummary(p, st.codes[p.id] || {}, year(), t)); return m; };
   const dates = () => F.daysBetween(st.from, st.to);
   const columns = (g0 = st.groups) => {
