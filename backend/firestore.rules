@@ -71,6 +71,10 @@ service cloud.firestore {
 
     // Kolejka wysyłki do arkusza (sync/grafik, sync/plan): dopisuje każdy, kto zapisuje w Grafiku lub Planie; wysyłkę (usunięcie
     // wysłanych pozycji) robi MASTER lub GOD – programy pokazują przycisk tylko im, a sam zapis do arkusza sprawdza też serwer.
+    // Kody dostępu do Grafiku na telefonie (GrafikKod.gs czyta je kontem usługi): nadaje i odbiera MASTER / GOD.
+    match /gr_codes/{d} {
+      allow read, write: if grManage();
+    }
     match /sync/{name} {
       allow read: if grRead() || planLvl() in ['read', 'write'];
       allow write: if grCells() || planLvl() == 'write';

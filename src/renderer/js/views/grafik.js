@@ -13,6 +13,7 @@ import { stationList } from '../logic/harmModel.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPersonCard } from './personCard.js';
 import { syncButton } from '../syncStore.js';
+import { openGrafikCodes } from './grafikCodes.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
@@ -529,6 +530,8 @@ export function mountGrafik(el, ctx) {
     ...groupBtns,
     // wysyłka do karty G – na żądanie (MASTER, GOD); świeci, gdy są zmiany do wysłania
     acc.manage ? syncButton('grafik', 'G', { h, toast, confirmBox }) : null,
+    // osobiste kody do Grafiku do wglądu w przeglądarce telefonu (iPhone) – strona Apps Script ?p=grafik
+    acc.manage ? h('button', { class: 'btn small', title: 'Kody dostępu pracowników do Grafiku na telefonie (iPhone, przeglądarka)', onclick: () => openGrafikCodes({ people, user: ctx.user }).catch((e) => toast('Kody: ' + (e.message || e), true)) }, 'Kody iPhone') : null,
     (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     acc.importG ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza (tylko GOD)', onclick: doImport }, 'Import z G') : null,
