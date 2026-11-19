@@ -26,6 +26,20 @@ export function mountContours(el, ctx) {
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
   const errBox = h('div', { class: 'err', style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
 
+  /** Dane generatora: PSWT D:N i zakładka „kontury” (Kontury.gs: ndContourData). Błąd zostaje widoczny w panelu parametrów. */
+  async function loadData() {
+    st.dataError = null;
+    try {
+      const cd = (await api('ndContourData', [], { timeoutMs: 180000 })) || {};
+      st.mounts = cd.mounts || {}; st.params = cd.params || {};
+      if (!Object.keys(st.params).length) st.dataError = 'serwer nie zwrócił żadnych narzędzi z arkusza PSWT (sprawdź nazwę karty „PSWT” i kolumny B:N).';
+    } catch (e) {
+      st.mounts = {}; st.params = {};
+      st.dataError = /Nieznana funkcja|UNKNOWN_FN/i.test(e.message || '')
+        ? 'w Apps Script nie ma jeszcze funkcji ndContourData – podmień Kontury.gs i Api.gs i wdróż nową wersję wdrożenia API.'
+        : (e.message || String(e));
+    }
+  }
   async function load(force) {
     clear(listBox).append(h('div', { class: 'muted', style: { padding: '8px' } }, 'Ładowanie narzędzi…'));
     try {
@@ -33,8 +47,7 @@ export function mountContours(el, ctx) {
       st.tools = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim()).sort((a, b) => String(a.productCode).localeCompare(String(b.productCode), 'pl', { numeric: true }));
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
       try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
-      try { const cd = (await api('ndContourData', [], { timeoutMs: 180000 })) || {}; st.mounts = cd.mounts || {}; st.params = cd.params || {}; }
-      catch (e) { st.mounts = {}; st.params = {}; status.set('Nie wczytano danych PSWT / zakładki „kontury” (Kontury.gs: ndContourData): ' + e.message, 'error'); }
+      await loadData();
       drawList();
     } catch (e) { clear(listBox).append(h('div', { class: 'err', style: { padding: '8px' } }, 'Nie wczytano narzędzi: ' + e.message)); }
   }
@@ -129,7 +142,13 @@ export function mountContours(el, ctx) {
       sheetInfo.style.color = body || m ? '#1b5e20' : '#c62828';
     };
     box.append(h('summary', { style: { cursor: 'pointer', fontWeight: 600, fontSize: '12px' } }, 'Parametry z arkusza PSWT (D:N) – do sprawdzenia, bez zapisu'));
-    if (!base) { box.append(h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Brak narzędzia w arkuszu PSWT (albo dane nie wczytane).')); return box; }
+    if (!base) {
+      box.append(st.dataError
+        ? h('div', { class: 'err', style: { fontSize: '12px' } }, 'Nie wczytano danych z arkusza PSWT: ' + st.dataError, ' ',
+          h('button', { class: 'btn small', onclick: async (e) => { e.target.disabled = true; e.target.textContent = 'Wczytywanie…'; await loadData(); drawList(); drawEditor(); } }, 'Wczytaj ponownie'))
+        : h('div', { class: 'muted', style: { fontSize: '12px' } }, `Brak narzędzia ${t.productCode} w kolumnie B arkusza PSWT (wczytano ${Object.keys(st.params).length} narzędzi).`));
+      return box;
+    }
     if (base.C) box.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Opis: ' + base.C));
     const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 6px', alignItems: 'center', fontSize: '12px' } });
     for (const [k, label] of PARAMS) {
