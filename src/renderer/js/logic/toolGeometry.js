@@ -34,13 +34,13 @@ export function bounds(points) {
 }
 
 /** Płytka: ścieżka SVG → punkty w jednostkach konturu (×10, Y jako wartość bezwzględna). Łuki (A) i krzywe (Q) rozbite na odcinki. */
-export function parseInsertPath(path) {
+export function parseInsertPath(path, { absY = true } = {}) {
   const tokens = String(path ?? '').replace(/,/g, ' ').match(/[MLAQZ]|-?\d+(?:\.\d+)?/gi) || [];
   const points = [];
   let i = 0, cmd = '', cur = null;
   const isNum = (t) => t != null && Number.isFinite(Number(t));
   const read = () => { const t = tokens[i++]; return isNum(t) ? Number(t) : NaN; };
-  const push = (x, y) => { if (!Number.isNaN(x) && !Number.isNaN(y)) points.push(pt(x * 10, Math.abs(y) * 10)); };
+  const push = (x, y) => { if (!Number.isNaN(x) && !Number.isNaN(y)) points.push(pt(x * 10, (absY ? Math.abs(y) : y) * 10)); };
   while (i < tokens.length) {
     if (!isNum(tokens[i])) cmd = tokens[i++].toUpperCase();
     if (cmd === 'M' || cmd === 'L') {

@@ -259,6 +259,14 @@ var API_FUNCS = {
   getStToolOptions: {
     run: function () { return getStToolOptions(); }
   },
+  // Edytor konturów (Kontury.gs): kolumna V arkusza ND_CACHE – odczyt dla wszystkich, zapis MASTER / GOD
+  ndContoursV: {
+    run: function () { return nd_contoursV_(); }
+  },
+  ndSaveContourV: {
+    write: true,
+    run: function (a, ctx) { return nd_saveContourV_(a[0], a[1], ctx); }
+  },
   getStAllowedLocations: {
     run: function () { return getStAllowedLocations(); }
   },
