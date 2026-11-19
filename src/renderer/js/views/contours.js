@@ -133,7 +133,11 @@ export function mountContours(el, ctx) {
     out += layers.map((l, i) => `<text x="8" y="${16 + i * 14}" font-size="11" fill="${l.stroke}">— ${esc(l.label)}</text>`).join('') + '</svg>';
     preview.innerHTML = out;
     const d = svg ? (() => { const b2 = G.bounds(E.svgToContour(svg)); return { diameter: Math.max(Math.abs(b2.minX), Math.abs(b2.maxX)) / 5, length: (b2.maxY - b2.minY) / 10 }; })() : null;
-    info.textContent = d ? `Nowy kontur: największa średnica ${d.diameter.toFixed(2)} mm, długość ${d.length.toFixed(2)} mm` + (t.columnF ? ` · katalog: Φ ${t.columnF}` : '') + (t.columnJ ? `, L ${t.columnJ}` : '') : '';
+    // składanie zestawu (ToolBuilder, Viewer): R = największe Y (od osi odniesienia Y = 0), M = głębokość poniżej zera (mocowanie)
+    const rm = (pts) => { const b2 = G.bounds(pts); return b2 ? `R ${(b2.r / 10).toFixed(2)} · M ${(b2.m / 10).toFixed(2)} mm` : '—'; };
+    const tPts = t && G.parseContour(tOf(t));
+    info.textContent = d ? `Nowy kontur: największa średnica ${d.diameter.toFixed(2)} mm, długość ${d.length.toFixed(2)} mm · składanie: ${rm(E.svgToContour(svg))}`
+      + (tPts && tPts.length >= 3 ? ` (kolumna T: ${rm(tPts)})` : '') + (t.columnF ? ` · katalog: Φ ${t.columnF}` : '') + (t.columnJ ? `, L ${t.columnJ}` : '') : '';
   }
 
   async function save(clearIt) {
