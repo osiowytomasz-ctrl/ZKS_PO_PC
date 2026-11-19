@@ -107,17 +107,53 @@ function mp_perms_(email) {
 }
 
 var MP_PERM_LABELS = {
-  manage: 'Brak uprawnień do zmiany statusu i usuwania operacji.',
+  manage: 'Brak uprawnień do zmiany statusu i usuwania operacji (wymagany poziom MASTER w kolumnie „Mistrz dostęp”).',
   details: 'Brak uprawnień do tworzenia listy detali.',
   docs: 'Brak uprawnień do rejestru dokumentacji (wyświetlanie i usuwanie).'
 };
 
+// Poziom w module Mistrz PO: kolumna „Mistrz dostęp” zakładki Uzytkownicy (GOD / MASTER / CLERIK / TOURIST / ---).
+// Zmiana statusu i usuwanie operacji – co najmniej MASTER. Gdy kolumna nie jest jeszcze wypełniona (nikt nie ma poziomu),
+// obowiązuje dawna lista z zakładki Setup (kolumna C).
+var MP_LEVEL_COLUMN = 'Mistrz dostęp';
+var MP_LEVELS = ['none', 'tourist', 'clerik', 'master', 'god'];
+
+/** Poziomy z kolumny „Mistrz dostęp” (e-mail → poziom); puste, gdy kolumny nie ma albo nikt nie ma wpisu. */
+function mp_levels_() {
+  return typeof api_levelColumn_ === 'function' ? api_levelColumn_(MP_LEVEL_COLUMN) : {};
+}
+
+/** Uprawnienia użytkownika: listy z Setup (detale, dokumentacja) i zarządzanie operacjami wg poziomu (min. MASTER). */
+function mp_permsFor_(ctx) {
+  var perms = mp_perms_(ctx.email);
+  var levels = mp_levels_();
+  if (Object.keys(levels).length) {
+    var lv = levels[mp_str_(ctx.email).toLowerCase().trim()] || 'none';
+    perms.level = lv;
+    perms.manage = MP_LEVELS.indexOf(lv) >= MP_LEVELS.indexOf('master');
+  }
+  return perms;
+}
+
 function mp_require_(ctx, key) {
-  if (!mp_perms_(ctx.email)[key]) throw api_error_('FORBIDDEN', MP_PERM_LABELS[key]);
+  if (!mp_permsFor_(ctx)[key]) throw api_error_('FORBIDDEN', MP_PERM_LABELS[key]);
 }
 
 function mp_getPermissions_(ctx) {
-  return mp_perms_(ctx.email);
+  return mp_permsFor_(ctx);
+}
+
+/** Jednorazowo (z edytora): kolumna „Mistrz dostęp” z listą wyboru GOD / MASTER / CLERIK / TOURIST / ---. */
+function mp_setupLevelColumn() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
+  if (!sheet) throw new Error('Brak zakładki ' + API_USERS_SHEET);
+  var lastCol = sheet.getLastColumn();
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+  var col = header.indexOf(MP_LEVEL_COLUMN.toLowerCase()) + 1;
+  if (!col) { col = lastCol + 1; sheet.getRange(1, col).setValue(MP_LEVEL_COLUMN).setFontWeight('bold'); }
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(['GOD', 'MASTER', 'CLERIK', 'TOURIST', '---'], true).setAllowInvalid(false).build();
+  sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
+  return 'Kolumna „' + MP_LEVEL_COLUMN + '” w kolumnie ' + col + ' zakładki ' + API_USERS_SHEET;
 }
 
 // ---------------------------------------------------------------------------

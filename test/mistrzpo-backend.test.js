@@ -197,3 +197,16 @@ test('podgląd Skanera: dokumenty komisu, operacje przewodnika i detale prosto z
   assert.equal(r.dreg.length, 1); assert.equal(r.dreg[0].progress, 0.75); assert.equal(r.dreg[0].todo, '4');
   assert.deepEqual(call(env, 'mp_scanInfo_', {}), { docs: [], ops: [], dreg: [] });
 });
+
+test('poziom „Mistrz dostęp”: zmiana statusu i usuwanie od MASTER; bez kolumny – lista z Setup', () => {
+  const env = makeEnv();
+  // bez kolumny poziomów: jak dotąd – Setup C
+  assert.equal(call(env, 'mp_getPermissions_', user('mistrz@x.pl')).manage, true);
+  assert.equal(call(env, 'mp_getPermissions_', user('lista@x.pl')).manage, false);
+  // kolumna wypełniona: decyduje poziom (min. MASTER), lista z Setup C już nie wystarcza
+  env.ctx.api_levelColumn_ = () => ({ 'lista@x.pl': 'master', 'mistrz@x.pl': 'clerik', 'god@x.pl': 'god' });
+  const p = (e) => call(env, 'mp_getPermissions_', user(e));
+  assert.equal(p('lista@x.pl').manage, true); assert.equal(p('lista@x.pl').level, 'master');
+  assert.equal(p('mistrz@x.pl').manage, false); assert.equal(p('god@x.pl').manage, true); assert.equal(p('nikt@x.pl').manage, false);
+  assert.equal(p('lista@x.pl').details, true);   // listy detali i dokumentacji – nadal z Setup
+});
