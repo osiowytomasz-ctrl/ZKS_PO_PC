@@ -58,7 +58,7 @@ export const colLetter = (n) => { let s = ''; while (n > 0) { const m = (n - 1) 
 const s = (v) => (v === null || v === undefined ? '' : String(v));
 /** Klucz porównania: '10' i 10 są równe, 'Koniec' = 'koniec'. */
 export const eq = (v) => s(v).trim().toLowerCase();
-const num = (v) => { if (typeof v === 'number') return v; const t = s(v).trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
+export const num = (v) => { if (typeof v === 'number') return v; const t = s(v).trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
 const empty = (v) => s(v).trim() === '';
 
 /** Data i godzina z kolumn A (rrrr-mm-dd) i B (gg:mm) → milisekundy UTC (do różnicy w godzinach) albo null. */
