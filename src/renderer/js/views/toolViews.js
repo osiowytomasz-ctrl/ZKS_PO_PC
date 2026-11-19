@@ -1,0 +1,128 @@
+// Wspólne elementy Narzędziowni na PC – wygląd jak w aplikacji na Androida (ui/common/ToolRows.kt, ui/tools/ToolViews.kt):
+// wiersz narzędzia (kod na pasku zużycia z kolorem lokalizacji, opis i parametry, miniatura), rysunek zestawu 2D, podgląd 3D,
+// tabela części, okno na cały ekran i lista rozwijana filtra.
+import { h, clear, modal } from '../ui.js';
+import { parseSheetColor } from '../logic/common.js';
+import * as T from '../logic/tooltrack.js';
+import * as G from '../logic/toolGeometry.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const poly = (pts, sx = 1, ox = 0, oy = 0) => pts.map((p) => `${(ox + p.x * sx).toFixed(2)},${(oy + p.y * sx).toFixed(2)}`).join(' ');
+
+/** Miniatura 60 × 70: szary obrys i żółte płytki; brak konturu – „brak”. */
+export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
+  const box = h('div', { class: 'tool-mini', style: { width: w + 'px', height: hgt + 'px', cursor: onclick ? 'pointer' : '' }, onclick: onclick ? (e) => { e.stopPropagation(); onclick(); } : null });
+  if (!mini) { box.append(h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak')); return box; }
+  const s = Math.min(w / G.MINI_W, hgt / G.MINI_H);
+  box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="#000" stroke-width="0.5"/>`
+    + mini.inserts.map((p) => `<polygon points="${poly(p, s)}" fill="#c8a400" stroke="#000" stroke-width="0.5"/>`).join('') + '</svg>';
+  return box;
+}
+
+/** Zestaw narzędzi 2D (SVG, dopasowany do pola): obrysy w kolorach narzędzi, płytki na czerwono; [labels] – kody i poziomy „Y=…”. */
+export function stackSvg(stack, { labels = false, pad = 24, width = 600, height = 600 } = {}) {
+  const b = stack.bounds, bw = Math.max(b.maxX - b.minX, 1), bh = Math.max(b.maxY - b.minY, 1);
+  const s = Math.min((width - 2 * pad) / bw, (height - 2 * pad) / bh);
+  const ox = width / 2 - ((b.minX + b.maxX) / 2) * s, oy = pad - b.minY * s;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">`;
+  stack.layers.forEach((l, i) => {
+    const c = G.TOOL_PALETTE[i % G.TOOL_PALETTE.length];
+    svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="${c}" stroke-width="1"/>`;
+    for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#d50000" fill-opacity="0.2" stroke="#d50000" stroke-width="1.5"/>`;
+    if (labels) {
+      const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
+      svg += `<text x="4" y="${(oy + top * s + 12).toFixed(1)}" font-size="11">${esc(l.code)}</text>`;
+      svg += `<circle cx="${ox.toFixed(1)}" cy="${ry.toFixed(1)}" r="3" fill="red"/><text x="${(ox + 8).toFixed(1)}" y="${(ry - 4).toFixed(1)}" font-size="11">Y=${l.referenceY.toFixed(1)}</text>`;
+    }
+  });
+  const el = h('div', { style: { width: '100%', height: '100%' } }); el.innerHTML = svg + '</svg>';
+  return el;
+}
+
+/** Podgląd 3D bryły obrotowej (canvas): przeciągnij myszką – obrót, kółko – przybliżenie. */
+export function view3d(mesh) {
+  const wrap = h('div', { style: { width: '100%', height: '100%', minHeight: '260px', background: '#f5f5f5', position: 'relative' } });
+  if (!mesh) { wrap.append(h('div', { style: { padding: '20px', fontWeight: 600 } }, 'Brak konturu 3D (kolumna T arkusza ND_CACHE)')); return wrap; }
+  const cv = h('canvas', { style: { width: '100%', height: '100%', display: 'block', cursor: 'grab' } });
+  wrap.append(cv, h('div', { class: 'muted', style: { position: 'absolute', left: '8px', bottom: '6px', fontSize: '11px' } }, 'Przeciągnij: obrót · kółko myszy: przybliżenie'));
+  let cam = G.initialCamera(mesh.size);
+  const base = G.TOOL_PALETTE.map((c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)));
+  const draw = () => {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    if (!r.width || !r.height) return;
+    cv.width = r.width * dpr; cv.height = r.height * dpr;
+    const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
+    const p = G.project(mesh, cam, r.width, r.height);
+    for (const f of p.order) {
+      const q = mesh.quads.slice(f * 4, f * 4 + 4), c = base[mesh.faceTool[f] % base.length], sh = p.shade[f];
+      ctx.beginPath(); ctx.moveTo(p.sx[q[0]], p.sy[q[0]]); for (let k = 1; k < 4; k++) ctx.lineTo(p.sx[q[k]], p.sy[q[k]]); ctx.closePath();
+      ctx.fillStyle = `rgb(${c.map((v) => Math.round(v * sh)).join(',')})`; ctx.fill(); ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 0.5; ctx.stroke();
+    }
+  };
+  let drag = null;
+  cv.addEventListener('mousedown', (e) => { drag = [e.clientX, e.clientY]; cv.style.cursor = 'grabbing'; });
+  window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('mousemove', (e) => { if (!drag) return; cam = G.rotateCamera(cam, -(e.clientX - drag[0]) * 0.01, (e.clientY - drag[1]) * 0.01); drag = [e.clientX, e.clientY]; requestAnimationFrame(draw); });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); cam = G.zoomCamera(cam, e.deltaY < 0 ? 1.1 : 1 / 1.1, mesh.size); requestAnimationFrame(draw); }, { passive: false });
+  new ResizeObserver(() => draw()).observe(wrap);
+  return wrap;
+}
+
+/** Tabela części zamiennych: kod narzędzia, płytka/część (tło – kolor stanu), stan, zapas, dostępne. */
+export function partsTable(rows) {
+  const tb = h('tbody', {}, ...rows.map((r) => h('tr', {}, h('td', { class: 'left', style: { fontWeight: 700 } }, String(r.toolCode).toUpperCase()),
+    h('td', { class: 'left', style: { fontWeight: 700, background: parseSheetColor(r.color, '#ffffff') } }, String(r.partCode).toUpperCase()), h('td', {}, r.status), h('td', {}, r.stock), h('td', {}, r.available))));
+  return h('div', {}, h('table', { class: 't', style: { width: '100%' } }, h('thead', {}, h('tr', {}, ...['Kod', 'Płytka/część', 'Stan', 'Zapas', 'Dostępne'].map((x) => h('th', {}, x)))), tb),
+    rows.length ? null : h('p', { class: 'muted' }, 'Brak części dla wybranych narzędzi.'));
+}
+
+/** Okno prawie na cały ekran z tytułem i „Zamknij”. [content] – element (rośnie na całą wysokość). */
+export function fullScreen(title, content) {
+  const m = modal(null, h('div', { class: 'fs-dialog' },
+    h('div', { class: 'row', style: { marginBottom: '6px' } }, h('h3', { style: { margin: 0, flex: 1 } }, title), h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij')),
+    h('div', { class: 'fs-body' }, content)), { wide: true });
+  m.root.classList.add('fs');
+  return m;
+}
+
+/** Komórka kodu: tło – pasek zużycia (do 80% szerokości), z prawej pasek koloru lokalizacji, czerwona ramka – brak części. */
+export function wearCodeCell(wear, location, warning, ...children) {
+  const p = T.wearPercent(wear), band = T.wearBand(p);
+  const c = band === 'low' ? '#00c853' : band === 'medium' ? '#ffd600' : '#d50000', fill = Math.min(80, (p / 100) * 80);
+  const lc = T.locationColor(location);
+  return h('div', { class: 'wear-cell', style: { background: `linear-gradient(90deg, ${c} 0%, ${c} ${fill}%, #fff ${fill}%, #fff 100%)`, outline: warning ? '3px solid #d50000' : '', outlineOffset: '-3px' } },
+    h('div', { class: 'wear-text' }, ...children), lc ? h('div', { class: 'wear-loc', style: { background: lc } }) : null);
+}
+
+/** Standardowe parametry: Φ, L, r/α, Ms, Mk. */
+export const toolParams = (t) => [['Φ', t.columnF], ['L', t.columnJ], ['r/α', T.rAlphaText(t)], ['Ms', t.columnM], ['Mk', t.columnN]];
+/** Karta: opis (2 linie) i parametry z etykietami w jednym zawijanym wierszu. */
+export function toolCard(description, params) {
+  const shown = params.filter(([, v]) => String(v ?? '').trim());
+  return h('div', { class: 'tool-card' }, h('div', { class: 'tool-desc' }, description),
+    shown.length ? h('div', { class: 'tool-params' }, ...shown.flatMap(([l, v], i) => [i ? '   ' : '', h('span', { class: 'muted' }, l + ' '), h('b', {}, String(v))])) : null);
+}
+/** Wiersz narzędzia jak na Androidzie: kod (92 px), opis i parametry, opcjonalnie miniatura. */
+export function toolRow(t, { warning = false, onclick, mini = null, description = null } = {}) {
+  return h('div', { class: 'tool-row' + (onclick ? ' click' : ''), onclick },
+    wearCodeCell(t.wear, t.location, warning, h('b', {}, t.productCode)),
+    toolCard(description ?? T.description(t), toolParams(t)), mini ? h('div', { class: 'tool-mini-col' }, mini) : null);
+}
+
+/** Lista rozwijana filtra jak przycisk Androida: aktywny filtr wypełniony; pusta wartość = „(wszystkie)”. */
+export function filterDropdown(label, value, options, onSelect, { allLabel = '(wszystkie)' } = {}) {
+  const sel = h('select', { class: 'filter-dd' + (String(value ?? '').trim() ? ' on' : ''), title: label, onchange: () => onSelect(sel.value) },
+    h('option', { value: '' }, String(value ?? '').trim() && allLabel !== null ? allLabel : label),
+    ...options.map((o) => h('option', { value: o, selected: String(value ?? '').toLowerCase() === String(o).toLowerCase() }, o)));
+  if (allLabel === null) sel.firstChild.disabled = true;
+  return sel;
+}
+
+/** Linia komunikatu (czerwony – błąd, szary – informacja, zielony – potwierdzenie). */
+export function statusLine() {
+  const el = h('div', { class: 'status-line' });
+  el.set = (text, kind = 'ok') => { el.textContent = text || ''; el.style.color = kind === 'error' ? '#c62828' : kind === 'neutral' ? '#666' : '#1b5e20'; el.style.display = text ? '' : 'none'; };
+  el.set('');
+  return el;
+}
+export { clear };

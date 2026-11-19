@@ -1,0 +1,422 @@
+// Geometria narzędzi Narzędziowni – port 1:1 z aplikacji na Androida (ui/tools: ToolGeometry.kt, ToolsLogic.kt, ToolExport.kt, Lathe3D.kt).
+// Kontur trzonu (ND_CACHE kolumna T, w API `columnAY`) to pary `x_y` rozdzielone `;` w jednostkach 0,1 mm; kontury płytek (PL_kontur, kolumna G)
+// to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
+import { normCode } from './tooltrack.js';
+import { naturalCompare } from './common.js';
+
+export const pt = (x, y) => ({ x, y });
+
+/** Jak JS `parseFloat(String(x).replace(',', '.')) || 0` (prefiks liczbowy, przecinek dziesiętny). */
+export function num(text) {
+  const m = /^\s*[-+]?\d+(?:\.\d+)?/.exec(String(text ?? '').replace(',', '.'));
+  return m ? Number(m[0]) : 0;
+}
+
+export function parseContour(text) {
+  const out = [];
+  for (const pair of String(text ?? '').split(';')) {
+    const p = pair.split('_');
+    if (p.length < 2) continue;
+    const xs = p[0].trim(), ys = p[1].trim();
+    if (!xs || !ys) continue;
+    const x = Number(xs), y = Number(ys);
+    if (Number.isFinite(x) && Number.isFinite(y)) out.push(pt(x, y));
+  }
+  return out;
+}
+
+/** Granice konturu; r = największe Y, m = odległość najniższego punktu poniżej zera. */
+export function bounds(points) {
+  if (!points || !points.length) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  return { minX, maxX, minY, maxY, r: maxY, m: Math.abs(minY) };
+}
+
+/** Płytka: ścieżka SVG → punkty w jednostkach konturu (×10, Y jako wartość bezwzględna). Łuki (A) i krzywe (Q) rozbite na odcinki. */
+export function parseInsertPath(path) {
+  const tokens = String(path ?? '').replace(/,/g, ' ').match(/[MLAQZ]|-?\d+(?:\.\d+)?/gi) || [];
+  const points = [];
+  let i = 0, cmd = '', cur = null;
+  const isNum = (t) => t != null && Number.isFinite(Number(t));
+  const read = () => { const t = tokens[i++]; return isNum(t) ? Number(t) : NaN; };
+  const push = (x, y) => { if (!Number.isNaN(x) && !Number.isNaN(y)) points.push(pt(x * 10, Math.abs(y) * 10)); };
+  while (i < tokens.length) {
+    if (!isNum(tokens[i])) cmd = tokens[i++].toUpperCase();
+    if (cmd === 'M' || cmd === 'L') {
+      const x = read(), y = read();
+      if (!Number.isNaN(x) && !Number.isNaN(y)) { push(x, y); cur = pt(x, y); }
+    } else if (cmd === 'A') {
+      const rx = read(), ry = read(), rot = read(), large = read(), sweep = read(), x = read(), y = read();
+      if (cur && ![rx, ry, x, y].some(Number.isNaN)) { for (const q of arcPoints(cur.x, cur.y, rx, ry, rot, large, sweep, x, y, 18)) push(q.x, q.y); cur = pt(x, y); }
+    } else if (cmd === 'Q') {
+      const cx = read(), cy = read(), x = read(), y = read();
+      if (cur && ![cx, cy, x, y].some(Number.isNaN)) {
+        for (let s = 1; s <= 12; s++) { const t = s / 12, u = 1 - t; push(u * u * cur.x + 2 * u * t * cx + t * t * x, u * u * cur.y + 2 * u * t * cy + t * t * y); }
+        cur = pt(x, y);
+      }
+    } else if (cmd === 'Z') break;
+    else i++;
+  }
+  return points;
+}
+
+/** Łuk SVG rozbity na [steps] odcinków (co najmniej 8); punkt początkowy nie jest zwracany. */
+export function arcPoints(x1, y1, rxIn, ryIn, angleDeg, largeArc, sweep, x2, y2, steps) {
+  const angle = (angleDeg * Math.PI) / 180, cosA = Math.cos(angle), sinA = Math.sin(angle);
+  let rx = Math.abs(rxIn), ry = Math.abs(ryIn);
+  if (rx === 0 || ry === 0) return [pt(x2, y2)];
+  const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+  const x1p = cosA * dx + sinA * dy, y1p = -sinA * dx + cosA * dy;
+  let rxSq = rx * rx, rySq = ry * ry;
+  const lambda = (x1p * x1p) / rxSq + (y1p * y1p) / rySq;
+  if (lambda > 1) { const s = Math.sqrt(lambda); rx *= s; ry *= s; rxSq = rx * rx; rySq = ry * ry; }
+  const sign = largeArc === sweep ? -1 : 1;
+  const coef = sign * Math.sqrt(Math.max(0, (rxSq * rySq - rxSq * y1p * y1p - rySq * x1p * x1p) / (rxSq * y1p * y1p + rySq * x1p * x1p)));
+  const cxp = coef * ((rx * y1p) / ry), cyp = coef * (-(ry * x1p) / rx);
+  const cx = cosA * cxp - sinA * cyp + (x1 + x2) / 2, cy = sinA * cxp + cosA * cyp + (y1 + y2) / 2;
+  const vAng = (ux, uy, vx, vy) => {
+    const len = Math.sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy));
+    let a = Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / len)));
+    if (ux * vy - uy * vx < 0) a = -a;
+    return a;
+  };
+  const start = vAng(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let delta = vAng((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (sweep === 0 && delta > 0) delta -= 2 * Math.PI;
+  if (sweep !== 0 && delta < 0) delta += 2 * Math.PI;
+  const n = Math.max(8, steps), out = [];
+  for (let k = 0; k < n; k++) {
+    const t = start + delta * ((k + 1) / n);
+    out.push(pt(cx + rx * Math.cos(t) * cosA - ry * Math.sin(t) * sinA, cy + rx * Math.cos(t) * sinA + ry * Math.sin(t) * cosA));
+  }
+  return out;
+}
+
+export function rotateAround(p, pivot, angleDeg) {
+  const a = (angleDeg * Math.PI) / 180, dx = p.x - pivot.x, dy = p.y - pivot.y;
+  return pt(pivot.x + dx * Math.cos(a) - dy * Math.sin(a), pivot.y + dx * Math.sin(a) + dy * Math.cos(a));
+}
+
+// ---------- zestaw narzędzi jeden pod drugim (widok 2D) ----------
+
+/**
+ * Układa narzędzia jedno pod drugim ([tools] – {code, contour, inserts: [ścieżka SVG], diameter, length, angle, chamfer}).
+ * [allInserts] – wszystkie płytki (Viewer) zamiast pierwszej; [rotateChamfer] – obrót płytek fazowników (podgląd zapisu).
+ * Wynik: { layers: [{code, outline, inserts, referenceY}], bounds } albo null.
+ */
+export function buildStack(tools, allInserts, rotateChamfer) {
+  const layers = [];
+  let offsetY = 0;
+  tools.forEach((tool, index) => {
+    const b = bounds(tool.contour);
+    if (!b) return;
+    const outline = tool.contour.map((p) => pt(p.x, offsetY + (b.maxY - p.y)));
+    const paths = allInserts ? tool.inserts : tool.inserts.slice(0, 1);
+    const placed = paths.flatMap((path) => {
+      const raw = parseInsertPath(path);
+      return raw.length < 2 ? [] : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer));
+    });
+    offsetY += b.r;
+    if (index === tools.length - 1) offsetY += b.m;
+    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY });
+  });
+  if (!layers.length) return null;
+  return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
+}
+
+function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer) {
+  const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));
+  const leftX = -(tool.diameter * 10) / 2, rightX = (tool.diameter * 10) / 2;
+  const topY = offsetY - (tool.length * 10 - (b.maxY - b.minY));
+  const plain = raw.map((p) => { const dx = p.x - minX; return pt(mirror ? rightX - dx : leftX + dx, topY + (p.y - minY)); });
+  if (!rotateChamfer || !tool.chamfer) return plain;
+  const pivotTop = offsetY - (tool.length * 10 - b.maxY);
+  const pivotLeft = pt(leftX + (raw[0].x - minX), pivotTop + (raw[0].y - minY));
+  const pivot = mirror ? pt(-pivotLeft.x, pivotLeft.y) : pivotLeft;
+  const shift = -(tool.length * 10), angle = mirror ? -tool.angle : tool.angle;
+  return plain.map((p) => rotateAround(pt(p.x, p.y + shift), pivot, angle));
+}
+
+// ---------- miniatura (pole 60 × 70) ----------
+export const MINI_W = 60, MINI_H = 70;
+
+export const isChamfer = (t) => { const g = String(t.columnD ?? '').trim().toLowerCase(), y = String(t.columnE ?? '').trim().toLowerCase(); return g === 'faz' || y === 'faz'; };
+export const isChamferForPreview = (code, type, name) => String(code ?? '').toUpperCase().includes('POGF') || String(type ?? '').toLowerCase().includes('faz') || String(name ?? '').toLowerCase().includes('faz');
+
+/** Miniatura z konturu i płytek: { outline, inserts } albo null (kontur < 3 punktów). */
+export function buildMini(tool, details) {
+  const points = parseContour(details && details.columnAY);
+  if (points.length < 3) return null;
+  const b = bounds(points);
+  const width = Math.max(b.maxX - b.minX, 1), height = Math.max(b.maxY - b.minY, 1);
+  const boxW = 50, boxH = 60, scale = Math.min(boxW / width, boxH / height);
+  const offsetX = 5 + (boxW - width * scale) / 2, offsetY = 5 + (boxH - height * scale) / 2;
+  const outline = points.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale));
+  const company = String(tool.columnP ?? '').toLowerCase().trim(), group = String(tool.columnD ?? '').toLowerCase().trim(), type = String(tool.columnE ?? '').toLowerCase().trim();
+  const isWiePly = group === 'wie' && type === 'ply';
+  const inserts = (details && details.insertContours) || [];
+  const toRender = isWiePly && company.includes('komet') && !company.includes('iscar') && !company.includes('amec') ? inserts : inserts.slice(0, 1);
+  const diameter = num(tool.columnF), length = num(tool.columnJ), faz = isChamfer(tool);
+  const tMounting = /t__0/i.test(String(tool.productCode ?? ''));
+  const centerAxisX = offsetX + (0 - b.minX) * scale;
+  const leftToolX = isWiePly ? centerAxisX - diameter * 5 * scale : offsetX + (-diameter * 5 - b.minX) * scale;
+  const rightToolX = isWiePly ? centerAxisX + diameter * 5 * scale : offsetX + (diameter * 5 - b.minX) * scale;
+  const insertTopY = tMounting ? offsetY : offsetY - (length * 10 - (b.maxY - b.minY)) * scale;
+  const polygons = [];
+  for (const ins of toRender) {
+    const raw = parseInsertPath(ins.contour);
+    if (raw.length < 2) continue;
+    const iMinX = Math.min(...raw.map((p) => p.x)), iMaxX = Math.max(...raw.map((p) => p.x)), iMinY = Math.min(...raw.map((p) => p.y)), iMaxY = Math.max(...raw.map((p) => p.y));
+    const polygon = (mirror) => {
+      if (isWiePly) {
+        const midX = (iMinX + iMaxX) / 2, toolTipY = offsetY + (b.maxY - length * 10) * scale + iMaxY * scale;
+        return raw.map((p) => { const dx = (p.x - midX) * scale; const my = iMaxY - (p.y - iMinY); return pt(mirror ? centerAxisX + dx : centerAxisX - dx, toolTipY - (iMaxY - my) * scale); });
+      }
+      return raw.map((p) => { const dx = (p.x - iMinX) * scale; const my = iMaxY - (p.y - iMinY); return pt(mirror ? rightToolX - dx : leftToolX + dx, insertTopY + (iMaxY - my) * scale); });
+    };
+    if (faz) {
+      const angle = num(String(tool.columnG ?? '').trim() ? tool.columnG : tool.columnH);
+      polygons.push(polygon(false).map((p) => rotateAround(p, pt(leftToolX, insertTopY), angle)));
+      polygons.push(polygon(true).map((p) => rotateAround(p, pt(rightToolX, insertTopY), -angle)));
+    } else if (isWiePly && (company.includes('iscar') || company.includes('amec'))) polygons.push(polygon(true));
+    else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
+  }
+  return { outline, inserts: polygons };
+}
+
+// ---------- indeks katalogu (ToolsLogic.kt) ----------
+export const NO_DATA = 'Brak danych';
+const isWhite = (c) => { const x = String(c ?? '').trim().toLowerCase().replace(/ /g, ''); return !x || x === '#ffffff' || x === '#fff' || x === 'white' || x === 'rgb(255,255,255)'; };
+export const numberText = (v) => (Number(v) === Math.round(Number(v)) ? String(Math.round(Number(v))) : String(Number(v)));
+
+/** Indeks katalogu narzędzi ({tools, detailsMap} z getStToolOptions): narzędzie, szczegóły, części, dane do 2D/3D/DXF. */
+export function toolIndex(catalog) {
+  const tools = new Map(), details = new Map();
+  for (const t of (catalog && catalog.tools) || []) if (String(t.productCode ?? '').trim()) tools.set(normCode(t.productCode), t);
+  for (const [k, d] of Object.entries((catalog && catalog.detailsMap) || {})) details.set(normCode(k), d);
+  const tool = (code) => tools.get(normCode(code)) || null;
+  const det = (code) => details.get(normCode(code)) || null;
+  let usage = null;
+  const idx = {
+    tool, details: det,
+    stackTool(t) {
+      if (typeof t === 'string') t = tool(t);
+      if (!t) return null;
+      const d = det(t.productCode);
+      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name) };
+    },
+    dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
+    coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
+    partRows(codes) {
+      return codes.flatMap((code) => {
+        const d = det(code);
+        if (!d) return [];
+        return [...(d.partsCutting || []), ...(d.partsAccessories || [])].map((partCode) => {
+          const p = tool(partCode);
+          return { toolCode: code, partCode, status: p ? numberText(p.status || 0) : NO_DATA, stock: p ? numberText(p.stock || 0) : NO_DATA, available: p ? numberText(p.available || 0) : NO_DATA,
+            color: (p && String(p.partStatusColor || '').trim()) || '#ffffff' };
+        });
+      });
+    },
+    hasPartWarning(code) {
+      const d = det(code);
+      if (!d) return false;
+      return [...(d.partsCutting || []), ...(d.partsAccessories || [])].some((pc) => { const p = tool(pc); return !!p && !isWhite(p.partStatusColor); });
+    },
+    usages(partCode) {
+      if (!usage) {
+        usage = new Map();
+        for (const [k, d] of details) {
+          const tc = (tools.get(k) || {}).productCode || k;
+          const add = (p, role) => { const key = normCode(p); if (!usage.has(key)) usage.set(key, []); const l = usage.get(key); if (!l.some((u) => u.toolCode === tc && u.role === role)) l.push({ toolCode: tc, role }); };
+          (d.partsCutting || []).forEach((p) => add(p, 'cutting'));
+          (d.partsAccessories || []).forEach((p) => add(p, 'accessory'));
+        }
+        for (const l of usage.values()) l.sort((a, b) => naturalCompare(a.toolCode, b.toolCode));
+      }
+      return usage.get(normCode(partCode)) || [];
+    },
+  };
+  return idx;
+}
+
+// ---------- eksport: DXF i współrzędne (ToolExport.kt) ----------
+export const TOOL_PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+const SCALE = 0.1, INSERT_COLOR = '#d50000';
+const f3 = (v) => v.toFixed(3);
+export const sanitizeLayer = (v) => String(v ?? 'LAYER').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+export const sanitizeFileName = (v) => String(v ?? 'Tool_DXF').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 120);
+export function trueColor(hex) {
+  const c = String(hex).trim().replace(/^#/, '');
+  const part = (from) => { const n = parseInt(c.slice(from, from + 2), 16); return Number.isFinite(n) ? n : 0; };
+  return part(0) * 65536 + part(2) * 256 + part(4);
+}
+const stackHeight = (tool, minY, maxY) => { const nominal = tool.length * 10; return nominal !== 0 ? nominal : maxY - minY; };
+
+/** Tekst pliku DXF (skala 1:10, milimetry); narzędzia bez konturu (< 2 punktów) pomijane. */
+export function buildDxf(tools) {
+  const out = ['0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n', '0\nSECTION\n2\nTABLES\n0\nENDSEC\n', '0\nSECTION\n2\nENTITIES\n'];
+  let base = 0;
+  for (const t of tools) { if (t.contour.length < 2) continue; const b = bounds(t.contour); base += stackHeight(t, b.minY, b.maxY); }
+  const line = (p1, p2, layer, color) => out.push(`0\nLINE\n8\n${sanitizeLayer(layer)}\n420\n${color}\n10\n${f3(p1.x * SCALE)}\n20\n${f3(p1.y * SCALE)}\n30\n0.000\n11\n${f3(p2.x * SCALE)}\n21\n${f3(p2.y * SCALE)}\n31\n0.000\n`);
+  const lines = (pts, layer, hex) => { if (pts.length < 2) return; const c = trueColor(hex); for (let i = 0; i < pts.length - 1; i++) line(pts[i], pts[i + 1], layer, c); line(pts[pts.length - 1], pts[0], layer, c); };
+  let currentY = 0;
+  const allOuter = [];
+  tools.forEach((tool, index) => {
+    if (tool.contour.length < 2) return;
+    const b = bounds(tool.contour), height = stackHeight(tool, b.minY, b.maxY);
+    const positioned = tool.contour.map((p) => pt(p.x, currentY + (b.maxY - p.y) - base));
+    const color = TOOL_PALETTE[index % TOOL_PALETTE.length], name = String(tool.code || '').trim() ? tool.code : 'TOOL_' + index;
+    lines(positioned, name, color); lines(positioned, 'ALL_TOOLS', color);
+    tool.inserts.forEach((ins, ii) => {
+      const pts = transformInsert(ins.contour, b, currentY, base, tool.diameter, tool.length);
+      if (pts.length < 2) return;
+      const layer = 'INSERT_' + sanitizeLayer(name) + '_' + sanitizeLayer(String(ins.code || '').trim() ? ins.code : 'P' + ii);
+      lines(pts, layer, INSERT_COLOR); lines(pts, 'ALL_INSERTS', INSERT_COLOR);
+    });
+    allOuter.push(...positioned);
+    currentY += height;
+  });
+  const outer = outerContour(allOuter);
+  if (outer.length > 1) lines(outer, 'OUTER_CONTOUR', INSERT_COLOR);
+  out.push('0\nENDSEC\n0\nEOF\n');
+  return out.join('');
+}
+function transformInsert(path, b, currentY, base, diameter, length) {
+  const raw = parseInsertPath(path);
+  if (raw.length < 2) return [];
+  const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));
+  const left = -((diameter * 10) / 2), top = currentY - base - (length * 10 - (b.maxY - b.minY));
+  return raw.map((p) => pt(left + (p.x - minX), top + (p.y - minY)));
+}
+/** Zewnętrzny obrys: dla każdego poziomu Y skrajne X po prawej, potem w górę po lewej. */
+export function outerContour(points) {
+  if (points.length < 2) return [];
+  const byY = new Map();
+  for (const p of points) {
+    const k = f3(p.y);
+    const l = byY.get(k) || { y: p.y, minX: p.x, maxX: p.x };
+    l.minX = Math.min(l.minX, p.x); l.maxX = Math.max(l.maxX, p.x); byY.set(k, l);
+  }
+  const levels = [...byY.values()].sort((a, b) => a.y - b.y);
+  const right = levels.map((l) => pt(l.maxX, l.y)), left = [...levels].reverse().map((l) => pt(l.minX, l.y));
+  return [...right, ...left, right[0]];
+}
+export const defaultNameOptions = () => ({ codes: true, length: true, diameter: false, toolType: false, company: false, date: false, manual: '' });
+export function dxfFileName(o, codes, totalLength, firstDiameter, firstType, firstCompany, isoDate) {
+  const parts = [];
+  if (String(o.manual || '').trim()) parts.push(o.manual.trim());
+  if (o.codes) parts.push(codes.join('_'));
+  if (o.length) parts.push('L' + Math.round(totalLength));
+  if (o.diameter && String(firstDiameter).trim()) parts.push('D' + String(firstDiameter).replace(',', '.'));
+  if (o.toolType && String(firstType).trim()) parts.push(firstType);
+  if (o.company && String(firstCompany).trim()) parts.push(firstCompany);
+  if (o.date) parts.push(isoDate);
+  return sanitizeFileName(parts.join('_') || 'Tool_DXF') + '.dxf';
+}
+/** Tekst „Współrzędne”: punkty konturu i płytek (przed i po obrocie). */
+export function coordinatesText(tools) {
+  let s = '';
+  for (const t of tools) {
+    s += `==============================\nNARZĘDZIE: ${t.code}\nFirma: ${t.company}\nŚrednica: ${t.diameter}\nDługość: ${t.length}\nKąt płytki / columnG: ${f3(t.angle)}°\n--- Punkty konturu narzędzia ---\n`;
+    t.contour.forEach((p, i) => { s += `${i + 1}. X=${f3(p.x)}  Y=${f3(p.y)}\n`; });
+    if (!t.inserts.length) s += '\n--- Płytki ---\nBrak konturów płytek.\n';
+    const maxY = t.contour.length ? Math.max(...t.contour.map((p) => p.y)) : 0;
+    for (const ins of t.inserts) {
+      const raw = parseInsertPath(ins.contour);
+      let placed = [];
+      if (raw.length >= 2) {
+        const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));
+        const leftX = -((num(t.diameter) * 10) / 2), topY = -(num(t.length) * 10 - maxY);
+        placed = raw.map((p) => pt(leftX + (p.x - minX), topY + (p.y - minY)));
+      }
+      const pivot = placed[0] || pt(0, 0);
+      s += `\n--- Płytka: ${ins.code} ---\nKontur źródłowy:\n${ins.contour}\n\n--- Obrót płytki ---\nKąt obrotu z columnG: ${f3(t.angle)}°\nPunkt obrotu LEWY / bazowy:\nX=${f3(pivot.x)}  Y=${f3(pivot.y)}\n\n`;
+      s += 'Punkty płytki PO TRANSFORMACJI:\nUwaga: pokazane przy środku osi 0, pozycji 0 i skali 1\n\n';
+      placed.forEach((p, i) => { const r = rotateAround(p, pivot, t.angle); s += `${i + 1}. przed X=${f3(p.x)}  Y=${f3(p.y)}  |  po obrocie X=${f3(r.x)}  Y=${f3(r.y)}\n`; });
+    }
+    s += '\n';
+  }
+  return s;
+}
+
+// ---------- bryła obrotowa 3D (Lathe3D.kt) ----------
+/** Prawa połowa konturu bez powtórzeń, zamknięta do osi na dole i na górze. */
+export function profileOf(contour) {
+  if (!contour || contour.length < 3) return null;
+  const right = contour.filter((p) => p.x >= 0).map((p) => pt(Math.abs(p.x), p.y));
+  if (right.length < 2) return null;
+  const clean = [];
+  for (const p of right) { const l = clean[clean.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) clean.push(p); }
+  if (clean.length < 2) return null;
+  const ys = clean.map((p) => p.y);
+  return [pt(0, Math.min(...ys)), ...clean, pt(0, Math.max(...ys))];
+}
+/** Siatka brył obrotowych zestawu (kolejność: pierwsze = tnące). null, gdy brak konturów. */
+export function buildMesh(contours, segments = 36) {
+  const profiles = contours.map(profileOf);
+  const offsets = new Array(contours.length).fill(0);
+  let z = 0;
+  for (let i = contours.length - 1; i >= 0; i--) { const p = profiles[i]; if (!p) continue; offsets[i] = z; z += Math.max(...p.map((q) => q.y)); }
+  const vx = [], vy = [], vz = [], quads = [], faceTool = [];
+  const sin = [...Array(segments)].map((_, j) => Math.sin((2 * Math.PI * j) / segments)), cos = [...Array(segments)].map((_, j) => Math.cos((2 * Math.PI * j) / segments));
+  profiles.forEach((profile, ti) => {
+    if (!profile) return;
+    const base = vx.length;
+    for (const p of profile) for (let j = 0; j < segments; j++) { vx.push(p.x * cos[j]); vy.push(-p.x * sin[j]); vz.push(p.y + offsets[ti]); }
+    for (let k = 0; k < profile.length - 1; k++) {
+      if (profile[k].x === 0 && profile[k + 1].x === 0) continue;
+      for (let j = 0; j < segments; j++) { const j2 = (j + 1) % segments; quads.push(base + k * segments + j, base + k * segments + j2, base + (k + 1) * segments + j2, base + (k + 1) * segments + j); faceTool.push(ti); }
+    }
+  });
+  if (!quads.length) return null;
+  const faces = quads.length / 4, normals = new Float64Array(faces * 3);
+  for (let f = 0; f < faces; f++) {
+    const a = quads[f * 4], b = quads[f * 4 + 1], d = quads[f * 4 + 3];
+    const e1 = [vx[b] - vx[a], vy[b] - vy[a], vz[b] - vz[a]], e2 = [vx[d] - vx[a], vy[d] - vy[a], vz[d] - vz[a]];
+    let nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2], nz = e1[0] * e2[1] - e1[1] * e2[0];
+    const len = Math.hypot(nx, ny, nz);
+    if (len > 1e-9) { nx /= len; ny /= len; nz /= len; }
+    normals[f * 3] = nx; normals[f * 3 + 1] = ny; normals[f * 3 + 2] = nz;
+  }
+  const mm = (a) => [Math.min(...a), Math.max(...a)];
+  const [x0, x1] = mm(vx), [y0, y1] = mm(vy), [z0, z1] = mm(vz);
+  return { vx, vy, vz, quads, faceTool, normals, faceCount: faces, center: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], size: Math.max(1, x1 - x0, y1 - y0, z1 - z0) };
+}
+/** Kamera obracająca się wokół środka bryły: ustawienie początkowe jak w wersji webowej (1,3; 0,8; 1,8). */
+export function initialCamera(size) {
+  const x = 1.3, y = 0.8, z = 1.8, len = Math.hypot(x, y, z);
+  return { yaw: Math.atan2(x, z), pitch: Math.asin(y / len), distance: size * len };
+}
+export const rotateCamera = (c, dYaw, dPitch) => ({ ...c, yaw: c.yaw + dYaw, pitch: Math.max(-1.5, Math.min(1.5, c.pitch + dPitch)) });
+export const zoomCamera = (c, factor, size) => ({ ...c, distance: Math.max(size * 0.6, Math.min(size * 8, c.distance / factor)) });
+/** Rzut perspektywiczny: współrzędne ekranu, ściany od najdalszej i jasność ścian. */
+export function project(mesh, cam, width, height) {
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const dir = [cp * Math.sin(cam.yaw), sp, cp * Math.cos(cam.yaw)];
+  const camP = mesh.center.map((c, i) => c + dir[i] * cam.distance);
+  const f = dir.map((v) => -v);
+  let r = [-f[2], 0, f[0]];
+  const rl = Math.hypot(...r) < 1e-6 ? 1 : Math.hypot(...r); r = r.map((v) => v / rl);
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  const focal = height / 2 / Math.tan((45 * Math.PI) / 360);
+  const n = mesh.vx.length, sx = new Float64Array(n), sy = new Float64Array(n), depth = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const px = mesh.vx[i] - camP[0], py = mesh.vy[i] - camP[1], pz = mesh.vz[i] - camP[2];
+    const x = px * r[0] + py * r[1] + pz * r[2], y = px * u[0] + py * u[1] + pz * u[2], zz = px * f[0] + py * f[1] + pz * f[2];
+    depth[i] = zz;
+    if (zz > 0.01) { sx[i] = width / 2 + (focal * x) / zz; sy[i] = height / 2 - (focal * y) / zz; }
+  }
+  const L = [100, 200, 200], ll = Math.hypot(...L), light = L.map((v) => v / ll);
+  const list = [], shade = new Float64Array(mesh.faceCount);
+  for (let fi = 0; fi < mesh.faceCount; fi++) {
+    const q = mesh.quads.slice(fi * 4, fi * 4 + 4);
+    if (q.some((i) => depth[i] <= 0.01)) continue;
+    list.push([fi, (depth[q[0]] + depth[q[1]] + depth[q[2]] + depth[q[3]]) / 4]);
+    const dot = Math.abs(mesh.normals[fi * 3] * light[0] + mesh.normals[fi * 3 + 1] * light[1] + mesh.normals[fi * 3 + 2] * light[2]);
+    shade[fi] = Math.max(0, Math.min(1, 0.45 + 0.55 * dot));
+  }
+  list.sort((a, b) => b[1] - a[1]);
+  return { sx, sy, order: list.map((x) => x[0]), shade };
+}
