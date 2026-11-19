@@ -9,7 +9,7 @@
  *   gr_codes/main: { codes: { <skrót>: { pid, name, by, at, last } } }
  *
  * Wdrożenie (robi właściciel skryptu):
- *  1. Dodaj ten plik (GrafikKod.gs) i plik HTML „GrafikKod” (GrafikKod.html) do projektu Apps Script.
+ *  1. Dodaj ten plik (GrafikKod.gs) i plik HTML „GrafikKo” (GrafikKo.html – Apps Script nie pozwala na tę samą nazwę co plik .gs) do projektu Apps Script.
  *  2. W Code.js na początku funkcji doGet(e) dodaj jedną linię (opis w PODSUMOWANIE / wiadomości):
  *       if (e && e.parameter && e.parameter.p === 'grafik') return grk_page_();
  *  3. Wdróż nową wersję (Zarządzaj wdrożeniami → Edytuj → Nowa wersja) wdrożenia API (dostęp: każdy, wykonaj jako: ja).
@@ -25,7 +25,7 @@ var GRK_FAIL_SECONDS = 600;
 
 /** Strona Grafiku do wglądu (doGet z ?p=grafik). */
 function grk_page_() {
-  return HtmlService.createHtmlOutputFromFile('GrafikKod')
+  return HtmlService.createHtmlOutputFromFile('GrafikKo')
     .setTitle('Grafik ZKS PO')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .addMetaTag('apple-mobile-web-app-capable', 'yes')

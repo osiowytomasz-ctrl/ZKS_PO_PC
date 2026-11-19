@@ -1,4 +1,4 @@
-// Grafik na telefonie (backend/GrafikKod.html + GrafikKod.gs): kolory jak w programie, kody i skróty jak na serwerze.
+// Grafik na telefonie (backend/GrafikKo.html + GrafikKod.gs): kolory jak w programie, kody i skróty jak na serwerze.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import * as F from '../src/renderer/js/logic/grafikFb.js';
 import { newCode, hashCode, codeRows, hashesOf, SALT } from '../src/renderer/js/logic/grafikCodes.js';
 
-const html = readFileSync(new URL('../backend/GrafikKod.html', import.meta.url), 'utf8');
+const html = readFileSync(new URL('../backend/GrafikKo.html', import.meta.url), 'utf8');
 const gs = readFileSync(new URL('../backend/GrafikKod.gs', import.meta.url), 'utf8');
 
 test('kolory strony telefonu = cellStyle / headerStyle programu', () => {
