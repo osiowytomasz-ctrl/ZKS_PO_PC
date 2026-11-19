@@ -69,12 +69,12 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
-    // Kolejka wysyłki do arkusza (sync/grafik, sync/plan): dopisuje każdy, kto zapisuje w Grafiku lub Planie; wysyłkę (usunięcie
-    // wysłanych pozycji) robi MASTER lub GOD – programy pokazują przycisk tylko im, a sam zapis do arkusza sprawdza też serwer.
     // Kody dostępu do Grafiku na telefonie (GrafikKod.gs czyta je kontem usługi): nadaje i odbiera MASTER / GOD.
     match /gr_codes/{d} {
       allow read, write: if grManage();
     }
+    // Kolejka wysyłki do arkusza (sync/grafik, sync/plan): dopisuje każdy, kto zapisuje w Grafiku lub Planie; wysyłkę (usunięcie
+    // wysłanych pozycji) robi MASTER lub GOD – programy pokazują przycisk tylko im, a sam zapis do arkusza sprawdza też serwer.
     match /sync/{name} {
       allow read: if grRead() || planLvl() in ['read', 'write'];
       allow write: if grCells() || planLvl() == 'write';
@@ -111,7 +111,7 @@ service cloud.firestore {
       allow read, write: if planLvl() in ['read', 'write'];
     }
     // Plan: dane (plan_meta/main, plan_rows/{paczka wierszy}) – czyta każdy z dostępem do Planu, zmienia zapis w Planie;
-    // karta PLAN arkusza dostaje kopię każdego zapisu przez API (savePlanData)
+    // do karty PLAN arkusza zmiany trafiają tylko na żądanie (przycisk „Do arkusza”, kolejka sync/plan)
     match /plan_meta/{doc} {
       allow read: if planLvl() in ['read', 'write'];
       allow write: if planLvl() == 'write';
