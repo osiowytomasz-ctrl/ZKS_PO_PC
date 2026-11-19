@@ -558,3 +558,55 @@ function mp_selfTest() {
   Logger.log(result);
   return result;
 }
+
+
+// ---------------------------------------------------------------------------
+// Skaner: podgląd rejestrów prosto z arkusza (wartości formuł – status, postęp, start i koniec obróbki)
+// ---------------------------------------------------------------------------
+
+function mp_eq_(a, b) { return mp_str_(a).toLowerCase() === mp_str_(b).toLowerCase(); }
+
+/** Wiersze zakładki od wiersza 3: [wartości, wartości wyświetlane] dla kolumn 1..[cols] (puste zakładki – []). */
+function mp_sheetRows_(name, cols) {
+  var sh = mp_ss_().getSheetByName(name);
+  if (!sh || sh.getLastRow() < 3) return [];
+  var rg = sh.getRange(3, 1, sh.getLastRow() - 2, cols);
+  var v = rg.getValues(), d = rg.getDisplayValues();
+  return v.map(function (row, i) { return { row: i + 3, v: row, d: d[i] }; });
+}
+
+/**
+ * q = { komis, przewodnik, detailKomis }. Wynik:
+ *  docs  – dokumenty komisu z Rejestru dokumentacji i Ar. dok (data, godz, nr, rodzaj, nazwa, ilość oper, kto, status K, postęp M, start N, koniec P, godziny O),
+ *  ops   – wpisy operacji przewodnika z Rejestru operacji i Archiwum operacji (data, godz, nr, operator, status I, status g K),
+ *  dreg  – wpisy Rejestru detali komisu detalu (data, godz, rysunek, poz., kpl, szt, operator, postęp I, do zrobienia J, zrobione K).
+ */
+function mp_scanInfo_(q) {
+  var komis = mp_str_(q.komis), prz = mp_str_(q.przewodnik), dk = mp_str_(q.detailKomis);
+  var out = { docs: [], ops: [], dreg: [] };
+  if (komis) {
+    [['Rejestr dokumentacji', false], ['Ar. dok', true]].forEach(function (x) {
+      mp_sheetRows_(x[0], 16).forEach(function (r) {
+        if (!mp_eq_(r.v[2], komis)) return;
+        out.docs.push({ archive: x[1], row: r.row, date: r.d[0], time: r.d[1], komis: r.d[2], nr: r.d[3], typ: r.d[4], nazwa: r.d[5], ilosc: r.d[8], kto: r.d[9],
+          status: r.d[10], progress: typeof r.v[12] === 'number' ? r.v[12] : null, start: r.d[13], hours: r.d[14], end: r.d[15] });
+      });
+    });
+  }
+  if (komis && prz) {
+    [['Rejestr operacji', false], ['Archiwum operacji', true]].forEach(function (x) {
+      mp_sheetRows_(x[0], 11).forEach(function (r) {
+        if (!mp_eq_(r.v[2], komis) || !mp_eq_(r.v[3], prz)) return;
+        out.ops.push({ archive: x[1], row: r.row, date: r.d[0], time: r.d[1], nr: r.d[4], operator: r.d[7], status: r.d[8], statusG: x[1] ? '' : r.d[10] });
+      });
+    });
+  }
+  if (dk) {
+    mp_sheetRows_(MP_DETAIL_SHEET, 11).forEach(function (r) {
+      if (!mp_eq_(r.v[2], dk)) return;
+      out.dreg.push({ row: r.row, date: r.d[0], time: r.d[1], rysunek: r.d[3], poz: r.d[4], kpl: r.d[5], szt: r.d[6], operator: r.d[7],
+        progress: typeof r.v[8] === 'number' ? r.v[8] : null, todo: r.d[9], done: r.d[10] });
+    });
+  }
+  return out;
+}

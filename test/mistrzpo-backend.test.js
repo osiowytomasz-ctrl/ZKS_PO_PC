@@ -14,6 +14,7 @@ function makeSheet(rows = [], maxCols = 14) {
       return {
         getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const row = cell(r + i, c + j); return row[c + j - 1] ?? ''; })),
         getValue: () => cell(r, c)[c - 1] ?? '',
+        getDisplayValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const v = cell(r + i, c + j)[c + j - 1]; return v == null ? '' : String(v); })),
         setValues: (vals) => vals.forEach((row, i) => row.forEach((v, j) => { cell(r + i, c + j)[c + j - 1] = v; })),
         setValue: (v) => { cell(r, c)[c - 1] = v; },
         clearContent: () => { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) cell(r + i, c + j)[c + j - 1] = ''; },
@@ -182,4 +183,17 @@ test('biała lista API: wszystkie funkcje mp_ z Api.js istnieją w Code_MistrzPO
   const used = [...api.matchAll(/\b(mp_[A-Za-z]+_)\(/g)].map((m) => m[1]);
   assert.ok(used.length >= 13);
   for (const name of new Set(used)) assert.match(code, new RegExp(`function ${name}\\(`), name);
+});
+
+test('podgląd Skanera: dokumenty komisu, operacje przewodnika i detale prosto z arkusza (wartości formuł)', () => {
+  const env = makeEnv({
+    docs: [[], [], ['23.03.2026', '09:25', 'E3/25/803', '4_2', 'KTK', 'Obudowa', 'R1', 'id', 5, 'Kumala', '2 / 5', 'E3/25/8034_2', 0.4, '23.03.2026 07:00', '', '']],
+    oper: [[], [], ['23.03.2026', '07:00', 'e3/25/803', '4_2', 10, 'K', 'R', 'jan@x', 'Koniec', '', 'Koniec'], ['23.03.2026', '07:00', 'E3/25/803', '1_1', 10, 'K', 'R', 'ola@x', 'Start', '', 'Start']],
+    detailRegister: [[], [], ['23.03.2026', '10:00', '25/803', 'R-1', '1', 1, 3, 'op@x', 0.75, 4, 3]],
+  });
+  const r = call(env, 'mp_scanInfo_', { komis: 'E3/25/803', przewodnik: '4_2', detailKomis: '25/803' });
+  assert.equal(r.docs.length, 1); assert.equal(r.docs[0].nr, '4_2'); assert.equal(r.docs[0].status, '2 / 5'); assert.equal(r.docs[0].progress, 0.4); assert.equal(r.docs[0].start, '23.03.2026 07:00');
+  assert.deepEqual(r.ops.map((o) => [o.nr, o.status, o.operator]), [['10', 'Koniec', 'jan@x']]);
+  assert.equal(r.dreg.length, 1); assert.equal(r.dreg[0].progress, 0.75); assert.equal(r.dreg[0].todo, '4');
+  assert.deepEqual(call(env, 'mp_scanInfo_', {}), { docs: [], ops: [], dreg: [] });
 });

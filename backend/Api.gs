@@ -159,6 +159,14 @@ var API_FUNCS = {
     write: true,
     run: function (a, ctx) { return mp_addDetail_(a[0], ctx); }
   },
+  mp_scanInfo: {
+    // Skaner: podgląd rejestrów prosto z arkusza Mistrz_po (wartości formuł z arkusza) – dokumenty komisu, operacje przewodnika, detale komisu.
+    run: function (a) { return mp_scanInfo_(a[0] || {}); }
+  },
+  scanPartInfo: {
+    // Skaner: stan części z arkusza I i z ND_CACHE oraz narzędzia (zespoły), do których część pasuje, z ich stanem.
+    run: function (a) { return api_scanPartInfo_(a[0]); }
+  },
   mp_export: {
     // Moduł Mistrz PO: dane WPISYWANE zakładek arkusza Mistrz_po do importu do bazy Firebase (kolumny liczone liczy program).
     // poziom MASTER lub GOD (kolumna „Grafik dostęp”)
@@ -1687,4 +1695,49 @@ function api_grafikWriteBack_(changes) {
   SpreadsheetApp.flush();
   api_grBump_();
   return { written: written, missing: missing.slice(0, 20) };
+}
+
+
+// ---------------------------------------------------------------------------
+// Skaner: stan części i narzędzia, do których pasuje (lekko – bez całego katalogu)
+// ---------------------------------------------------------------------------
+
+/** Normalizacja kodu jak w całym projekcie. */
+function api_normCode_(x) { return String(x == null ? '' : x).trim().toLowerCase().replace(/\s+/g, ' '); }
+
+/**
+ * { code, sheetI: { headers: [...], values: [...] } | null, part: {…} | null, tools: [{ code, name, role, group, kind, diameter, location, stan, zapas,
+ * dostepne, color, wear }] } – arkusz I (wiersz z kodem w kolumnie D, kolumny A–J jak w arkuszu), wiersz ND_CACHE części i narzędzia z ND_CACHE,
+ * które mają część na liście części skrawających (R) albo akcesoriów (S). Narzędzia na złomie pomijane.
+ */
+function api_scanPartInfo_(code) {
+  var want = api_normCode_(code);
+  if (!want) throw new Error('Brak kodu części.');
+  var out = { code: String(code), sheetI: null, part: null, tools: [] };
+  var ss = SpreadsheetApp.getActive();
+  var shI = ss.getSheetByName('I');
+  if (shI && shI.getLastRow() >= 2) {
+    var w = Math.min(10, shI.getLastColumn());
+    var head = shI.getRange(1, 1, 1, w).getDisplayValues()[0];
+    var rows = shI.getRange(2, 1, shI.getLastRow() - 1, w).getDisplayValues();
+    for (var i = 0; i < rows.length; i++) if (api_normCode_(rows[i][3]) === want) { out.sheetI = { headers: head, values: rows[i], row: i + 2 }; break; }
+  }
+  var nd = getNdCacheValues_();
+  var pick = function (r) {
+    return { code: String(r[ND_COL.KOD]).trim(), name: String(r[ND_COL.NAZWA] || '').trim(), group: String(r[ND_COL.GRUPA] || '').trim(), kind: String(r[ND_COL.RODZAJ] || '').trim(),
+      diameter: String(r[ND_COL.SREDNICA] || '').trim(), location: String(r[ND_COL.LOKALIZACJA] || '').trim(), stan: String(r[ND_COL.STAN] || '').trim(),
+      zapas: String(r[ND_COL.ZAPAS] || '').trim(), dostepne: String(r[ND_COL.DOSTEPNE] || '').trim(), color: String(r[ND_COL.KOLOR_STANU] || '').trim().toLowerCase(),
+      wear: String(r[ND_COL.ZUZYCIE] || '').trim(), info: String(r[ND_COL.INFO] || '').trim() };
+  };
+  nd.forEach(function (r) {
+    var k = api_normCode_(r[ND_COL.KOD]);
+    if (!k) return;
+    if (k === want && !out.part) out.part = pick(r);
+    var loc = api_normCode_(r[ND_COL.LOKALIZACJA]);
+    if (loc === 'złom') return;
+    var cut = splitNdList_(r[ND_COL.CZESCI_SKRAWAJACE]), acc = splitNdList_(r[ND_COL.AKCESORIA]);
+    var role = cut.indexOf(want) >= 0 ? 'płytka / część skrawająca' : (acc.indexOf(want) >= 0 ? 'akcesorium' : '');
+    if (role) { var t = pick(r); t.role = role; out.tools.push(t); }
+  });
+  return out;
 }
