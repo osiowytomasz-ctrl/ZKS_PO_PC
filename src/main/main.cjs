@@ -47,7 +47,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#808080',
-    title: EDITION === 'narz' ? 'ZKS PO – Narzędziownia' : 'ZKS PO',
+    title: 'ZKS PO',
     icon: path.join(__dirname, '..', 'renderer', 'img', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -74,20 +74,6 @@ function createWindow() {
     app.quit();
     setTimeout(() => app.exit(0), 3000).unref();
   });
-}
-
-// Wydanie programu: 'full' (wszystkie moduły) albo 'narz' (sama Narzędziownia) – pole zksEdition w package.json,
-// ustawiane przy budowie (electron-builder -c.extraMetadata.zksEdition=narz). Narzędziownia ma osobne dane (może działać obok pełnego programu),
-// a przy pierwszym uruchomieniu przejmuje ustawienia połączenia (adres i klucz) z pełnego programu.
-const EDITION = (() => { try { return require('../../package.json').zksEdition || 'full'; } catch { return 'full'; } })();
-if (EDITION === 'narz') {
-  const fullData = app.getPath('userData');
-  const own = path.join(app.getPath('appData'), 'ZKS PO Narzedziownia');
-  app.setPath('userData', own);
-  try {
-    const src = path.join(fullData, 'settings.bin'), dst = path.join(own, 'settings.bin');
-    if (!fs.existsSync(dst) && fs.existsSync(src)) { fs.mkdirSync(own, { recursive: true }); fs.copyFileSync(src, dst); }
-  } catch { /* bez kopiowania – ustawienia wpisuje się w programie */ }
 }
 
 // Jedna kopia programu: ponowne uruchomienie pokazuje działające okno zamiast otwierać drugie (wspólna pamięć bazy, pliki ustawień)
@@ -193,8 +179,7 @@ app.whenReady().then(() => {
     if (/^https?:\/\//i.test(String(url))) return shell.openExternal(String(url));
     return false;
   });
-  ipcMain.handle('app:version', () => app.getVersion());
-  ipcMain.handle('app:edition', () => EDITION);   // numer wersji programu PC (package.json)
+  ipcMain.handle('app:version', () => app.getVersion());   // numer wersji programu PC (package.json)
   ipcMain.handle('clipboard:write', (_e, text) => { clipboard.writeText(String(text || '')); return true; });
 
   createWindow();

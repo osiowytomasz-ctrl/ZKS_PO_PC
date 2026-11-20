@@ -37,22 +37,8 @@ jobs:
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest dist/*.exe dist/*.zip --title "ZKS PO – najnowsza wersja (Windows)" --notes "Wersja przenośna: pobierz plik .exe i uruchom (bez instalacji, bez Node.js)."
 
-      # Wydanie „ZKS PO Narzędziownia” – ten sam kod, same moduły narzędziowni (package.json → zksEdition: narz)
-      - name: Build Narzędziownia (portable exe and zip)
-        shell: bash
-        run: npx electron-builder --win portable zip --x64 --publish never -c.extraMetadata.zksEdition=narz -c.productName="ZKS PO Narzedziownia" -c.appId=pl.zks.po.narz -c.directories.output=dist-narz -c.portable.artifactName=ZKS-PO-Narzedziownia-portable.exe '-c.artifactName=ZKS-PO-Narzedziownia-${version}-${os}-${arch}.${ext}'
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ZKS-PO-Narzedziownia-windows
-          path: |
-            dist-narz/*.exe
-            dist-narz/*.zip
-      - name: Publish release "narzedziownia"
+      - name: Remove old release "narzedziownia"
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete narzedziownia --yes --cleanup-tag || true
-          gh release create narzedziownia dist-narz/*.exe dist-narz/*.zip --title "ZKS PO Narzędziownia – najnowsza wersja (Windows)" --notes "Sama Narzędziownia (ToolBuilder, Assem.Tool, ToolTrack, Kontury, Części) – lżejsza wersja przenośna. Ustawienia połączenia przejmuje z pełnego programu przy pierwszym uruchomieniu."
+        run: gh release delete narzedziownia --yes --cleanup-tag || true
