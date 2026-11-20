@@ -5,6 +5,7 @@ import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
 import { stationsPanel } from './stationsPanel.js';
 import { toolLook, setToolLook } from './toolViews.js';
+import { invalidateConfirmed } from '../catalog.js';
 import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
@@ -121,6 +122,7 @@ export async function mountSettings(el, ctx) {
 function toolLookPanel() {
   const look = toolLook();
   const frame = h('input', { type: 'checkbox', checked: look.frame, onchange: () => setToolLook({ frame: frame.checked }) });
+  const gen = h('input', { type: 'checkbox', checked: look.gen, onchange: () => { setToolLook({ gen: gen.checked }); invalidateConfirmed(); toast(gen.checked ? 'Kontury z wewnętrznego generatora – otwórz moduł narzędziowni ponownie' : 'Kontury z kolumny T'); } });
   const glow = h('input', { type: 'checkbox', checked: look.glow, onchange: () => setToolLook({ glow: glow.checked }) });
   const locG = h('input', { type: 'checkbox', checked: look.glowColor === 'loc', onchange: () => { color.disabled = locG.checked; setToolLook({ glowColor: locG.checked ? 'loc' : color.value }); } });
   const color = h('input', { type: 'color', value: look.glowColor === 'loc' ? '#00c853' : look.glowColor, disabled: look.glowColor === 'loc', style: { width: '40px', height: '24px', padding: 0, border: 0 },
@@ -129,5 +131,8 @@ function toolLookPanel() {
     h('p', { class: 'muted' }, 'Kolor lokalizacji narzędzia bierze się z kolorów stanowisk (Union – 2Un, Correa – 3Co, Schiess – 1Si, Narzędziownia – Narz; pozostałe – kolory domyślne).'),
     h('label', { class: 'row', style: { gap: '6px' } }, frame, 'Ramka w kolorze lokalizacji (wiersze i kafelki narzędzi)'),
     h('label', { class: 'row', style: { gap: '6px' } }, glow, 'Poświata (glow) wokół narzędzia'),
-    h('div', { class: 'row', style: { gap: '6px', marginLeft: '22px' } }, h('label', { class: 'row', style: { gap: '4px' } }, locG, 'w kolorze lokalizacji'), h('span', { class: 'muted' }, 'albo kolor:'), color));
+    h('div', { class: 'row', style: { gap: '6px', marginLeft: '22px' } }, h('label', { class: 'row', style: { gap: '4px' } }, locG, 'w kolorze lokalizacji'), h('span', { class: 'muted' }, 'albo kolor:'), color),
+    h('h3', { style: { marginTop: '12px' } }, 'Narzędziownia – kontury narzędzi (ten komputer)'),
+    h('label', { class: 'row', style: { gap: '6px' } }, gen, 'Kontury z wewnętrznego generatora (PSWT D:N + zakładka „kontury”) zamiast kolumny T arkusza ND_CACHE'),
+    h('p', { class: 'muted', style: { margin: '2px 0 0 22px' } }, 'Kolejność: zatwierdzony kontur (PSWT BC) → roboczy (ND_CACHE V) → generator; gdy generator nie ma reguły dla narzędzia – kolumna T. Dotyczy ToolBuildera, Assem.Tool, Części i Konturów; zmiana działa po ponownym otwarciu modułu. Kontury z generatora poprawia się w Konturach i zatwierdza.'));
 }

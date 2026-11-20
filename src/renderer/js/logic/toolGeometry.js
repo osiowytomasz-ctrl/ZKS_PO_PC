@@ -205,7 +205,9 @@ export function toolIndex(catalog, overrides = null) {
   for (const [k, d] of Object.entries((catalog && catalog.detailsMap) || {})) details.set(normCode(k), d);
   const tool = (code) => tools.get(normCode(code)) || null;
   // zatwierdzony kontur (PSWT BC) zastępuje kontur z kolumny T
-  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); const rg = overrides && overrides.regions && overrides.regions.get(k); return o ? { ...(d || {}), columnAY: o, confirmedContour: true, originalAY: d ? d.columnAY : '', regions: rg || null } : d; };
+  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); const rg = overrides && overrides.regions && overrides.regions.get(k); const genC = !!(overrides && overrides.generated && overrides.generated.has(k));
+    if (!o) return rg && d ? { ...d, regions: rg } : d;
+    return { ...(d || {}), columnAY: o, confirmedContour: !genC, generatedContour: genC, originalAY: d ? d.columnAY : '', regions: rg || null }; };
   let usage = null;
   const idx = {
     tool, details: det,

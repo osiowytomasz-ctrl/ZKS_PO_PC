@@ -3,6 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
+import { fullContour } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -115,6 +116,34 @@ export function confirmedOverrides(params) {
   // rejony ostrze / oprawka (BE) zatwierdzonych narzędzi – kolor części roboczej w 3D
   m.regions = new Map();
   for (const [k, o] of Object.entries(params || {})) if (o && String(o.BH || '').trim() && String(o.BE || '').trim()) m.regions.set(String(k).trim().toLowerCase(), parseRegionsText(o.BE));
+  return m;
+}
+
+/**
+ * Kontury zastępujące kolumnę T w całym programie: zatwierdzone (PSWT BC) zawsze; przy [gen] (Ustawienia → Narzędziownia:
+ * wewnętrzny generator) dla pozostałych narzędzi – roboczy z kolumny V, a bez niego kontur z generatora (PSWT D:N + zakładka „kontury”).
+ * Narzędzia monolityczne bez rejonów – część robocza wg długości roboczej (K). Wynik: Map kod → kontur x_y; .regions, .generated (Set).
+ */
+export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
+  const m = confirmedOverrides(params);
+  m.generated = new Set();
+  const key = (k) => String(k).trim().toLowerCase();
+  const str = (pts) => pts.map((p) => `${fmt(p.x)}_${fmt(p.y)}`).join(';');
+  for (const [k0, o] of Object.entries(params || {})) {
+    const k = key(k0);
+    let pts = null;
+    if (gen && !m.has(k)) {
+      const vs = String((v || {})[k0] || (v || {})[k] || '').trim();
+      if (vs) pts = expandHalf(svgToContour(vs));
+      if (!pts || pts.length < 3) { const g = parseContour(fullContour(o, mounts || {}) || ''); pts = g.length >= 3 && Math.max(...g.map((p) => p.x)) > Math.min(...g.map((p) => p.x)) ? g : null; }
+      if (pts && pts.length >= 3) { m.set(k, str(pts)); m.generated.add(k); }
+    }
+    if (!m.regions.has(k) && isMonolithic(o) && workLength(o) > 0) {   // część robocza wg L roboczej (kolor w 3D)
+      const src = m.has(k) ? parseContour(m.get(k)) : null;
+      const s = src && src.length >= 3 ? workSplit(halfPathSvg(src), workLength(o)) : null;
+      if (s) m.regions.set(k, s.regions);
+    }
+  }
   return m;
 }
 

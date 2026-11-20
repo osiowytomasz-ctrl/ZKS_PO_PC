@@ -2,7 +2,7 @@
 // R – promień, opcjonalnie zaokrąglenie w punkcie), program rysuje cały kontur (odbicie lustrzane) obok dawnego z kolumny T i zapisuje go
 // jako ścieżkę SVG w mm do kolumny V arkusza ND_CACHE (MASTER, GOD). Kolumna T się nie zmienia.
 import { h, clear, api, toast, confirmBox, modal } from '../ui.js';
-import { toolCatalog } from '../catalog.js';
+import { toolCatalog, contourGenOn } from '../catalog.js';
 import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
@@ -83,11 +83,13 @@ export function mountContours(el, ctx) {
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
       try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
       await loadData();
-      st.cat = cat; st.index = G.toolIndex(cat, E.confirmedOverrides(st.params));
+      st.cat = cat; st.index = G.toolIndex(cat, overridesK());
       drawFilters(); drawList();
       if (pendingCode) { const t = st.tools.find((x) => normCode(x.productCode) === normCode(pendingCode)); pendingCode = null; if (t) pick(t); }
     } catch (e) { clear(listBox).append(h('div', { class: 'err', style: { padding: '8px' } }, 'Nie wczytano narzędzi: ' + e.message)); }
   }
+  /** Kontury dla płytek i podglądów: zatwierdzone (BC), przy włączonym generatorze – V / generator zamiast T. */
+  const overridesK = () => E.contourOverrides(st.params, st.mounts, { gen: contourGenOn(), v: st.v });
   const tOf = (t) => (st.details.get(normCode(t.productCode)) || {}).columnAY || '';
   const vOf = (t) => st.v[normCode(t.productCode)] || '';
   /** Potwierdzenie poprawności konturu z PSWT (kolumna BH) – tekst albo ''. */
@@ -137,7 +139,9 @@ export function mountContours(el, ctx) {
     // narzędzie monolityczne bez zapisanych rejonów: ostrze wg długości roboczej (K) – ustawiane po narysowaniu konturu
     { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.workLength(p) > 0; }
     const g = genOf(t), tp = G.parseContour(tOf(t));
-    const src = bcOf(t) ? [fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)] : vOf(t) ? [fromSvg(vOf(t)), 'kolumna V', vOf(t)] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
+    const src = bcOf(t) ? [fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)] : vOf(t) ? [fromSvg(vOf(t)), 'kolumna V', vOf(t)]
+      : contourGenOn() ? (g ? [g, 'wewnętrzny generator (D:N)'] : tp.length >= 3 ? [tp, 'kolumna T'] : null)
+        : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
     setFull(src && src[0], src && src[1], src && src[2]);
     if (!st.rows.length) st.rows = [{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }];
     status.set(src ? `Wczytano kontur (${src[1]}).` : 'Brak konturu – wpisz punkty od początku.', 'neutral');
@@ -205,7 +209,7 @@ export function mountContours(el, ctx) {
         await api('ndConfirmContour', [t.productCode, value, bc, value ? regionsText(st.regions) : null]);
         st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: bc, BE: regionsText(st.regions) } : {}) };
         status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
-        if (st.cat) st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.params));
+        if (st.cat) st.index = G.toolIndex(st.cat, overridesK());
         drawList(); drawEditor();
       } catch (e) { status.set('Nie zapisano potwierdzenia: ' + e.message, 'error'); }
     };

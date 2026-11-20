@@ -2,7 +2,7 @@
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
 import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
-import { toolCatalog, confirmedContoursQuick, invalidateConfirmed } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick, invalidateConfirmed, contourGenOn } from '../catalog.js';
 import * as E from '../logic/contourEditor.js';
 import { fullContour } from '../logic/contourGen.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
@@ -50,7 +50,7 @@ export function mountBuilder(el, ctx) {
     try {
       const [cd, v] = await Promise.all([api('ndContourData', [], { timeoutMs: 180000 }), api('ndContoursV', []).catch(() => ({}))]);
       st.cd = { params: (cd && cd.params) || {}, mounts: (cd && cd.mounts) || {}, v: v || {} };
-      st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params));
+      st.index = G.toolIndex(st.cat, overrides());
       paintFix();
       if (st.view === 'tiles') drawList();
     } catch (e) { st.cdError = e.message; if (st.view === 'tiles') drawList(); }
@@ -67,17 +67,19 @@ export function mountBuilder(el, ctx) {
   }
   /** Narzędzie monolityczne bez rejonów w BE: podział istniejącego konturu wg długości roboczej (K) – ostrze od czubka, reszta oprawka. */
   const monoSplit = (p, svg) => (p && !String(p.BE || '').trim() && E.isMonolithic(p) && E.workLength(p) > 0 ? E.workSplit(svg, E.workLength(p)) : null);
+  /** Kontury dla podglądów: zatwierdzone (BC), a przy włączonym generatorze – V albo wewnętrzny generator zamiast T. */
+  const overrides = () => E.contourOverrides(st.cd.params, st.cd.mounts, { gen: contourGenOn(), v: st.cd.v });
   function autoContour0(t) {
     const k = nc(t), v = st.cd.v[k] || '';
     if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfPathSvg(pts), label: 'z kolumny V (roboczy)' }; }
     const tp = origT(t);
-    if (tp.length >= 3) return { svg: E.halfPathSvg(tp), label: 'z kolumny T' };
     const p = st.cd.params[k], g = p ? G.parseContour(fullContour(p, st.cd.mounts) || '') : [];
-    if (g.length >= 3) return { svg: E.halfPathSvg(g), label: 'z danych PSWT (D:N)' };
-    return null;
+    const fromGen = g.length >= 3 ? { svg: E.halfPathSvg(g), label: 'z wewnętrznego generatora (PSWT D:N)' } : null;
+    const fromT = tp.length >= 3 ? { svg: E.halfPathSvg(tp), label: 'z kolumny T' } : null;
+    return contourGenOn() ? fromGen || fromT : fromT || fromGen;
   }
   /** Kontur z kolumny T (ND_CACHE) – także gdy w podglądach zastępuje go zatwierdzony BC. */
-  function origT(t) { const d = (st.index && st.index.details(t.productCode)) || {}; return G.parseContour((d.confirmedContour ? d.originalAY : d.columnAY) || ''); }
+  function origT(t) { const d = (st.index && st.index.details(t.productCode)) || {}; return G.parseContour(((d.confirmedContour || d.generatedContour) ? d.originalAY : d.columnAY) || ''); }
   /**
    * Naprawa konturów zatwierdzonych bez zmian w wersji 1.50–1.53 (BC = sam obrys zewnętrzny z T / V / danych D:N):
    * zapis BC jeszcze raz – prawa połowa z liniami krawędzi; potwierdzenie (BH) i rejony (BE) bez zmian.
@@ -114,7 +116,7 @@ export function mountBuilder(el, ctx) {
       try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, x.regions]); x.p.BC = x.svg; if (x.regions) x.p.BE = x.regions; ok++; } catch { bad++; }
     }
     status.set(`Poprawiono kontury: ${ok}` + (bad ? `, błędy: ${bad}` : '') + '.', bad ? 'error' : 'neutral');
-    invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params)); paintFix(); drawList();
+    invalidateConfirmed(); st.index = G.toolIndex(st.cat, overrides()); paintFix(); drawList();
   }
   const fixBtn = h('button', { class: 'btn', style: { display: 'none' }, title: 'Zatwierdzone kontury bez linii krawędzi – dopisanie linii krawędzi elementów i części obrotowej', onclick: () => fixConfirmed() });
   const paintFix = () => { const n = canConfirm ? fixableConfirmed().length : 0; fixBtn.style.display = n ? '' : 'none'; fixBtn.textContent = `Popraw zatwierdzone kontury (${n})`; };
@@ -148,7 +150,7 @@ export function mountBuilder(el, ctx) {
   }
   /** Po zmianie potwierdzenia: zatwierdzone kontury (BC zamiast T) w miniaturach i podglądach, przerysowanie kafelków. */
   function after(t, box, toEnd) {
-    invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params));
+    invalidateConfirmed(); st.index = G.toolIndex(st.cat, overrides());
     const tile = box.closest('.tool-tile');
     if (toEnd && tile && st.stopFill && st.stopFill.add) { tile.remove(); st.stopFill.add(t); }   // zatwierdzony – na sam dół, bez przewijania listy
     else if (tile) tile.replaceWith(row(t, { onclick: () => select(t) }));

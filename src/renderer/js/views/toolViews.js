@@ -29,7 +29,7 @@ const LS_LOOK = 'zks.tools.look';
 export function toolLook() {
   let v = {};
   try { v = JSON.parse(localStorage.getItem(LS_LOOK) || '{}') || {}; } catch { v = {}; }
-  return { frame: v.frame !== false, glow: !!v.glow, glowColor: v.glowColor || 'loc' };
+  return { frame: v.frame !== false, glow: !!v.glow, glowColor: v.glowColor || 'loc', gen: !!v.gen };
 }
 export function setToolLook(patch) { try { localStorage.setItem(LS_LOOK, JSON.stringify({ ...toolLook(), ...patch })); } catch { /* bez pamięci */ } }
 /** Styl ramki i poświaty elementu narzędzia wg lokalizacji. */

@@ -93,3 +93,15 @@ test('narzędzia monolityczne: podział istniejącego konturu wg długości robo
   assert.equal(E.workSplit(plain, 100), null);
   assert.deepEqual(E.parseRegionsText('ostrze 29–54; oprawka -21–29'), [{ role: 'ostrze', z1: 29, z2: 54 }, { role: 'oprawka', z1: -21, z2: 29 }]);
 });
+
+test('kontury z wewnętrznego generatora zamiast T (ustawienie), zatwierdzone mają pierwszeństwo', () => {
+  const params = { 'a1': { D: 'wie', E: 'HSS', F: '10', J: '50', K: '30', BH: 'OK', BC: 'M 0 0 L 5 0 L 5 50 L 0 50 Z' }, 'b2': { D: 'wie', E: 'HSS', F: '8', J: '40', K: '20' } };
+  const off = E.contourOverrides(params, {}, { gen: false });
+  assert.deepEqual([...off.keys()], ['a1']); assert.equal(off.generated.size, 0);
+  const on = E.contourOverrides(params, {}, { gen: true, v: {} });
+  assert.ok(on.has('a1') && !on.generated.has('a1'));
+  if (on.has('b2')) assert.ok(on.generated.has('b2'));
+  const v = E.contourOverrides(params, {}, { gen: true, v: { b2: 'M 0 0 L 4 0 L 4 40 L 0 40 Z' } });
+  assert.equal(v.get('b2'), '0_0;40_0;40_400;0_400;-40_400;-40_0');
+  assert.ok(v.regions.has('b2'));   // monolityczne – część robocza wg K
+});

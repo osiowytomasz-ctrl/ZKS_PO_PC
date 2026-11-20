@@ -24,11 +24,16 @@ export function confirmedContours(force = false) {
   if (confirmed && !force) return confirmed;
   confirmed = new Promise((resolve) => {
     let done = false;
-    const fin = (d) => { if (!done) { done = true; resolve(E.confirmedOverrides((d && d.params) || {})); } };
+    const gen = contourGenOn();
+    const vP = gen ? apiCached('ndContoursV', [], () => {}).catch(() => ({})) : Promise.resolve({});
+    const fin = (d) => { if (!done) { done = true; vP.then((v) => resolve(E.contourOverrides((d && d.params) || {}, (d && d.mounts) || {}, { gen, v: v || {} }))); } };
     apiCached('ndContourData', [], (d) => fin(d), { timeoutMs: 180000 }).then(fin, () => fin(null));
   });
   return confirmed;
 }
+
+/** Ustawienia → Narzędziownia: kontury z wewnętrznego generatora zamiast kolumny T (ten komputer). */
+export function contourGenOn() { try { return !!(JSON.parse(localStorage.getItem('zks.tools.look') || '{}') || {}).gen; } catch { return false; } }
 
 /** Po zatwierdzeniu / cofnięciu konturu – następne odczyty pobiorą świeże dane. */
 export function invalidateConfirmed() { confirmed = null; }
