@@ -14,7 +14,7 @@ import * as B from '../logic/builder.js';
 let pendingCode = null;
 /** Otwarcie Konturów z wybranym narzędziem (ikonka narzędzia w ToolBuilderze). */
 export function openContoursFor(code) { pendingCode = code; }
-import { fullContour, bodyContour, mounting } from '../logic/contourGen.js';
+import { bodyContour, mounting } from '../logic/contourGen.js';
 
 /** Rejony ostrze / oprawka jako tekst do arkusza (PSWT, kolumna BE): „ostrze 0–45; oprawka 45–60” (Z w mm). */
 export const regionsText = (list) => (list || []).map((r) => `${r.role} ${String(r.z1).replace('.', ',')}–${String(r.z2).replace('.', ',')}`).join('; ');
@@ -103,8 +103,11 @@ export function mountContours(el, ctx) {
   const genOf = (t) => {
     const p = paramsOf(t);
     if (!p) return null;
-    const pts = G.parseContour(fullContour(p, st.mounts) || '');
-    return pts.length >= 3 && G.bounds(pts).maxX - G.bounds(pts).minX > 0 ? pts : null;
+    const half = E.generatedHalf(p, st.mounts);   // generator – sama prawa połowa; podgląd 2D = odbicie lustrzane
+    if (half.length < 3) return null;
+    const full = E.expandHalf(half);
+    full.halfSvg = E.halfPathSvg(half);
+    return full;
   };
 
   // filtry jak w ToolBuilderze (Lokal, Grupa, Rodzaj, Firma, Φ, L, r/α) – nad listą, na całą szerokość
@@ -140,8 +143,8 @@ export function mountContours(el, ctx) {
     { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.workLength(p) > 0; }
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = bcOf(t) ? [fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)] : vOf(t) ? [fromSvg(vOf(t)), 'kolumna V', vOf(t)]
-      : contourGenOn() ? (g ? [g, 'wewnętrzny generator (D:N)'] : tp.length >= 3 ? [tp, 'kolumna T'] : null)
-        : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
+      : contourGenOn() ? (g ? [g, 'wewnętrzny generator (D:N)', g.halfSvg] : tp.length >= 3 ? [tp, 'kolumna T'] : null)
+        : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N', g.halfSvg] : null;
     setFull(src && src[0], src && src[1], src && src[2]);
     if (!st.rows.length) st.rows = [{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }];
     status.set(src ? `Wczytano kontur (${src[1]}).` : 'Brak konturu – wpisz punkty od początku.', 'neutral');
@@ -160,7 +163,7 @@ export function mountContours(el, ctx) {
       h('button', { class: 'btn small', disabled: !tOf(t), title: 'Pełny kontur z kolumny T (bez zmian)', onclick: () => { setFull(G.parseContour(tOf(t)), 'kolumna T'); st.dirty = true; status.set('Wczytano pełny kontur z kolumny T (bez zmian).', 'neutral'); drawEditor(); } }, 'Z kolumny T'),
       h('button', { class: 'btn small', disabled: !bcOf(t), title: 'Zatwierdzony kontur z arkusza PSWT (kolumna BC)', onclick: () => { setFull(fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)); status.set('Wczytano zatwierdzony kontur z PSWT (kolumna BC).', 'neutral'); drawEditor(); } }, 'Z kolumny BC'),
       h('button', { class: 'btn small', disabled: !vOf(t), onclick: () => { setFull(fromSvg(vOf(t)), 'kolumna V', vOf(t)); status.set('Wczytano pełny kontur z kolumny V.', 'neutral'); drawEditor(); } }, 'Z kolumny V'),
-      h('button', { class: 'btn small', disabled: !genOf(t), title: 'Kontur policzony z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (jak dawna formuła)', onclick: () => { setFull(genOf(t), 'dane D:N'); st.dirty = true; status.set('Wczytano pełny kontur policzony z danych (D:N) – z liniami rzutu bocznego.', 'neutral'); drawEditor(); } }, 'Z danych (D:N)'),
+      h('button', { class: 'btn small', disabled: !genOf(t), title: 'Prawa połowa konturu z wewnętrznego generatora: korpus z kolumn D:N arkusza PSWT dorysowany do mocowania wg karty „kontury”', onclick: () => { { const g = genOf(t); setFull(g, 'dane D:N', g.halfSvg); } st.dirty = true; status.set('Wczytano pełny kontur policzony z danych (D:N) – z liniami rzutu bocznego.', 'neutral'); drawEditor(); } }, 'Z danych (D:N)'),
       h('button', { class: 'btn small', onclick: () => setRows([{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }], 'Wyczyszczono.') }, 'Od nowa'),
       h('button', { class: 'btn small', onclick: () => { st.rows.push({ z: '', r: '', rad: '' }); st.dirty = true; drawEditor(); } }, '+ punkt')));
     editBox.append(moveBox());
@@ -235,7 +238,7 @@ export function mountContours(el, ctx) {
       const m = mounting(st.mounts, p.M, p.C);
       const body = bodyContour(p, (m && m.left) || '');
       sheetInfo.textContent = (st.test ? 'Zmienione do sprawdzenia (arkusz bez zmian). ' : '')
-        + `Mocowanie ${p.M || '—'}: ${m ? (m.synthetic ? 'wyliczone ze wzoru (brak w zakładce „kontury”)' : 'z zakładki „kontury”') : 'brak w zakładce „kontury”'} · `
+        + `Mocowanie ${p.M || '—'}: ${m ? (m.formula ? (m.synthetic ? 'wg wzoru karty „kontury” (rozmiar spoza tabeli – wyliczony)' : 'wg wzoru karty „kontury”') : 'z danych zakładki „kontury”') : 'brak (kod spoza karty „kontury”)'} · `
         + (body ? 'reguła korpusu: jest' : `brak reguły korpusu dla ${p.D || '?'} / ${p.E || '?'}`);
       sheetInfo.style.color = body || m ? '#1b5e20' : '#c62828';
     };
@@ -258,12 +261,12 @@ export function mountContours(el, ctx) {
           e.target.style.background = st.test[k] !== base[k] ? '#fff3e0' : '';
           // nowy kontur zawsze z wpisanych danych (bez przebudowy pól – kursor zostaje w polu)
           const g = genOf(t);
-          if (g) { setFull(g, 'dane D:N'); st.dirty = true; showNote(); drawTable(); }
+          if (g) { setFull(g, 'dane D:N', g.halfSvg); st.dirty = true; showNote(); drawTable(); }
           refresh(); drawPreview();
         } });
       grid.append(h('span', { class: 'muted' }, `${k} · ${label}`), inp);
     }
-    box.append(grid, sheetInfo, h('button', { class: 'btn small', style: { marginTop: '4px' }, onclick: () => { st.test = null; const g = genOf(t); if (g) setFull(g, 'dane D:N'); drawEditor(); } }, 'Przywróć z arkusza'));
+    box.append(grid, sheetInfo, h('button', { class: 'btn small', style: { marginTop: '4px' }, onclick: () => { st.test = null; const g = genOf(t); if (g) setFull(g, 'dane D:N', g.halfSvg); drawEditor(); } }, 'Przywróć z arkusza'));
     refresh();
     return box;
   }
@@ -592,7 +595,7 @@ export function mountContours(el, ctx) {
       let saved = 0;
       try {
         for (let i = 0; i < l.length; i += 300) {
-          const items = Object.fromEntries(l.slice(i, i + 300).map((x) => [x.t.productCode, E.halfPathSvg(x.g)]));
+          const items = Object.fromEntries(l.slice(i, i + 300).map((x) => [x.t.productCode, x.g.halfSvg || E.halfPathSvg(x.g)]));
           const r = await api('ndSaveContoursV', [items], { timeoutMs: 180000 });
           saved += r.saved || 0;
           for (const [c, v] of Object.entries(items)) st.v[normCode(c)] = v;

@@ -95,6 +95,16 @@ export function halfPath(points) {
   if (k < 0) k = out.findIndex((p) => p.x === 0);
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
+/**
+ * Wewnętrzny generator – sama prawa połowa konturu (0,1 mm, od osi do osi, z liniami krawędzi): korpus z PSWT D:N
+ * dorysowany do mocowania z karty „kontury” (kształt i położenie w osi Z jak w karcie). [] – brak danych.
+ */
+export function generatedHalf(p, mounts) {
+  const g = p ? parseContour(fullContour(p, mounts || {}) || '') : [];
+  if (g.length < 3 || Math.max(...g.map((q) => q.x)) <= Math.min(...g.map((q) => q.x))) return [];
+  const h = halfPath(g);
+  return h.length >= 3 ? h : [];
+}
 /** Prawa połowa (z liniami krawędzi) pełnego konturu jako ścieżka SVG w mm – zapis do BC / V. */
 export const halfPathSvg = (points) => contourToSvg(halfPath(points));
 /** Prawa połowa konturu z wierszy (mm) jako zamknięta ścieżka SVG: od osi, punkty z zaokrągleniami, z powrotem do osi. */
@@ -135,7 +145,7 @@ export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
     if (gen && !m.has(k)) {
       const vs = String((v || {})[k0] || (v || {})[k] || '').trim();
       if (vs) pts = expandHalf(svgToContour(vs));
-      if (!pts || pts.length < 3) { const g = parseContour(fullContour(o, mounts || {}) || ''); pts = g.length >= 3 && Math.max(...g.map((p) => p.x)) > Math.min(...g.map((p) => p.x)) ? g : null; }
+      if (!pts || pts.length < 3) { const hh = generatedHalf(o, mounts); pts = hh.length >= 3 ? expandHalf(hh) : null; }
       if (pts && pts.length >= 3) { m.set(k, str(pts)); m.generated.add(k); }
     }
     if (!m.regions.has(k) && isMonolithic(o) && workLength(o) > 0) {   // część robocza wg L roboczej (kolor w 3D)

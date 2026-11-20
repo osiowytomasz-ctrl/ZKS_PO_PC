@@ -74,8 +74,8 @@ export function mountBuilder(el, ctx) {
     const k = nc(t), v = st.cd.v[k] || '';
     if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfPathSvg(pts), label: 'z kolumny V (roboczy)' }; }
     const tp = origT(t);
-    const p = st.cd.params[k], g = p ? G.parseContour(fullContour(p, st.cd.mounts) || '') : [];
-    const fromGen = g.length >= 3 ? { svg: E.halfPathSvg(g), label: 'z wewnętrznego generatora (PSWT D:N)' } : null;
+    const g = E.generatedHalf(st.cd.params[k], st.cd.mounts);   // generator – sama prawa połowa
+    const fromGen = g.length >= 3 ? { svg: E.halfPathSvg(g), label: 'z wewnętrznego generatora (PSWT D:N + karta „kontury”)' } : null;
     const fromT = tp.length >= 3 ? { svg: E.halfPathSvg(tp), label: 'z kolumny T' } : null;
     return contourGenOn() ? fromGen || fromT : fromT || fromGen;
   }

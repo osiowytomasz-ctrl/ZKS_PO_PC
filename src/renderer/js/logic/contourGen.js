@@ -159,40 +159,107 @@ export function bodyContour(p, av = '') {
 export function mirrorLeft(left) {
   return txt(left).split(';').filter(Boolean).reverse().map((p) => { const [x, y] = p.split('_'); return f(-nv(x)) + '_' + y; }).join(';');
 }
+
+// ── Mocowania wg karty „kontury” (wzory kolumn AJ:AW arkusza): lewa część jako punkty x1…x7 (0,1 mm), Z jak w karcie ──
+/** ZAOKR(x; 1) – jedno miejsce po przecinku, połówki od zera. */
+const round1 = (x) => (Math.sign(x) * Math.round(Math.abs(x) * 10)) / 10;
+/** FZS / KS: [BM, BN, BO, BP] z karty. */
+const FZS_KS = { FZS_031: [50, 31, 34, 69], FZS_048: [72, 48, 45, 90], FZS_060: [95, 60, 68, 138], KS_003: [50, 31, 34, 69], KS_005: [95, 60, 75, 138], "KS_005'": [95, 60, 62, 125] };
+/** ER: [AL (x2, puste dla małych), AM (głębokość), AQ = AS − …, AR·2, AT·2 (ujemne), AU]. */
+const ER = { 8: [null, -135, 12, 65, 64.5, -15], 11: [null, -180, 20, 95, 115, -25], 16: [null, -275, 27, 138, 170, -40], 20: [-75, -315, 28, 174, 210, -48],
+  25: [-95, -340, 31, 220, 260, -50], 32: [-125, -400, 36, 292, 330, -55], 40: [-155, -460, 41, 362, 410, -70], 50: [-195, -600, 55, 460, 520, -85] };
+/** Stożek Morse'a: [BU, BY, BZ, CB, CG]; kąt CH = 1,5°. */
+const MK = [[3, 9.045, 56.5, 10.5, 3.9], [3.5, 12.065, 62, 13.5, 5.2], [5, 17.78, 75, 16, 6.3], [5, 23.825, 94, 20, 7.9], [6.5, 31.267, 117.5, 24, 11.9],
+  [6.5, 44.399, 149.5, 29, 15.9], [8, 63.348, 210, 40, 19], [8, 83.058, 285.75, 34.9, 19]];
+/** Weldon: głębokość osadzenia BL (mm) wg średnicy. */
+const WEL = { 10: 20, 16: 24, 19: 22, 20: 30, 25: 40, 28: 45, 32: 50, 40: 60, 50: 75 };
+/** Termo (T__ / SP): BS z karty. */
+const TS = { T__006: 6.8, T__008: 8.8, T__010: 10.8, SP_15: 12.8 };
+const KAR = { 19: -220, 32: -400 };
+const ISO = { 40: [827, 26, 54, 83], 50: [1012.5, 32, 70, 97] };
+
 /**
- * Mocowania ABS i WEL liczone, gdy brak ich w zakładce „kontury” (wzory tej zakładki): ABSddd – z samej średnicy;
- * WELddd – głębokość osadzenia interpolowana z rozmiarów WEL, które są w zakładce.
+ * Lewa część mocowania wg wzorów karty „kontury” (kod z kolumny M) – lista punktów [x, y] w 0,1 mm albo null (kod spoza karty
+ * / bez wymiarów). [synthetic] – rozmiar spoza tabel karty (Weldon interpolowany, termo T__ z reguły BS = Ø + 0,8).
  */
-export function synthMount(mounts, M) {
-  const code = txt(M).toUpperCase(), m = /^(ABS|WEL)(\d{3})$/.exec(code);
-  if (!m) return null;
-  const d = Number(m[2]);
-  if (!d) return null;
-  let left;
-  if (m[1] === 'ABS') left = `0_${f(-d * 5)};${f(d * 2.5)}_${f(-d * 5)};${f(d * 2.5)}_0;${f(-d * 5)}_0`;
-  else {
-    const known = Object.entries(mounts).map(([k, v]) => [/^WEL(\d{3})$/.exec(k.toUpperCase()), v]).filter(([x, v]) => x && Number(x[1]) && minY(v.left) < 0)
-      .map(([x, v]) => [Number(x[1]), -minY(v.left)]).sort((a, b) => a[0] - b[0]);
-    if (!known.length) return null;
-    let depth;
-    if (known.length === 1) depth = (known[0][1] * d) / known[0][0];
-    else {
-      let i = known.findIndex(([kd]) => kd >= d);
-      if (i <= 0) i = i === 0 ? 1 : known.length - 1;
-      const [d1, h1] = known[i - 1], [d2, h2] = known[i];
-      depth = h1 + ((h2 - h1) * (d - d1)) / (d2 - d1);
-    }
-    depth = Math.round(depth);
-    left = `0_${f(-depth)};${f(-d * 5)}_${f(-depth)};${f(-d * 5)}_0`;
+export function formulaMountPoints(code) {
+  const c = txt(code).toUpperCase(), d3 = Number(c.substr(3, 3)) || 0;
+  let m;
+  if ((m = /^ABS(\d{3})$/.exec(c)) && d3) { const d = d3; return { pts: [[0, -5 * d], [2.5 * d, -5 * d], [2.5 * d, 0], [-5 * d, 0]] }; }
+  if (c === 'CAP080') return { pts: [[0, -800], [-250, -800], [-350, 0], [-400, 0], [0, 0]] };
+  if ((m = /^D(\d\d,\d)□(\d\d,\d)_(\d{3})$/.exec(c))) {
+    const a = nv(m[1]), s = nv(m[2]), L = Number(m[3]), y = -10 * L + 10 * s;
+    if (!a || !L) return null;
+    return { pts: [[0, -10 * L], [5 * s, -10 * L], [5 * s, y], [-5 * a, y], [-5 * a, 0]] };
   }
-  return { left, right: mirrorLeft(left), synthetic: true };
+  if ((m = /^ER_(\d{3})$/.exec(c)) && ER[Number(m[1])]) {
+    const [x2, y2, dq, r2, t2, u] = ER[Number(m[1])], t = -t2 / 2, q = u - dq;
+    return { pts: [[0, y2], ...(x2 == null ? [] : [[x2, y2]]), [t, q], [r2 / 2, q], [r2 / 2, u], [t, u], [t - u, 0]] };
+  }
+  if (FZS_KS[c]) {
+    const [a, b, cc, e] = FZS_KS[c], y1 = -10 * e + 10 * cc, y5 = 10 * cc - b;
+    return { pts: [[0, y1], [5 * b, y1], [5 * b, 0], [-5 * a, 0], [-5 * a, y5], [2.5 * a, y5], [2.5 * a, 10 * cc]] };
+  }
+  if ((m = /^ISO(\d{3})$/.exec(c)) && ISO[Number(m[1])]) {
+    const [k, a, b, e] = ISO[Number(m[1])];
+    return { pts: [[0, -k], [5 * a, -k], [5 * b, 0], [5 * b, 32], [5 * e, 32], [5 * e, 191], [0, 191]] };
+  }
+  if ((m = /^KAR(\d{3})$/.exec(c)) && KAR[Number(m[1])]) { const d = Number(m[1]), h = KAR[d]; return { pts: [[0, h], [-5 * d, h], [-5 * d, 0]] }; }
+  if (c === 'FREM16') return { pts: [[0, -180], [-80, -180], [-80, -100], [-70, -100], [-70, -60], [-80, -60], [-80, 0]] };
+  if ((m = /^MHD(\d{3})$/.exec(c)) && d3) {
+    const d = d3;
+    return { pts: [[0, -7.5 * d], [-2.5 * d, -7.5 * d], [-2.5 * d, -2.5 * d], [2.5 * d, -2.5 * d], [5 * d, 0], [-5 * d, 0]] };
+  }
+  if ((m = /^MK_(\d{3})$/.exec(c)) && MK[Number(m[1])]) {
+    const [bu, by, bz, cb, cg] = MK[Number(m[1])], bv = round1(Math.tan((1.5 * Math.PI) / 180) * (bz - cb));
+    const bm = -bz + bu, bn = -cg / 2, bq = bm + cb + bu, br = -by / 2 + bv, bt = -by / 2, r = (v) => round1(v) * 10;
+    return { pts: [[0, r(bm)], [-r(bn), r(bm)], [-r(bn), r(bq)], [r(br), r(bq)], [r(bt), r(bu)]] };
+  }
+  if (TS[c] || /^T__\d{3}$/.test(c)) {
+    const bs = TS[c] || (d3 ? d3 + 0.8 : 0);
+    if (!bs) return null;
+    return { pts: [[4.5 * bs, -10 * bs], [-4.5 * bs, -10 * bs], [-5 * bs, 0], [5 * bs, 0]], synthetic: !TS[c] };
+  }
+  if ((m = /^WEL(\d{3})$/.exec(c)) && d3) {
+    const d = d3;
+    let bl = WEL[d], synthetic = false;
+    if (bl == null) { // rozmiar spoza karty – głębokość interpolowana między sąsiednimi rozmiarami
+      const k = Object.keys(WEL).map(Number).sort((a, b) => a - b);
+      let i = k.findIndex((x) => x >= d);
+      if (i <= 0) i = i === 0 ? 1 : k.length - 1;
+      const [d1, d2] = [k[i - 1], k[i]];
+      bl = Math.round(WEL[d1] + ((WEL[d2] - WEL[d1]) * (d - d1)) / (d2 - d1));
+      synthetic = true;
+    }
+    return { pts: [[0, -10 * bl], [-5 * d, -10 * bl], [-5 * d, 0]], synthetic };
+  }
+  return null;
 }
-/** Mocowanie z zakładki „kontury” (kod z kolumny M; dla narzędzi z „F0815” w opisie – wariant z apostrofem); brak – ABS / WEL ze wzoru. */
+/** Mocowanie wg karty: { left, right, formula: true, synthetic } (format kolumn B / C karty) albo null. */
+export function formulaMount(code) {
+  const r = formulaMountPoints(code);
+  if (!r) return null;
+  const left = r.pts.map(([x, y]) => P(x, y)).join(';');
+  return { left, right: mirrorLeft(left), formula: true, synthetic: !!r.synthetic };
+}
+/** Zgodność wstecz: mocowanie ABS / WEL wyliczone ze wzoru karty (dawniej tylko, gdy brak go w zakładce). */
+export function synthMount(mounts, M) {
+  const c = txt(M).toUpperCase();
+  if (!/^(ABS|WEL)\d{3}$/.test(c)) return null;
+  const m = formulaMount(c);
+  return m ? { left: m.left, right: m.right, synthetic: true } : null;
+}
+/**
+ * Mocowanie narzędzia (kod z kolumny M; z „F0815” w opisie – wariant z apostrofem): najpierw wzory karty „kontury”
+ * (kształt i położenie w osi Z jak w karcie), dla kodów spoza wzorów – dane z zakładki „kontury”.
+ */
 export function mounting(mounts, M, opis = '') {
   const key = txt(M) + (txt(opis).includes('F0815') ? "'" : '');
-  const found = mounts[key] || mounts[key.toUpperCase()];
+  const fm = formulaMount(key);
+  if (fm) return fm;
+  const found = (mounts || {})[key] || (mounts || {})[key.toUpperCase()];
   if (found && (found.left || found.right)) return found;
-  return synthMount(mounts, M) || found || null;
+  return key !== txt(M) ? formulaMount(M) : null;   // wariant F0815 spoza karty – zwykłe mocowanie
 }
 
 /** Pełny kontur (dawne PSWT!AY = AV + (AW albo „;”) + AX); null, gdy brak i mocowania, i reguły korpusu. */
