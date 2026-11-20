@@ -55,7 +55,7 @@ export function mountCompetence(el, ctx) {
     for (const g of gPeople()) {
       if (!g || g.sep) continue;
       const k = kp[g.id] || {}; seen.add(g.id);
-      out.push({ ...k, id: g.id, lp: ++lp, name: g.name, nr: g.nr || '', place: g.place || '', dept: deptOf(g.nr, k), inGrafik: true, g });
+      out.push({ ...k, id: g.id, lp: ++lp, name: g.name, nr: g.nr || '', place: g.place || '', dept: deptOf(g.nr, k), inGrafik: true, off: !!g.off, g });
     }
     for (const [id, k] of Object.entries(kp)) if (!seen.has(id)) out.push({ ...k, id, lp: ++lp, name: k.name || id, nr: (k.dept || '') + (k.nr || ''), place: '', dept: k.dept || '', inGrafik: false });
     return (peopleCache = out);
@@ -164,6 +164,7 @@ export function mountCompetence(el, ctx) {
         if ((c.key === 'name' || c.key === 'place') && stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 };
         else if (c.key === 'name') style = { ...style, fontWeight: 600, ...(p.inGrafik ? {} : { fontStyle: 'italic', color: '#888' }) };
         if (c.key === 'pts') style = { ...style, fontWeight: 700, background: '#e2efda' };
+        if (c.lpCol && p.off) style = { ...style, background: '#d50000', color: '#fff', fontWeight: 700, cursor: 'pointer' };   // wyłączony z Grafiku
         if (c.skill) { const bg = K.levelColor(raw(p, c)); if (bg) style = { ...style, background: bg }; }
         if (c.perm && c.field === 'valid') {
           const pv = K.permValid(K.permOf(p, c.perm.key), c.perm), lv = K.validLevel(pv.iso, t, !!c.perm.med), ls = K.LEVEL_STYLE[lv];
@@ -205,6 +206,8 @@ export function mountCompetence(el, ctx) {
   let dragging = false;
   body.addEventListener('mousedown', (e) => { if (st.editing) return; const p = posOf(e); if (!p || e.button !== 0) return; e.preventDefault(); body.focus(); setSel(p.r, p.c, e.shiftKey); dragging = true; });
   body.addEventListener('mousemove', (e) => { if (!dragging || !(e.buttons & 1)) { dragging = false; return; } const p = posOf(e); if (p && st.sel && (p.r !== st.sel.r1 || p.c !== st.sel.c1)) { st.sel = { ...st.sel, r1: p.r, c1: p.c }; paintSel(); } });
+  // kliknięcie w Lp: wyłączenie / włączenie pracownika w Grafiku (z pytaniem); nowy numer – wpisanie w komórkę
+  body.addEventListener('click', (e) => { const p = posOf(e); if (!p || !cols[p.c] || !cols[p.c].lpCol || !grid[p.r] || !canWrite || !grid[p.r].inGrafik) return; if (e.detail === 1) setTimeout(() => { if (!st.editing) toggleOff(grid[p.r]); }, 260); });
   body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name' || (cols[p.c].ro && !cols[p.c].lpCol)) personCard(grid[p.r]); else beginEdit(null); });
   body.addEventListener('contextmenu', (e) => { const p = posOf(e); if (!p) return; e.preventDefault(); setSel(p.r, p.c); contextMenu(e, grid[p.r]); });
   body.addEventListener('keydown', (e) => {
@@ -351,6 +354,7 @@ export function mountCompetence(el, ctx) {
   function contextMenu(e, p) {
     document.querySelectorAll('.gr-menu').forEach((m) => m.remove());
     const items = [['Karta pracownika…', () => personCard(p)]];
+    if (canWrite && p.inGrafik) items.push([p.off ? 'Włącz do Grafiku…' : 'Wyłącz z Grafiku i obliczeń…', () => toggleOff(p)]);
     if (canWrite) { items.push(['Zmień stanowisko…', () => beginEditPlace(p)]); if (!p.inGrafik) items.push(['Dodaj do Grafiku…', () => addPerson(p)]); items.push(['Dodaj pracownika…', () => addPerson()], ['Usuń pracownika…', () => removePerson(p)], ['Kolumny umiejętności i uprawnień…', defsDialog]); }
     const menu = h('div', { class: 'gr-menu', style: { position: 'fixed', left: e.clientX + 'px', top: e.clientY + 'px', zIndex: 9999, background: '#fff', border: '1px solid #888', boxShadow: '0 3px 10px rgba(0,0,0,.3)', minWidth: '220px' } },
       ...items.map(([label, fn]) => h('div', { style: { padding: '6px 12px', cursor: 'pointer' }, onmouseenter: (ev) => { ev.target.style.background = '#e8f0fe'; }, onmouseleave: (ev) => { ev.target.style.background = ''; }, onmousedown: (ev) => { ev.preventDefault(); menu.remove(); fn(); } }, label)));
@@ -451,6 +455,20 @@ export function mountCompetence(el, ctx) {
     list.splice(j, 0, me);
     try { await saveMeta({ people: list }); toast(`${p.name}: Lp ${from} → ${to}`); }
     catch (e) { toast('Nie zapisano kolejności: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+  }
+  /**
+   * Wyłączenie / włączenie pracownika w Grafiku (dla wszystkich – gr_meta/main people[].off): wyłączony znika z Grafiku i z obliczeń
+   * (podsumowania, obsada stanowisk w Harmonogramie, podpowiedzi Planu); dane zostają. Pytanie w obie strony.
+   */
+  async function toggleOff(p) {
+    if (!canWrite || !p.inGrafik) return;
+    const off = !p.off;
+    const ok = await confirmBox(off ? `Wyłączyć ${p.name}?` : `Włączyć ${p.name}?`, off
+      ? `${p.name} zniknie z Grafiku u wszystkich (PC i telefony) i z obliczeń: podsumowania urlopów, obsada stanowisk w Harmonogramie, podpowiedzi Planu.\n\nDane (wpisy w Grafiku, urlopy, kompetencje) zostają – można włączyć z powrotem.`
+      : `${p.name} wróci do Grafiku u wszystkich (PC i telefony) i do obliczeń: podsumowania urlopów, obsada stanowisk w Harmonogramie, podpowiedzi Planu.`, off ? 'Wyłącz' : 'Włącz');
+    if (!ok) return;
+    try { await saveMeta({ people: gPeople().map((g) => (g.id === p.id ? { ...g, off } : g)) }); toast(`${p.name}: ${off ? 'wyłączony z Grafiku i obliczeń' : 'włączony do Grafiku'}`); }
+    catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
   }
   /** Usuwanie pracownika: cztery kolejne potwierdzenia z ostrzeżeniami (na końcu trzeba wpisać nazwisko). */
   async function removePerson(p) {

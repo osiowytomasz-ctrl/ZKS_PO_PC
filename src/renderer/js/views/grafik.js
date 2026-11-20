@@ -99,7 +99,9 @@ export function mountGrafik(el, ctx) {
   const preset = (label, fn, title) => h('button', { class: 'btn small', title, onclick: () => { const [a, b] = fn(today()); setRange(a, b); } }, label);
 
   // ---------- model ekranu ----------
-  const people = () => ((st.meta && st.meta.people) || []);
+  // cała lista (zapisy) i widoczni w Grafiku – bez wyłączonych w Kompetencjach (people[].off)
+  const allPeople = () => ((st.meta && st.meta.people) || []);
+  const people = () => allPeople().filter((p) => !p.off);
   // święta: wspólna lista programu (Ustawienia, config/main) + daty z karty i (import)
   const holidays = () => new Set([...((st.cfg && st.cfg.holidays) || []).map((x) => (typeof x === 'string' ? x : x && x.date)), ...((st.meta && st.meta.holidays) || [])]);
   const stations = () => stationList(st.cfg);
@@ -355,7 +357,7 @@ export function mountGrafik(el, ctx) {
     if (!Number.isFinite(n)) { toast('Wpisz liczbę dni urlopu'); return; }
     const y = year(), cur = (p.ut || {})[y] || {};
     if ((Number(cur[field]) || 0) === n) return;
-    const list = people().map((x) => x.id !== p.id ? x : { ...x, ut: { ...(x.ut || {}), [y]: { prev: 0, cur: 0, plan: [], ...cur, [field]: n } } });
+    const list = allPeople().map((x) => x.id !== p.id ? x : { ...x, ut: { ...(x.ut || {}), [y]: { prev: 0, cur: 0, plan: [], ...cur, [field]: n } } });
     try { await saveMeta({ people: list }); toast(`${p.name}: UT ${field === 'prev' ? Number(y) - 1 : y} = ${n}`); } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
   }
   function clearSel() { const items = selCells().filter((x) => code(x.p.id, x.iso) !== '').map((x) => ({ ...x, code: '' })); if (items.length) apply(items, `Wyczyszczenie: ${items.length}`); }
@@ -464,7 +466,7 @@ export function mountGrafik(el, ctx) {
       h('div', { style: { marginTop: '6px' } }, `Plan urlopu ${y}: `, ...plan.flatMap((x, i) => [h('span', { class: 'muted' }, ' ' + (i + 1) + ':'), x])),
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'),
         h('button', { class: 'btn primary', onclick: async () => {
-          const list = people().map((x) => x.id !== p.id ? x : { ...x, place: place.value.trim(), suffix: suffix.value.trim(),
+          const list = allPeople().map((x) => x.id !== p.id ? x : { ...x, place: place.value.trim(), suffix: suffix.value.trim(),
             ut: { ...(x.ut || {}), [y]: { prev: Number(prev.value) || 0, cur: Number(cur.value) || 0, plan: plan.map((q) => Number(q.value) || 0) } } });
           try { await saveMeta({ people: list }); m.close(); toast('Zapisano dane pracownika'); } catch (e) { toast('Nie zapisano: ' + (e.message || e), true); }
         } }, 'Zapisz'))));

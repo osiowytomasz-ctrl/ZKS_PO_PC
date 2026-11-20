@@ -175,6 +175,7 @@ export function grafNormDays(people, codesByPerson, isos) {
   for (const iso of isos) {
     const slots = {};
     for (const p of people) {
+      if (p.off) continue;   // wyłączeni w Kompetencjach nie obsadzają stanowisk
       if (p.sep || !p.place || p.place in slots) continue;
       const c = (codesByPerson[p.id] || {})[iso];
       slots[p.place] = c == null ? '' : String(c);

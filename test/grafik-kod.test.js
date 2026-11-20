@@ -42,3 +42,14 @@ test('Użytkownicy i klucze: adres e-mail i tekst do przekazania', async () => {
   assert.ok(validEmail(' Jan.K@firma.pl ')); assert.ok(!validEmail('jan@firma')); assert.ok(!validEmail('a b@c.pl'));
   assert.equal(shareText(' https://x/exec ', ' K1 '), 'Adres API: https://x/exec\nKlucz: K1');
 });
+
+test('pracownik wyłączony w Kompetencjach (off) – poza obsadą dnia i graf_norm', async () => {
+  const HD = await import('../src/renderer/js/logic/harmDay.js');
+  const GF = await import('../src/renderer/js/logic/grafikFb.js');
+  const people = [{ id: 'a', name: 'Anna', place: '1Si1' }, { id: 'b', name: 'Bartek', place: '1Si2', off: true }];
+  const codes = { a: { '2026-11-20': 'a8' }, b: { '2026-11-20': 'b8' } };
+  const day = HD.firebaseDayPeople(people, codes, '2026-11-20', [], GF.cellStyle, () => null);
+  assert.deepEqual(day.map((x) => x.name), ['Anna']);
+  const norm = GF.grafNormDays(people, codes, ['2026-11-20']);
+  assert.ok(!JSON.stringify(norm).includes('b8'));
+});

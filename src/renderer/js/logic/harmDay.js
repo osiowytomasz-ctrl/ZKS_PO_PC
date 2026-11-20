@@ -145,7 +145,7 @@ export function dayTasks(rows, result, start, end) {
 export function firebaseDayPeople(people, codes, iso, stations, cellStyle, placeStation) {
   const out = [];
   for (const p of people || []) {
-    if (!p || p.sep || !String(p.name || '').trim()) continue;
+    if (!p || p.sep || p.off || !String(p.name || '').trim()) continue;   // wyłączeni w Kompetencjach – poza obsadą
     const text = String(((codes || {})[p.id] || {})[iso] ?? '').trim();
     if (!text) continue;
     const cs = cellStyle(text, iso, {}), stn = placeStation(p.place, stations);
