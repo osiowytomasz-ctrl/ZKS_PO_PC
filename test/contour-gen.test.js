@@ -35,7 +35,7 @@ test('frez palcowy w Weldonie: 0,98·F, czoło J−1, przesunięcie o głęboko�
   const p = { D: 'fre', E: 'pal', F: '16', I: '16', J: '85', K: '31', M: 'WEL016' };
   assert.equal(C.bodyContour(p, mounts.WEL016.left), ';0_0;-80_0;-80_300;-78.4_300;-78.4_600;78.4_600;78.4_300;80_300;80_0;0_0;');
   const half = halfFromContour(parseContour(C.fullContour(p, mounts)));
-  assert.deepEqual(half.map((r) => [r.z, r.r]), [['-24', '8'], ['30', '8'], ['30', '7.84'], ['60', '7.84']]);
+  assert.deepEqual(half.map((r) => [r.z, r.r]), [['-48', '8'], ['6', '8'], ['6', '7.84'], ['36', '7.84']]);   // chwyt Ø16 ma l = 48 mm
 });
 
 test('brak reguły i brak mocowania → null; wariant F0815 z apostrofem', () => {
@@ -47,11 +47,12 @@ test('brak reguły i brak mocowania → null; wariant F0815 z apostrofem', () =>
 test('mocowania wg wzorów karty „kontury” (Z jak w karcie); kody spoza wzorów – z danych zakładki', () => {
   const lib = { WEL010: { left: 'x', right: 'y' }, ARB050: { left: '0_-500;-250_-500;-250_0', right: '250_0;250_-500;0_-500' } };
   assert.deepEqual(C.synthMount(lib, 'ABS040'), { left: '0_-200;100_-200;100_0;-200_0', right: '200_0;-100_0;-100_-200;0_-200', synthetic: true });
-  assert.equal(C.mounting(lib, 'WEL016').left, '0_-240;-80_-240;-80_0');   // głębokość 24 mm z karty
-  assert.equal(C.mounting(lib, 'WEL010').left, '0_-200;-50_-200;-50_0');   // wzór karty przed danymi zakładki
+  assert.equal(C.mounting(lib, 'WEL016').left, '0_-480;-80_-480;-80_0');   // długość chwytu Weldon Ø16: 48 mm
+  assert.equal(C.mounting(lib, 'WEL010').left, '0_-400;-50_-400;-50_0');   // wzór (l = 40 mm) przed danymi zakładki
   assert.equal(C.mounting(lib, 'ARB050').left, lib.ARB050.left);           // bez wzoru – dane zakładki
   assert.equal(C.mounting(lib, 'XYZ'), null);
-  const w12 = C.formulaMount('WEL012'); assert.equal(w12.left, '0_-210;-60_-210;-60_0'); assert.equal(w12.synthetic, true);   // 20 + (24−20)·2/6 ≈ 21
+  const w12 = C.formulaMount('WEL012'); assert.equal(w12.left, '0_-450;-60_-450;-60_0'); assert.equal(w12.synthetic, false);   // l = 45 mm z tabeli
+  const w19 = C.formulaMount('WEL019'); assert.equal(w19.left, '0_-490;-95_-490;-95_0'); assert.equal(w19.synthetic, true);   // spoza tabeli: 48 + (50−48)/2 = 49
   assert.equal(C.mirrorLeft('0_-260;-80_-260;-80_0'), '80_0;80_-260;0_-260');
   assert.equal(C.formulaMount('ER_008').left, '0_-135;-32.25_-27;32.5_-27;32.5_-15;-32.25_-15;-17.25_0');
   assert.equal(C.formulaMount('MK_001').left, '0_-585;26_-585;26_-415;-47_-415;-60_35');
@@ -63,9 +64,16 @@ test('mocowania wg wzorów karty „kontury” (Z jak w karcie); kody spoza wzor
   assert.equal(C.formulaMount("KS_005'").left, '0_-630;300_-630;300_0;-475_0;-475_560;237.5_560;237.5_620');
   assert.equal(C.mounting({}, 'KS_005', 'F0815').left, C.formulaMount("KS_005'").left);
   assert.equal(C.formulaMount('FRE016'), null); assert.equal(C.formulaMount('D00,0□00,0_000'), null);
-  // wiertło w Weldonie spoza karty (wariant ER) rysuje własny chwyt – wyliczonego mocowania nie dokładamy
-  const drill = { D: 'wie', E: 'WĘG', F: '12', J: '102', K: '55', M: 'WEL012' };
-  assert.ok(C.fullContour(drill, lib).startsWith('0_-412.5;'));
+  // wiertło w Weldonie (wariant ER) rysuje własny chwyt – mocowania nie dokładamy (także dla rozmiarów z tabeli)
+  for (const M of ['WEL012', 'WEL016']) assert.ok(C.fullContour({ D: 'wie', E: 'WĘG', F: '12', J: '102', K: '55', M }, lib).startsWith('0_-412.5;'));
+});
+
+test('Weldon: długość chwytu l wg tabeli wymiarów', () => {
+  const l = { 6: 36, 8: 36, 10: 40, 12: 45, 14: 45, 16: 48, 18: 48, 20: 50, 25: 56, 32: 60 };
+  for (const [d, len] of Object.entries(l)) {
+    const m = C.formulaMount('WEL' + String(d).padStart(3, '0'));
+    assert.equal(C.minY(m.left), -len * 10, 'Ø' + d); assert.equal(m.synthetic, false);
+  }
 });
 
 test('generator – sama prawa połowa (od osi do osi, x ≥ 0)', () => {

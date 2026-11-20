@@ -171,8 +171,8 @@ const ER = { 8: [null, -135, 12, 65, 64.5, -15], 11: [null, -180, 20, 95, 115, -
 /** Stożek Morse'a: [BU, BY, BZ, CB, CG]; kąt CH = 1,5°. */
 const MK = [[3, 9.045, 56.5, 10.5, 3.9], [3.5, 12.065, 62, 13.5, 5.2], [5, 17.78, 75, 16, 6.3], [5, 23.825, 94, 20, 7.9], [6.5, 31.267, 117.5, 24, 11.9],
   [6.5, 44.399, 149.5, 29, 15.9], [8, 63.348, 210, 40, 19], [8, 83.058, 285.75, 34.9, 19]];
-/** Weldon: głębokość osadzenia BL (mm) wg średnicy. */
-const WEL = { 10: 20, 16: 24, 19: 22, 20: 30, 25: 40, 28: 45, 32: 50, 40: 60, 50: 75 };
+/** Weldon: długość chwytu l (mm) wg średnicy chwytu d = głębokość osadzenia (tabela wymiarów chwytu Weldon). Rozmiary spoza tabeli – interpolacja. */
+const WEL = { 6: 36, 8: 36, 10: 40, 12: 45, 14: 45, 16: 48, 18: 48, 20: 50, 25: 56, 32: 60 };
 /** Termo (T__ / SP): BS z karty. */
 const TS = { T__006: 6.8, T__008: 8.8, T__010: 10.8, SP_15: 12.8 };
 const KAR = { 19: -220, 32: -400 };
@@ -267,7 +267,7 @@ export function fullContour(p, mounts) {
   let m = mounting(mounts, p.M, p.C) || { left: '', right: '' };
   let body = bodyContour(p, m.left);
   // reguły bez „;” na początku (wariant ER, frezy HSS/WĘG) rysują własny chwyt poniżej zera – wyliczonego mocowania nie dokładamy
-  if (m.synthetic && body && !body.startsWith(';')) { m = { left: '', right: '' }; body = bodyContour(p, ''); }
+  if (body && !body.startsWith(';')) { m = { left: '', right: '' }; body = bodyContour(p, ''); }
   if (!body && !m.left && !m.right) return null;
   return m.left + (body || ';') + m.right;
 }
