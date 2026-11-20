@@ -2,7 +2,7 @@
 // kod na pasku zużycia z kolorem lokalizacji, L zespołu i komis _ KTK _ operacja, opis i parametry, przyciski Części / 2D / 3D,
 // miniatura całego zespołu (kliknięcie – widok 2D) i elementy zespołu. Tylko odczyt.
 import { h, clear, apiCached } from '../ui.js';
-import { toolCatalog } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
 import { wearCodeCell, toolCard, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine } from './toolViews.js';
@@ -28,7 +28,7 @@ export function mountBn(el, ctx) {
     st.loading = false; refreshBtn.disabled = false;
   }
   async function loadIndex() {
-    try { st.index = G.toolIndex(await toolCatalog()); st.indexError = null; } catch (e) { st.indexError = e.message; }
+    try { st.index = G.toolIndex(await toolCatalog(), await confirmedContoursQuick()); st.indexError = null; } catch (e) { st.indexError = e.message; }
     draw();
   }
 

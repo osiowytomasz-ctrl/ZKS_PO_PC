@@ -1,5 +1,6 @@
 // Katalog narzędzi (getStToolOptions): pamięć w procesie + pamięć podręczna na dysku, wspólny dla ToolTrack, ToolBuildera i Assem.Tool.
 import { apiCached } from './ui.js';
+import * as E from './logic/contourEditor.js';
 let memory = null;
 let pending = null;
 
@@ -15,6 +16,22 @@ export function toolCatalog(force = false) {
   }).finally(() => { pending = null; });
   return pending;
 }
+
+/** Zatwierdzone kontury narzędzi (PSWT: BH potwierdzone, BC – kontur) jako Map kod → kontur x_y; zastępują kontur z kolumny T
+ *  w ToolBuilderze, BN i Częściach (toolIndex). Brak dostępu / funkcji na serwerze → pusta mapa (zostaje kolumna T). */
+let confirmed = null;
+export function confirmedContours(force = false) {
+  if (confirmed && !force) return confirmed;
+  confirmed = new Promise((resolve) => {
+    let done = false;
+    const fin = (d) => { if (!done) { done = true; resolve(E.confirmedOverrides((d && d.params) || {})); } };
+    apiCached('ndContourData', [], (d) => fin(d), { timeoutMs: 180000 }).then(fin, () => fin(null));
+  });
+  return confirmed;
+}
+
+/** Jak confirmedContours, ale czeka najwyżej [ms] – moduł otwiera się od razu (przy następnym otwarciu dane są już w pamięci). */
+export const confirmedContoursQuick = (ms = 4000) => Promise.race([confirmedContours(), new Promise((r) => setTimeout(() => r(null), ms))]);
 
 /** Wczytanie w tle zaraz po starcie, żeby moduły otwierały się od razu. */
 export function preload() { toolCatalog().catch(() => {}); }

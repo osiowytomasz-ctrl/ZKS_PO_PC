@@ -2,7 +2,7 @@
 // kod, stan / zapas / dostępne (kolor braku jak w arkuszu), rysunek płytki i narzędzia, w których jest używana.
 // Kliknięcie kafelka – duży rysunek, wymiary, kontur źródłowy (do skopiowania) i lista narzędzi.
 import { h, clear, toast, modal } from '../ui.js';
-import { toolCatalog } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as G from '../logic/toolGeometry.js';
 import { parseSheetColor } from '../logic/common.js';
 import { naturalCompare } from '../logic/common.js';
@@ -34,7 +34,7 @@ export function mountParts(el, ctx) {
     clear(grid).append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie części…'));
     try {
       const cat = await toolCatalog(force);
-      st.index = G.toolIndex(cat);
+      st.index = G.toolIndex(cat, await confirmedContoursQuick());
       st.parts = st.index.cuttingParts().map((code) => {
         const t = st.index.tool(code);
         return { code, contour: st.index.insertContour(code), tool: t, uses: st.index.usages(code) };

@@ -95,9 +95,26 @@ export function view3dGl(mesh, inserts, fallback) {
     const spinBtn = h('button', { class: 'btn small', title: 'Obrót automatyczny', onclick: () => { spin = !spin; ctl.autoRotate = spin; spinBtn.classList.toggle('primary', spin); kick(); } }, '⟳');
     bar.append(spinBtn);
 
+    // triada osi jak w SolidWorks (lewy dolny róg): X czerwona, Y zielona, Z niebieska (Z = oś narzędzia = „w górę” sceny)
+    const tri = h('canvas', { width: 180, height: 180, style: { position: 'absolute', left: '4px', bottom: '20px', width: '90px', height: '90px', pointerEvents: 'none' } });
+    wrap.append(tri);
+    const AX = [[new T.Vector3(1, 0, 0), '#d50000', 'X'], [new T.Vector3(0, 0, -1), '#2e7d32', 'Y'], [new T.Vector3(0, 1, 0), '#1565c0', 'Z']];
+    const drawTriad = () => {
+      const g2 = tri.getContext('2d'); g2.setTransform(2, 0, 0, 2, 0, 0); g2.clearRect(0, 0, 90, 90);
+      const q = cam.quaternion.clone().invert(), c = 45, L = 30;
+      const v = AX.map(([d, col, l]) => { const p = d.clone().applyQuaternion(q); return { x: p.x, y: p.y, z: p.z, col, l }; }).sort((a, b) => a.z - b.z);
+      for (const a of v) {
+        const x2 = c + a.x * L, y2 = c - a.y * L;
+        g2.strokeStyle = g2.fillStyle = a.col; g2.lineWidth = 2.5; g2.beginPath(); g2.moveTo(c, c); g2.lineTo(x2, y2); g2.stroke();
+        g2.beginPath(); g2.arc(x2, y2, 3, 0, Math.PI * 2); g2.fill();
+        g2.font = 'bold 12px sans-serif'; g2.fillText(a.l, c + a.x * (L + 9) - 4, c - a.y * (L + 9) + 4);
+      }
+      g2.fillStyle = '#333'; g2.beginPath(); g2.arc(c, c, 2.5, 0, Math.PI * 2); g2.fill();
+    };
+
     // rysowanie tylko gdy coś się zmienia (oszczędza procesor/kartę)
     let raf = 0, alive = true;
-    const frame = () => { raf = 0; if (!alive) return; const moving = ctl.update(); renderer.render(scene, cam); if (moving || spin) kick(); };
+    const frame = () => { raf = 0; if (!alive) return; const moving = ctl.update(); renderer.render(scene, cam); drawTriad(); if (moving || spin) kick(); };
     const kick = () => { if (!raf && alive) raf = requestAnimationFrame(frame); };
     ctl.addEventListener('change', kick);
     const resize = () => { const w = wrap.clientWidth, hh = wrap.clientHeight; if (!w || !hh) return; renderer.setSize(w, hh, false); cam.aspect = w / hh; cam.updateProjectionMatrix(); kick(); };

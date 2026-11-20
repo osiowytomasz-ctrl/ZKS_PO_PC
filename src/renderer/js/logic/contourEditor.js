@@ -57,7 +57,35 @@ export const halfFromSvg = (path) => halfFromContour(svgToContour(path));
 /** Ścieżka SVG (mm) → punkty konturu w 0,1 mm jak kolumna T (bez wartości bezwzględnej Y – Z może być ujemne). */
 export const svgToContour = (path) => parseInsertPath(path, { absY: false });
 /** Kontur narzędzia z kolumny V (SVG) albo T (x_y). */
-export const anyContour = (text) => (/^\s*M/i.test(String(text ?? '')) ? svgToContour(text) : parseContour(text));
+export const anyContour = (text) => (/^\s*M/i.test(String(text ?? '')) ? expandHalf(svgToContour(text)) : parseContour(text));
+
+/** Czy kontur (0,1 mm) to sama prawa połowa (wszystkie x ≥ 0) – tak zapisujemy nowe kontury (V, BC). */
+export const isHalf = (points) => (points || []).length >= 2 && Math.min(...points.map((p) => p.x)) >= -0.5;
+/** Połowa → cały kontur: prawa połowa, potem lewa jako odbicie w odwrotnej kolejności (punkty na osi bez powtórzeń). Pełny kontur – bez zmian. */
+export function expandHalf(points) {
+  const P = (points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (!isHalf(P)) return P;
+  const right = P.map((p) => ({ x: Math.max(0, p.x), y: p.y }));
+  return [...right, ...[...right].reverse().filter((p) => p.x > 1e-6).map((p) => ({ x: -p.x, y: p.y }))];
+}
+/** Prawa połowa konturu z wierszy (mm) jako zamknięta ścieżka SVG: od osi, punkty z zaokrągleniami, z powrotem do osi. */
+export function halfSvg(rows) {
+  const right = rows.filter((r) => Number.isFinite(n(r.z)) && Number.isFinite(n(r.r)))
+    .map((r) => ({ x: Math.abs(n(r.r)), y: n(r.z), rad: Math.max(0, n(r.rad) || 0) }));
+  if (right.length < 2) return '';
+  const pts = [...(right[0].x > 0 ? [{ x: 0, y: right[0].y, rad: 0 }] : []), ...right, ...(right[right.length - 1].x > 0 ? [{ x: 0, y: right[right.length - 1].y, rad: 0 }] : [])];
+  return pathWithFillets(pts);
+}
+/** Zatwierdzone kontury z PSWT (BH potwierdzone, BC – SVG w mm, zwykle połowa) → Map kod → kontur jak kolumna T (x_y w 0,1 mm, cały). */
+export function confirmedOverrides(params) {
+  const m = new Map();
+  for (const [k, o] of Object.entries(params || {})) {
+    if (!o || !String(o.BH || '').trim() || !String(o.BC || '').trim()) continue;
+    const pts = expandHalf(svgToContour(o.BC));
+    if (pts.length >= 3) m.set(String(k).trim().toLowerCase(), pts.map((p) => `${fmt(p.x)}_${fmt(p.y)}`).join(';'));
+  }
+  return m;
+}
 
 /** Sprawdzenie wierszy: liczby, promień ≥ 0, zaokrąglenie ≥ 0, co najmniej 2 punkty. Wynik: lista komunikatów (pusta = dobrze). */
 export function validate(rows) {
@@ -82,8 +110,9 @@ export function fullPoints(rows) {
 }
 
 /** Ścieżka SVG (mm) pełnego konturu z zaokrągleniami w punktach (łuk stycznie do obu odcinków). */
-export function toSvg(rows) {
-  const pts = fullPoints(rows);
+export const toSvg = (rows) => pathWithFillets(fullPoints(rows));
+/** Zamknięta ścieżka SVG (mm) przez punkty {x, y, rad} – w punktach z rad > 0 łuk styczny do obu odcinków. */
+function pathWithFillets(pts) {
   if (pts.length < 2) return '';
   const N = pts.length, parts = [];
   for (let i = 0; i < N; i++) {

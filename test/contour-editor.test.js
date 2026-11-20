@@ -43,3 +43,23 @@ test('pełny kontur bez zmian – linie rzutu bocznego (X+ → X-) zostają', ()
   assert.equal(svg, 'M -9.5 0 L 9.5 0 L 8 34 L -8 34 L 8 34 L 9.5 36 L -9.5 36 Z');
   assert.deepEqual(E.svgToContour(svg), er);
 });
+
+test('prawa połowa: halfSvg od osi do osi, expandHalf – odbicie, pełny kontur bez zmian', () => {
+  const rows = [{ z: '0', r: '8', rad: '' }, { z: '45', r: '8', rad: '' }, { z: '45', r: '10', rad: '' }, { z: '60', r: '10', rad: '' }];
+  const half = E.halfSvg(rows);
+  assert.equal(half, 'M 0 0 L 8 0 L 8 45 L 10 45 L 10 60 L 0 60 Z');
+  const pts = E.svgToContour(half);
+  assert.ok(E.isHalf(pts));
+  const full = E.expandHalf(pts);
+  assert.equal(full.length, 10);
+  assert.deepEqual(full.slice(6).map((p) => [p.x, p.y]), [[-100, 600], [-100, 450], [-80, 450], [-80, 0]]);
+  const sym = [{ x: -80, y: 0 }, { x: 80, y: 0 }, { x: 80, y: 600 }, { x: -80, y: 600 }];
+  assert.deepEqual(E.expandHalf(sym), sym);
+  assert.ok(E.halfSvg([{ z: '0', r: '8', rad: '' }, { z: '45', r: '8', rad: '2' }, { z: '45', r: '20', rad: '' }]).includes(' A 2 2 '));
+});
+
+test('zatwierdzone kontury z PSWT (BH + BC) → kontur x_y dla toolIndex', () => {
+  const m = E.confirmedOverrides({ 'fx-1': { BH: 'OK 1.1.2026', BC: 'M 0 0 L 8 0 L 8 60 L 0 60 Z' }, 'fx-2': { BH: '', BC: 'M 0 0 L 8 0 L 8 60 L 0 60 Z' } });
+  assert.deepEqual([...m.keys()], ['fx-1']);
+  assert.equal(m.get('fx-1'), '0_0;80_0;80_600;0_600;-80_600;-80_0');
+});

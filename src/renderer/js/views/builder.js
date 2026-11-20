@@ -2,7 +2,7 @@
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
 import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
-import { toolCatalog } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
 import { toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
@@ -31,7 +31,7 @@ export function mountBuilder(el, ctx) {
     try {
       const cat = await toolCatalog(force);
       st.all = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim());
-      st.listed = st.all.filter(B.isListed); st.index = G.toolIndex(cat); st.selected = [];
+      st.listed = st.all.filter(B.isListed); st.index = G.toolIndex(cat, await confirmedContoursQuick()); st.selected = [];
       // kolory lokalizacji z kolorów stanowisk (Ustawienia programu – config/main)
       try { const { sdk, db } = await firebase(); const snap = await sdk.getDoc(sdk.doc(db, 'config', 'main')); setToolStations(stationList(snap.exists() ? snap.data() : null)); } catch { setToolStations(null); }
       draw();

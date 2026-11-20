@@ -198,12 +198,13 @@ const isWhite = (c) => { const x = String(c ?? '').trim().toLowerCase().replace(
 export const numberText = (v) => (Number(v) === Math.round(Number(v)) ? String(Math.round(Number(v))) : String(Number(v)));
 
 /** Indeks katalogu narzędzi ({tools, detailsMap} z getStToolOptions): narzędzie, szczegóły, części, dane do 2D/3D/DXF. */
-export function toolIndex(catalog) {
+export function toolIndex(catalog, overrides = null) {
   const tools = new Map(), details = new Map();
   for (const t of (catalog && catalog.tools) || []) if (String(t.productCode ?? '').trim()) tools.set(normCode(t.productCode), t);
   for (const [k, d] of Object.entries((catalog && catalog.detailsMap) || {})) details.set(normCode(k), d);
   const tool = (code) => tools.get(normCode(code)) || null;
-  const det = (code) => details.get(normCode(code)) || null;
+  // zatwierdzony kontur (PSWT BC) zastępuje kontur z kolumny T
+  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); return o ? { ...(d || {}), columnAY: o, confirmedContour: true } : d; };
   let usage = null;
   const idx = {
     tool, details: det,
