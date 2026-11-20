@@ -216,11 +216,12 @@ async function commit(sdk, db, writes) {
 }
 
 /** Zapis ustawień harmonogramu: stanowiska [{name, bg, color, sum?}], kolory komisów [{komis, bg, color, …}] i święta [{date: 'RRRR-MM-DD', name}] (zamienia całe listy). */
+/** Zapis config/main: [stations] (null – bez zmian; zmienia je panel w Ustawieniach programu), kolory komisów, [holidays] (opcjonalnie). */
 export async function saveSettings(stations, komisColors, holidays) {
   sbBlocked('zapis ustawień');
   const { sdk, db } = await firebase();
   await sdk.setDoc(sdk.doc(db, 'config', 'main'), {
-    stations: stations.map(({ name, bg, color, sum }) => (sum ? { name, bg, color, sum: true } : { name, bg, color })),
+    ...(stations ? { stations: stations.map(({ name, bg, color, sum }) => (sum ? { name, bg, color, sum: true } : { name, bg, color })) } : {}),
     komisColors: komisColors.map(({ komis, bg, color, bold, italic, underline }) => ({ komis, bg, color, ...(bold ? { bold: true } : {}), ...(italic ? { italic: true } : {}), ...(underline ? { underline: true } : {}) })),
     ...(holidays ? { holidays: holidays.map(({ date, name }) => (name ? { date, name } : { date })) } : {}),
   }, { merge: true });

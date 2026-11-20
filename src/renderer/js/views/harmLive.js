@@ -53,9 +53,9 @@ export function mountHarmLive(el, appCtx) {
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
     // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
-    confirmChanges: lsGet(LS.confirm, true) !== false,
+    confirmChanges: false,   // zmiana komórki bez okna potwierdzenia (opcja usunięta)
     // wykres: pola napisu na pasku (w tej kolejności), wielkość czcionki napisów [px przy 100%; 0 = jak w tabeli], kolor komisu na pasku
-    chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, komisColor: false, ...lsGet(LS.chart, {}) },   // okno potwierdzenia przed zapisem zmiany komórki
+    chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, ...lsGet(LS.chart, {}), komisColor: true },   // kolor komisu na pasku – zawsze   // okno potwierdzenia przed zapisem zmiany komórki
     issues: [], issueMap: new Map(), cursor: null, path: null,   // path – pokazywana ścieżka konfliktu (linie na wykresie)
       // konflikty i błędy (liczone na bieżąco), aktywna komórka (nawigacja jak w Excelu)
     collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
@@ -857,9 +857,8 @@ export function mountHarmLive(el, appCtx) {
         st.layout = { rowH: clamp(rowHI.value, 16, 80, DEFAULT_LAYOUT.rowH), dateW: clamp(dateWI.value, 60, 220, DEFAULT_LAYOUT.dateW) }; lsSet(LS.layout, st.layout);
         st.komisOpt = kOpt; lsSet(LS.komis, kOpt);
         if (god) st.chartOpt = { ...cOpt, fields: CHART_FIELDS.map(([k]) => k).filter((k) => cOpt.fields.includes(k)) };
-        else st.chartOpt = { ...st.chartOpt, komisColor: !!cOpt.komisColor };   // kolor komisu na pasku – każdy u siebie
         lsSet(LS.chart, st.chartOpt);
-        if (god) await saveSettings(list, komisList);   // święta – w Ustawieniach programu (wspólne z Grafikiem)
+        if (god) await saveSettings(null, komisList);   // stanowiska i święta – w Ustawieniach programu
         m.close(); toast('Zapisano ustawienia'); if (st.data) draw();
       } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień do edycji' : e.message || e)); }
     };
@@ -867,7 +866,6 @@ export function mountHarmLive(el, appCtx) {
       h('h3', { style: { margin: '4px 0' } }, 'Wygląd tabeli'),
       h('div', { class: 'row', style: { alignItems: 'center' } }, 'Wysokość wiersza operacji [px]', rowHI, ' Szerokość kolumn dat [px]', dateWI, h('button', { class: 'btn small', onclick: () => { rowHI.value = String(DEFAULT_LAYOUT.rowH); dateWI.value = String(DEFAULT_LAYOUT.dateW); } }, 'Domyślne')),
       h('p', { class: 'muted' }, 'Zapisywane na tym komputerze. Domyślnie szerokość pasuje do daty „dd.mm.rrrr hh”.'),
-      h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: st.confirmChanges, onchange: (e) => { st.confirmChanges = e.target.checked; lsSet(LS.confirm, st.confirmChanges); } }), ' Potwierdzaj zmiany komórek (okno ze starą i nową wartością przed zapisem)'),
       ...(god ? [h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres'),
       h('p', { class: 'muted' }, 'Napis na pasku operacji (zaznaczone pola, w tej kolejności) i wielkość jego czcionki. Zapisywane na tym komputerze.'),
       h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '2px 14px' } }, ...CHART_FIELDS.map(([k, label]) => h('label', {}, h('input', { type: 'checkbox', checked: cOpt.fields.includes(k),
@@ -875,21 +873,14 @@ export function mountHarmLive(el, appCtx) {
       h('div', { class: 'row', style: { alignItems: 'center', marginTop: '6px' } }, 'Czcionka napisów na wykresie: ',
         (() => { const sel = h('select', { onchange: () => { cOpt.font = Number(sel.value); } }, h('option', { value: 0 }, 'jak w tabeli'), ...[8, 9, 10, 11, 12, 13, 14, 16, 18].map((n) => h('option', { value: n }, n + ' px'))); sel.value = String(cOpt.font || 0); return sel; })()),
       ] : []),
-      // dla wszystkich (zapisywane na tym komputerze)
-      ...(god ? [] : [h('h3', { style: { margin: '14px 0 4px' } }, 'Wykres')]),
-      h('label', { style: { display: 'block', margin: '6px 0' } }, h('input', { type: 'checkbox', checked: !!cOpt.komisColor, onchange: (e) => { cOpt.komisColor = e.target.checked; } }),
-        ' Kolor komisu na pasku: z lewej 10 px koloru maszyny (stanowiska), reszta w kolorze komisu z listy „Kolory komisów”'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Podsumowanie komisów'),
       h('p', { class: 'muted' }, 'Pasek komisu zbiera wszystkie operacje komisu (terminy, godziny, postęp, wysyłka). Tylko informacja – nie wpływa na harmonogram. Zapisywane na tym komputerze.'),
       kCheck('show', 'Pokazuj paski podsumowania komisów'),
       kCheck('inline', 'Przypasuj pasek do pierwszego wystąpienia komisu (zamiast wszystkich na górze tabeli)'),
       kCheck('filter', 'Filtruj i sortuj także paski podsumowania (wg filtrów i sortowania kolumn)', 'Bez zaznaczenia paski są zawsze widoczne i ułożone wg pierwszego wystąpienia komisu'),
-      ...(god ? [h('h3', { style: { margin: '14px 0 4px' } }, 'Stanowiska'),
-      h('p', { class: 'muted' }, 'Kolor stanowiska widać w kolumnie „Stan.” i na paskach wykresu. Nowe stanowisko ma też kolumny z miejscami pracy w karcie graf_norm (np. „4Fr1”); bez nich program nie wyliczy końca jego operacji.'),
-      box, h('div', { class: 'row', style: { marginTop: '8px' } }, nameI, addBtn),
+      ...(god ? [h('p', { class: 'muted', style: { margin: '10px 0 0' } }, 'Kolory stanowisk i dni świąteczne ustawia się w Ustawieniach programu (przycisk „Ustawienia” w górnym pasku) – wspólne dla całego programu.'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kolory komisów'), h('p', { class: 'muted' }, 'Wiersze operacji danego komisu są podświetlone wybranym kolorem w tabeli. Nazwę komisu można poprawić w polu.'),
       kBox, h('div', { class: 'row', style: { marginTop: '8px' } }, komisI, komisHints, kAdd),
-      h('h3', { style: { margin: '14px 0 4px' } }, 'Dni świąteczne'), h('p', { class: 'muted' }, 'Święta ustawia się w Ustawieniach programu (przycisk „Ustawienia” w górnym pasku) – wspólne dla Harmonogramu i Grafiku. W nagłówku osi czasu są bordowe, z białą pogrubioną czcionką.'),
       h('h3', { style: { margin: '14px 0 4px' } }, 'Kopia całego harmonogramu'),
       h('p', { class: 'muted' }, 'Eksport zapisuje wszystkie operacje i ustawienia (stanowiska, kolory komisów, święta) do pliku .json. Import zastępuje cały harmonogram zawartością pliku – przed zapisem pokazuje zmiany i może najpierw zapisać kopię obecnego stanu. Tylko poziom GOD.'),
       h('div', { class: 'row', style: { gap: '6px' } },

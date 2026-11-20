@@ -3,6 +3,7 @@ import { permissionsSummary } from '../logic/common.js';
 import { firebase, resetFirestoreCache } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
+import { stationsPanel } from './stationsPanel.js';
 import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
@@ -103,6 +104,7 @@ export async function mountSettings(el, ctx) {
           } catch (e) { toast('Kody iPhone: ' + (e.message || e), true); }
         } }, 'Kody iPhone'))) : null,
     cfg.url && cfg.key ? holidaysPanel() : null,
+    cfg.url && cfg.key ? stationsPanel() : null,
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
     cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
       h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),
