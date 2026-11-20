@@ -401,7 +401,7 @@ export function buildMesh(contours, segments = 36) {
   }
   const mm = (a) => [Math.min(...a), Math.max(...a)];
   const [x0, x1] = mm(vx), [y0, y1] = mm(vy), [z0, z1] = mm(vz);
-  return { vx, vy, vz, quads, faceTool, normals, faceCount: faces, center: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], size: Math.max(1, x1 - x0, y1 - y0, z1 - z0) };
+  return { vx, vy, vz, quads, faceTool, normals, faceCount: faces, profiles, offsets, center: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], size: Math.max(1, x1 - x0, y1 - y0, z1 - z0) };
 }
 /** Kamera obracająca się wokół środka bryły: ustawienie początkowe jak w wersji webowej (1,3; 0,8; 1,8). */
 export function initialCamera(size) {

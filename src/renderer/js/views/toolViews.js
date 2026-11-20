@@ -5,6 +5,7 @@ import { h, clear, modal } from '../ui.js';
 import { parseSheetColor } from '../logic/common.js';
 import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
+import { view3dGl } from './tool3d.js';
 
 // ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
 let STATIONS = null;
@@ -74,7 +75,15 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
 }
 
 /** Podgląd 3D bryły obrotowej (canvas): przeciągnij myszką – obrót, kółko – przybliżenie. */
+/** Podgląd 3D: WebGL (three.js, karta graficzna); gdy WebGL niedostępny – dawny rysunek na płótnie 2D. */
 export function view3d(mesh) {
+  if (!mesh || !webglOk()) return view3dCanvas(mesh);
+  return view3dGl(mesh, () => view3dCanvas(mesh));
+}
+let GL_OK = null;
+function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }
+
+export function view3dCanvas(mesh) {
   const wrap = h('div', { style: { width: '100%', height: '100%', minHeight: '260px', background: '#f5f5f5', position: 'relative' } });
   if (!mesh) { wrap.append(h('div', { style: { padding: '20px', fontWeight: 600 } }, 'Brak konturu 3D (kolumna T arkusza ND_CACHE)')); return wrap; }
   const cv = h('canvas', { style: { width: '100%', height: '100%', display: 'block', cursor: 'grab' } });
