@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing, tapHole } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile } from './contourGen.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -122,7 +122,13 @@ export function trepanDrawingFor(diameter, length, contour) {
  */
 export function holeDrawingFor(N, contour) {
   const h = tapHole(N), b = bounds(contour);
-  if (!h || !b) return null;
+  if (!b) return null;
+  if (!h) {   // gniazdo żeńskie o kształcie męskiego zakończenia N (ABS, Weldon, Capto, MHD, KAR, MK): linia niewidoczna i wnęka 3D
+    const sk = socketProfile(N);
+    if (!sk) return null;
+    const prof = sk.map(([x, z]) => pt(x, b.maxY + z)), poly = [...[...prof].reverse().map((p) => pt(p.x ? -p.x : 0, p.y)), ...prof].filter((p, i, a) => !i || Math.abs(p.x - a[i - 1].x) > 1e-6 || Math.abs(p.y - a[i - 1].y) > 1e-6);
+    return { hidden: [poly], cavity: { prof, rb: 0, y7: Infinity } };
+  }
   const top = b.maxY, yb = top - h.depth;
   return { hidden: [[pt(-h.r, top), pt(-h.r, yb), pt(h.r, yb), pt(h.r, top)]], cavity: { ri: h.r, yb, rb: 0, y7: Infinity } };
 }
@@ -401,7 +407,7 @@ export function profileOf(contour, cav = null) {
   // wiertło rurowe: wnęka otwarta od czubka; płytki (w ściance) rysuje osobno podgląd – bryła ma tu promień korpusu aż do czubka
   if (cav) rows = rows.map((p) => (p.y >= cav.y7 - 1e-6 ? pt(Math.min(p.x, cav.rb), p.y) : p));
   const out = [];
-  for (const p of [pt(0, Math.min(...ys)), ...rows, ...(cav ? [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)] : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
+  for (const p of [pt(0, Math.min(...ys)), ...rows, ...(cav ? (cav.prof ? [...cav.prof].reverse() : [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)]) : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
   return out.length >= 2 ? out : null;
 }
 /**

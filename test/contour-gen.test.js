@@ -146,3 +146,18 @@ test('oprawka gwintująca (N „D12,0□09,0_042”): otwór Ø12 × 42 mm od cz
   assert.ok(cup.some((q) => q.x === 60 && q.y === 340) && cup.some((q) => q.x === 60 && q.y === -80) && cup.some((q) => q.x === 0 && q.y === -80));
   assert.equal(holeDrawingFor('FRE016', pts), null);
 });
+
+test('gniazdo żeńskie oprawki z męskiego zakończenia N (ABS, Weldon, Capto, MHD, KAR, MK): linia przerywana i wnęka 3D', () => {
+  assert.deepEqual(C.socketProfile('ABS040'), [[0, -200], [100, -200], [100, 0]]);
+  assert.deepEqual(C.socketProfile('WEL016'), [[0, -480], [80, -480], [80, 0]]);   // chwyt Ø16, l = 48 mm
+  assert.deepEqual(C.socketProfile('CAP080'), [[0, -800], [250, -800], [350, 0]]);   // bez kołnierza przy czole
+  assert.deepEqual(C.socketProfile('KAR019'), [[0, -220], [95, -220], [95, 0]]);
+  assert.deepEqual(C.socketProfile('MK_003'), [[0, -940], [40, -940], [40, -690], [100, -690], [119, 0]]);
+  assert.equal(C.socketProfile('MHD063').at(-1)[0], 315);
+  for (const k of ['ER_032', 'ISO050', 'FZS_031', 'FRE016', '']) assert.equal(C.socketProfile(k), null);
+  const pts = parseContour(C.fullContour({ D: 'opr', E: 'red', F: '31', I: '50', J: '70', K: '34', M: 'FZS_031', N: 'WEL016' }, {}));   // czubek konturu = 340
+  const h = holeDrawingFor('WEL016', pts);
+  assert.deepEqual(h.hidden[0].map((q) => [q.x, q.y]), [[-80, 340], [-80, -140], [0, -140], [80, -140], [80, 340]]);
+  const cup = profileOf(pts, h.cavity);
+  assert.ok(cup.some((q) => q.x === 80 && q.y === 340) && cup.some((q) => q.x === 0 && q.y === -140));
+});

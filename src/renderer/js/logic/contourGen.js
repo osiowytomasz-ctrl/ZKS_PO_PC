@@ -276,6 +276,21 @@ export function formulaMountPoints(code) {
   }
   return null;
 }
+/** Mocowania męskie, dla których oprawka (kolumna N) ma gniazdo żeńskie o kształcie tego zakończenia: ABS, Weldon, Capto, MHD, KAR, stożek Morse'a. */
+const SOCKET_CODES = /^(ABS|WEL|CAP|MHD|KAR)\d|^MK_\d/;
+/**
+ * Gniazdo żeńskie oprawki z kodu mocowania końcowego N: kształt męskiego zakończenia (wzór karty „kontury”) – prawa połowa [x, z] (0,1 mm) od dna
+ * gniazda na osi do jego otworu (z = 0 przy otworze, głębiej – ujemne). null – kod spoza listy lub bez wzoru.
+ */
+export function socketProfile(N) {
+  const c = txt(N).toUpperCase();
+  if (!SOCKET_CODES.test(c)) return null;
+  const f = formulaMountPoints(c);
+  if (!f) return null;
+  const top = Math.max(...f.pts.map((q) => q[1])), out = [];
+  for (const [x, y] of f.pts) { out.push([Math.abs(x), y - top]); if (y === top) break; }   // do pierwszego punktu na poziomie otworu (bez kołnierza przy czole)
+  return out.length >= 2 ? out : null;
+}
 /** Mocowanie wg karty: { left, right, formula: true, synthetic } (format kolumn B / C karty) albo null. */
 export function formulaMount(code) {
   const r = formulaMountPoints(code);
