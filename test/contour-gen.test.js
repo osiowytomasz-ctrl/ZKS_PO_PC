@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
-import { halfFromContour, generatedHalf, contourOverrides, bladeLength } from '../src/renderer/js/logic/contourEditor.js';
+import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines } from '../src/renderer/js/logic/contourEditor.js';
 import { profileOf, trepanBlade } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
@@ -20,7 +20,7 @@ test('liczby z przecinkiem, FRAGMENT.TEKSTU, ostatni i najniższy punkt mocowani
 
 test('wiertło rurowe (tre) – sylweta z boku: ostrze 7×4, korpus Ø−0,5, szyjka Ø−3 pod L, linie płytki i chwytu', () => {
   const p = { D: 'tre', E: 'TCT', F: '50', J: '70', K: '50', M: 'WEL019' };   // R 25; korpus 24,75; szyjka 23,5 od 0 do 20; ostrze 63…70
-  assert.equal(C.fullContour(p, {}), '0_-490;-95_-490;-95_0;95_0;-95_0;-235_0;-235_200;-247.5_200;-247.5_630;-250_630;-210_630;-210_700;-210_630;-250_630;-250_700;250_700;250_630;210_630;210_700;210_630;250_630;247.5_630;247.5_200;235_200;235_0;95_0;95_-490;0_-490');
+  assert.equal(C.fullContour(p, {}), '0_-490;-95_-490;-95_0;95_0;-95_0;-235_0;-235_200;-247.5_200;247.5_200;-247.5_200;-247.5_630;-250_630;-210_630;-210_700;-210_630;-250_630;-250_700;250_700;250_630;210_630;210_700;210_630;250_630;247.5_630;247.5_200;235_200;235_0;95_0;95_-490;0_-490');
   // bez szyjki (J ≤ K) korpus od zera; bez Weldona – bez linii oddzielającej chwyt
   const q = C.fullContour({ ...p, J: '50', K: '60', M: 'ABS040' }, {});
   assert.ok(q.includes(';-247.5_0;-247.5_430;-250_430;') && !q.includes(';-235_'));
@@ -70,7 +70,11 @@ test('mocowania wg wzorów karty „kontury” (Z jak w karcie); kody spoza wzor
   assert.equal(C.formulaMount('MK_001').left, '0_-585;26_-585;26_-415;-47_-415;-60_35');
   assert.equal(C.formulaMount('D06,0□04,0_024').left, '0_-240;20_-240;20_-200;-30_-200;-30_0');
   assert.equal(C.formulaMount('FZS_031').left, '0_-350;155_-350;155_0;-250_0;-250_309;125_309;125_340');
-  assert.equal(C.formulaMount('ISO040').left, '0_-827;130_-827;270_0;270_32;415_32;415_191;0_191');
+  // stożek SK50 z pliku DXF (dla wszystkich ISO / SK) + grzybek montażowy DIN50 na końcu stożka
+  const sk = C.formulaMount('ISO050');
+  assert.equal(sk.left, C.formulaMount('ISO040').left);
+  assert.equal(sk.left, '0_-1356;126_-1356;140_-1332;140_-1266;105_-1256.6;105_-1145;178_-1044;178_-1016;201.0316_-1016;349.25_0;349.25_15;487.5_15;487.5_78.553;456.25_96.595;456.25_125.405;487.5_143.447;487.5_191;0_191');
+  assert.equal(C.minY(sk.left), -1356); assert.equal(C.lastY(sk.left), 191);   // grzybek: L1 = 34 mm pod stożkiem 101,6 mm; kołnierz do 19,1 mm
   assert.equal(C.formulaMount('MHD063').left, '0_-472.5;-157.5_-472.5;-157.5_-157.5;157.5_-157.5;315_0;-315_0');
   assert.equal(C.formulaMount('T__006').left, '30.6_-68;-30.6_-68;-34_0;34_0');
   assert.equal(C.formulaMount("KS_005'").left, '0_-630;300_-630;300_0;-475_0;-475_560;237.5_560;237.5_620');
@@ -91,7 +95,7 @@ test('Weldon: długość chwytu l wg tabeli wymiarów', () => {
 test('generator – sama prawa połowa (od osi do osi, x ≥ 0)', () => {
   const p = { D: 'tre', E: 'TCT', F: '50', J: '70', K: '50', M: 'WEL019' };
   const h = generatedHalf(p, {});
-  assert.deepEqual(h.map((q) => [q.x, q.y]), [[0, 0], [95, 0], [0, 0], [0, 700], [250, 700], [250, 630], [210, 630], [210, 700], [210, 630], [250, 630], [247.5, 630], [247.5, 200], [235, 200], [235, 0], [95, 0], [95, -490], [0, -490]]);
+  assert.deepEqual(h.map((q) => [q.x, q.y]), [[0, 0], [95, 0], [0, 0], [0, 200], [247.5, 200], [0, 200], [0, 700], [250, 700], [250, 630], [210, 630], [210, 700], [210, 630], [250, 630], [247.5, 630], [247.5, 200], [235, 200], [235, 0], [95, 0], [95, -490], [0, -490]]);
   assert.ok(h.every((q) => q.x >= 0));
   const q = { D: 'tre', E: 'TCT', F: '35', J: '90', K: '60', M: 'ABS040' };
   assert.ok(generatedHalf(q, {}).length > 3);
@@ -117,4 +121,15 @@ test('wiertło rurowe: rejon ostrza = węglik 7 mm od czubka (nie K), brak linii
   assert.deepEqual(b, { n: 7, rIn: 21, rOut: 25, z1: 63, z2: 70, arc: 4 });
   assert.equal(trepanBlade(50, m.regions.get('tre50'), 8).n, 8); assert.equal(trepanBlade(50, []), null);
   assert.ok(trepanBlade(12, [{ role: 'ostrze', z1: 0, z2: 7 }]).arc <= 4);
+});
+
+test('linie krawędzi średnic w generatorze – wszędzie (poza wiertłem rurowym, które ma własne), bez powtórzeń', () => {
+  const o = { D: 'opr', E: 'stż', F: '32', I: '60', J: '90', K: '60', M: 'ISO050', N: 'WEL032' };
+  const h = generatedHalf(o, {});
+  // uskok kołnierza SK50 (r 487,5 → 456,25 na Z 96,6) ma linię od obrysu do osi i z powrotem
+  const i = h.findIndex((q, k) => q.y === 96.595 && q.x === 456.25 && h[k + 1] && h[k + 1].x === 0);
+  assert.ok(i >= 0, 'brak linii przez rowek');
+  assert.equal(h.filter((q) => q.x === 0 && q.y === 96.595).length, 1);
+  // drugi raz nic nie dopisuje (np. przy akceptacji)
+  assert.deepEqual(withEdgeLines(h), h);
 });

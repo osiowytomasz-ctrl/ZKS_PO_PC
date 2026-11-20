@@ -96,6 +96,25 @@ export function halfPath(points) {
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
 /**
+ * Linie krawędzi średnic w połowie konturu (0,1 mm): na każdym uskoku i załamaniu obrysu (> 15°) linia przez całą szerokość – w połowie odcinek
+ * od obrysu do osi i z powrotem. Linie już narysowane nie są powtarzane. Robi to samo co [addEdgeLines] na ścieżce SVG.
+ */
+export function withEdgeLines(half) {
+  const pts = half || [];
+  if (pts.length < 3 || !isHalf(pts)) return pts;
+  const near = (a, b) => Math.abs(a - b) < 0.02;
+  const has = (lv) => pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, lv.z) && near(q.y, lv.z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) >= lv.r - 0.02; });
+  const todo = edgeLevels(pts).filter((lv) => !has(lv));
+  if (!todo.length) return pts;
+  const out = [];
+  for (const p of pts) {
+    out.push(p);
+    const k = todo.findIndex((lv) => near(lv.z, p.y) && near(lv.r, p.x));
+    if (k >= 0) { out.push({ x: 0, y: p.y }, { x: p.x, y: p.y }); todo.splice(k, 1); }
+  }
+  return out;
+}
+/**
  * Wewnętrzny generator – sama prawa połowa konturu (0,1 mm, od osi do osi, z liniami krawędzi): korpus z PSWT D:N
  * dorysowany do mocowania z karty „kontury” (kształt i położenie w osi Z jak w karcie). [] – brak danych.
  */
@@ -103,7 +122,7 @@ export function generatedHalf(p, mounts) {
   const g = p ? parseContour(fullContour(p, mounts || {}) || '') : [];
   if (g.length < 3 || Math.max(...g.map((q) => q.x)) <= Math.min(...g.map((q) => q.x))) return [];
   const h = halfPath(g);
-  return h.length >= 3 ? h : [];
+  return h.length >= 3 ? (isTrepan(p) ? h : withEdgeLines(h)) : [];   // linie krawędzi średnic wszędzie (wiertło rurowe ma własne linie w sylwecie)
 }
 /** Prawa połowa (z liniami krawędzi) pełnego konturu jako ścieżka SVG w mm – zapis do BC / V. */
 export const halfPathSvg = (points) => contourToSvg(halfPath(points));

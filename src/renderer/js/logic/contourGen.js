@@ -99,7 +99,7 @@ export function bodyContour(p, av = '') {
   if (D === 'tre') { // wiertło rurowe (trepanacyjne) – sylweta z boku: ostrze 7 mm × 4 mm, korpus Ø−0,5, szyjka pod długością roboczą; wnęka tylko w rysunku
     const d = trepanDims(F, J, K), rs = M3 === 'WEL' ? 5 * midN(M, 4, 3) : 0;   // chwyt Weldon (średnica z kodu mocowania) pod narzędziem
     const rl = d.ye > 0 ? d.Rn : d.Rb;
-    const L = [...(rs ? [[rs, 0], [-rs, 0]] : []), ...(rs !== rl ? [[-rl, 0]] : []), ...(d.ye > 0 ? [[-rl, d.ye], [-d.Rb, d.ye]] : []),
+    const L = [...(rs ? [[rs, 0], [-rs, 0]] : []), ...(rs !== rl ? [[-rl, 0]] : []), ...(d.ye > 0 ? [[-rl, d.ye], [-d.Rb, d.ye], [d.Rb, d.ye], [-d.Rb, d.ye]] : []),   // krawędź szyjki – linia przez całą szerokość
       [-d.Rb, d.y7], [-d.R, d.y7], [-d.Rc, d.y7], [-d.Rc, d.yt], [-d.Rc, d.y7], [-d.R, d.y7], [-d.R, d.yt]];   // linie płytki: dół i wewnętrzna krawędź
     const Rr = [[d.R, d.yt], [d.R, d.y7], [d.Rc, d.y7], [d.Rc, d.yt], [d.Rc, d.y7], [d.R, d.y7], [d.Rb, d.y7], ...(d.ye > 0 ? [[d.Rb, d.ye], [rl, d.ye]] : []), ...(rs !== rl ? [[rl, 0]] : [])];
     return pts([...L, ...Rr]);
@@ -207,7 +207,13 @@ const WEL = { 6: 36, 8: 36, 10: 40, 12: 45, 14: 45, 16: 48, 18: 48, 20: 50, 25: 
 /** Termo (T__ / SP): BS z karty. */
 const TS = { T__006: 6.8, T__008: 8.8, T__010: 10.8, SP_15: 12.8 };
 const KAR = { 19: -220, 32: -400 };
-const ISO = { 40: [827, 26, 54, 83], 50: [1012.5, 32, 70, 97] };
+/**
+ * Stożek 7:24 SK50 (DIN 69871) wg pliku SK50.DXF – prawa połowa od dołu osi do góry (0,1 mm): stożek Ø69,85 × 101,6 mm, kołnierz Ø97,5 z rowkiem V,
+ * górna płaszczyzna na 19,1 mm; poziom 0 = płaszczyzna pomiarowa (duża średnica stożka). Stosowany dla wszystkich mocowań ISO / SK.
+ */
+const SK50 = [[201.0316, -1016], [349.25, 0], [349.25, 15], [487.5, 15], [487.5, 78.553], [456.25, 96.595], [456.25, 125.405], [487.5, 143.447], [487.5, 191], [0, 191]];
+/** Grzybek montażowy (kołek pociągowy DIN 69872 A, DIN50: M24, L1 = 34, L2 = 25, D1 = 21, D2 = 28, fazy 15° i 30°) wkręcony w koniec stożka – część wystająca. */
+const STUD = [[0, -1356], [126, -1356], [140, -1332], [140, -1266], [105, -1256.6], [105, -1145], [178, -1044], [178, -1016]];
 
 /**
  * Lewa część mocowania wg wzorów karty „kontury” (kod z kolumny M) – lista punktów [x, y] w 0,1 mm albo null (kod spoza karty
@@ -231,10 +237,7 @@ export function formulaMountPoints(code) {
     const [a, b, cc, e] = FZS_KS[c], y1 = -10 * e + 10 * cc, y5 = 10 * cc - b;
     return { pts: [[0, y1], [5 * b, y1], [5 * b, 0], [-5 * a, 0], [-5 * a, y5], [2.5 * a, y5], [2.5 * a, 10 * cc]] };
   }
-  if ((m = /^ISO(\d{3})$/.exec(c)) && ISO[Number(m[1])]) {
-    const [k, a, b, e] = ISO[Number(m[1])];
-    return { pts: [[0, -k], [5 * a, -k], [5 * b, 0], [5 * b, 32], [5 * e, 32], [5 * e, 191], [0, 191]] };
-  }
+  if (/^ISO\d{3}$/.test(c)) return { pts: [...STUD, ...SK50] };   // stożek SK50 z grzybkiem montażowym (każdy rozmiar ISO / SK)
   if ((m = /^KAR(\d{3})$/.exec(c)) && KAR[Number(m[1])]) { const d = Number(m[1]), h = KAR[d]; return { pts: [[0, h], [-5 * d, h], [-5 * d, 0]] }; }
   if (c === 'FREM16') return { pts: [[0, -180], [-80, -180], [-80, -100], [-70, -100], [-70, -60], [-80, -60], [-80, 0]] };
   if ((m = /^MHD(\d{3})$/.exec(c)) && d3) {
