@@ -2,7 +2,8 @@
 // R – promień, opcjonalnie zaokrąglenie w punkcie), program rysuje cały kontur (odbicie lustrzane) obok dawnego z kolumny T i zapisuje go
 // jako ścieżkę SVG w mm do kolumny V arkusza ND_CACHE (MASTER, GOD). Kolumna T się nie zmienia.
 import { h, clear, api, toast, confirmBox, modal } from '../ui.js';
-import { toolCatalog, contourGenOn } from '../catalog.js';
+import { toolCatalog, contourGenOn, invalidateConfirmed } from '../catalog.js';
+import { ndLoad, ndPatch } from '../ndStore.js';
 import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
@@ -61,15 +62,15 @@ export function mountContours(el, ctx) {
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
   const errBox = h('div', { class: 'err', style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
 
-  /** Dane generatora: PSWT D:N i zakładka „kontury” (Kontury.gs: ndContourData). Błąd zostaje widoczny w panelu parametrów. */
-  async function loadData() {
+  /** Dane konturów: PSWT D:N, BH/BC/BE, zakładka „kontury” i kolumna V – z bazy Firebase (ndStore), gdy pusta – z arkusza. */
+  async function loadData(force) {
     st.dataError = null;
     try {
-      const cd = (await api('ndContourData', [], { timeoutMs: 180000 })) || {};
-      st.mounts = cd.mounts || {}; st.params = cd.params || {};
+      const cd = await ndLoad({ manage: canSave, user: (ctx.user && (ctx.user.name || ctx.user.email)) || '', force });
+      st.mounts = cd.mounts || {}; st.params = cd.params || {}; st.v = cd.v || {}; st.dataSource = cd.source;
       if (!Object.keys(st.params).length) st.dataError = 'serwer nie zwrócił żadnych narzędzi z arkusza PSWT (sprawdź nazwę karty „PSWT” i kolumny B:N).';
     } catch (e) {
-      st.mounts = {}; st.params = {};
+      st.mounts = {}; st.params = {}; st.v = {};
       st.dataError = /Nieznana funkcja|UNKNOWN_FN/i.test(e.message || '')
         ? 'w Apps Script nie ma jeszcze funkcji ndContourData – podmień Kontury.gs i Api.gs i wdróż nową wersję wdrożenia API.'
         : (e.message || String(e));
@@ -81,8 +82,7 @@ export function mountContours(el, ctx) {
       const cat = await toolCatalog(force);
       st.tools = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim()).sort((a, b) => String(a.productCode).localeCompare(String(b.productCode), 'pl', { numeric: true }));
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
-      try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
-      await loadData();
+      await loadData(force);
       st.cat = cat; st.index = G.toolIndex(cat, overridesK());
       drawFilters(); drawList();
       if (pendingCode) { const t = st.tools.find((x) => normCode(x.productCode) === normCode(pendingCode)); pendingCode = null; if (t) pick(t); }
@@ -208,6 +208,7 @@ export function mountContours(el, ctx) {
         if (bc) for (const r of (st.regions || []).slice(0, -1)) bc = E.addLineAt(bc, r.z2);   // + linie podziału ostrze / oprawka
         await api('ndConfirmContour', [t.productCode, value, bc, value ? regionsText(st.regions) : null]);
         st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: bc, BE: regionsText(st.regions) } : {}) };
+        ndPatch(t.productCode, st.params[normCode(t.productCode)], st.v[normCode(t.productCode)]); invalidateConfirmed();   // baza Firebase
         status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
         if (st.cat) st.index = G.toolIndex(st.cat, overridesK());
         drawList(); drawEditor();
@@ -567,6 +568,7 @@ export function mountContours(el, ctx) {
     try {
       const r = await api('ndSaveContourV', [t.productCode, svg]);
       if (svg) st.v[normCode(t.productCode)] = svg; else delete st.v[normCode(t.productCode)];
+      ndPatch(t.productCode, st.params[normCode(t.productCode)] || {}, svg);   // baza Firebase
       st.dirty = false; status.set(clearIt ? `Usunięto kontur z kolumny V (wiersz ${r.row}).` : `Zapisano w kolumnie V (wiersz ${r.row}).`);
       toast('Kontur zapisany'); drawList(); drawPreview();
     } catch (e) { status.set('Nie zapisano: ' + e.message, 'error'); }

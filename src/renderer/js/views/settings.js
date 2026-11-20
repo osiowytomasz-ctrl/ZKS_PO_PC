@@ -6,6 +6,7 @@ import { holidaysPanel } from './holidays.js';
 import { stationsPanel } from './stationsPanel.js';
 import { toolLook, setToolLook } from './toolViews.js';
 import { invalidateConfirmed } from '../catalog.js';
+import { ndImport } from '../ndStore.js';
 import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
@@ -108,6 +109,7 @@ export async function mountSettings(el, ctx) {
     cfg.url && cfg.key ? holidaysPanel() : null,
     cfg.url && cfg.key ? stationsPanel() : null,
     toolLookPanel(),
+    cfg.url && cfg.key && grafikAccess(grafikLevelOf(ctx.user)).manage ? ndPanel(ctx) : null,
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
     cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
       h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),
@@ -116,6 +118,27 @@ export async function mountSettings(el, ctx) {
         try { toast('Przeniesiono kart: ' + (await importKartyFromSheet(ctx.user && ctx.user.email))); } catch (e) { toast('Nie przeniesiono: ' + (e.message || e), true); }
       } }, 'Przenieś karty z arkusza do bazy')) : null,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
+}
+
+/** Narzędziownia – dane konturów w bazie Firebase (MASTER / GOD): przesłanie z arkusza (PSWT D:N, BH/BC/BE, „kontury”, ND_CACHE V). */
+function ndPanel(ctx) {
+  const info = h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Sprawdzanie bazy…');
+  const show = async () => {
+    try {
+      const { sdk, db } = await firebase();
+      const m = await sdk.getDoc(sdk.doc(db, 'nd_meta', 'main'));
+      info.textContent = m.exists() ? `W bazie: ${m.data().count || 0} narzędzi, przesłane ${new Date(m.data().updatedAt || 0).toLocaleString('pl-PL')}${m.data().updatedBy ? ' (' + m.data().updatedBy + ')' : ''}.` : 'W bazie nie ma jeszcze danych konturów – program czyta je z arkusza.';
+    } catch (e) { info.textContent = 'Baza niedostępna: ' + (e.message || e); }
+  };
+  const btn = h('button', { class: 'btn', onclick: async () => {
+    btn.disabled = true; info.textContent = 'Przesyłanie z arkusza do bazy…';
+    try { const n = await ndImport({ user: (ctx.user && (ctx.user.name || ctx.user.email)) || '' }); invalidateConfirmed(); toast(`Przesłano dane ${n} narzędzi`); } catch (e) { toast('Nie przesłano: ' + (e.message || e), true); }
+    btn.disabled = false; show();
+  } }, 'Prześlij dane konturów z arkusza do bazy');
+  show();
+  return h('div', { style: { marginTop: '10px' } }, h('h3', {}, 'Narzędziownia – dane konturów w bazie'),
+    h('p', { class: 'muted', style: { margin: '2px 0' } }, 'Program czyta parametry narzędzi (PSWT D:N), zatwierdzone kontury (BH, BC, BE), mocowania („kontury”) i kontury robocze (ND_CACHE V) z bazy Firebase, a kontury liczy sam. Zatwierdzenia w programie trafiają do arkusza i od razu do bazy. Zmiany wpisane wprost w arkuszu przechodzą do bazy tym przyciskiem albo same raz na dobę (przy otwarciu narzędziowni przez MASTER / GOD).'),
+    btn, info);
 }
 
 /** Narzędziownia – wygląd na tym komputerze: ramka w kolorze lokalizacji (kolory stanowisk wyżej), poświata (glow) i jej kolor. */

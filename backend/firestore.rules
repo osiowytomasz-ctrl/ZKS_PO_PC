@@ -106,6 +106,17 @@ service cloud.firestore {
       allow write: if grManage();
     }
 
+    // Narzędziownia: dane konturów z arkusza (nd_meta/main, nd_meta/mounts, nd_rows/{paczka}: PSWT D:N, BH/BC/BE, ND_CACHE V) –
+    // czyta każdy zalogowany, przesyła z arkusza i poprawia po zatwierdzeniu konturu MASTER / GOD
+    match /nd_meta/{doc} {
+      allow read: if request.auth != null;
+      allow write: if grManage();
+    }
+    match /nd_rows/{chunk} {
+      allow read: if request.auth != null;
+      allow write: if grManage();
+    }
+
     // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
     match /plan_layout/{doc} {
       allow read, write: if planLvl() in ['read', 'write'];

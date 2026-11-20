@@ -1,6 +1,7 @@
 // Katalog narzędzi (getStToolOptions): pamięć w procesie + pamięć podręczna na dysku, wspólny dla ToolTrack, ToolBuildera i Assem.Tool.
 import { apiCached } from './ui.js';
 import * as E from './logic/contourEditor.js';
+import { ndLoad } from './ndStore.js';
 let memory = null;
 let pending = null;
 
@@ -25,9 +26,8 @@ export function confirmedContours(force = false) {
   confirmed = new Promise((resolve) => {
     let done = false;
     const gen = contourGenOn();
-    const vP = gen ? apiCached('ndContoursV', [], () => {}).catch(() => ({})) : Promise.resolve({});
-    const fin = (d) => { if (!done) { done = true; vP.then((v) => resolve(E.contourOverrides((d && d.params) || {}, (d && d.mounts) || {}, { gen, v: v || {} }))); } };
-    apiCached('ndContourData', [], (d) => fin(d), { timeoutMs: 180000 }).then(fin, () => fin(null));
+    const fin = (d) => { if (!done) { done = true; resolve(E.contourOverrides((d && d.params) || {}, (d && d.mounts) || {}, { gen, v: (d && d.v) || {} })); } };
+    ndLoad().then(fin, () => fin(null));   // baza Firebase (ndStore), gdy pusta – arkusz
   });
   return confirmed;
 }

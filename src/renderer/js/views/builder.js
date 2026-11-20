@@ -3,6 +3,7 @@
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
 import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
 import { toolCatalog, confirmedContoursQuick, invalidateConfirmed, contourGenOn } from '../catalog.js';
+import { ndLoad, ndPatch } from '../ndStore.js';
 import * as E from '../logic/contourEditor.js';
 import { fullContour } from '../logic/contourGen.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
@@ -48,8 +49,8 @@ export function mountBuilder(el, ctx) {
   async function loadContourData() {
     if (!canConfirm) return;
     try {
-      const [cd, v] = await Promise.all([api('ndContourData', [], { timeoutMs: 180000 }), api('ndContoursV', []).catch(() => ({}))]);
-      st.cd = { params: (cd && cd.params) || {}, mounts: (cd && cd.mounts) || {}, v: v || {} };
+      const cd = await ndLoad({ manage: true, user: (ctx.user && (ctx.user.name || ctx.user.email)) || '' });   // baza Firebase, gdy pusta – arkusz
+      st.cd = { params: cd.params || {}, mounts: cd.mounts || {}, v: cd.v || {} };
       st.index = G.toolIndex(st.cat, overrides());
       paintFix();
       if (st.view === 'tiles') drawList();
@@ -113,7 +114,7 @@ export function mountBuilder(el, ctx) {
     let ok = 0, bad = 0;
     for (const x of list2) {
       status.set(`Poprawianie konturów… ${ok + bad + 1} / ${list2.length}`, 'neutral');
-      try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, x.regions]); x.p.BC = x.svg; if (x.regions) x.p.BE = x.regions; ok++; } catch { bad++; }
+      try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, x.regions]); x.p.BC = x.svg; if (x.regions) x.p.BE = x.regions; ndPatch(x.t.productCode, x.p, st.cd.v[nc(x.t)]); ok++; } catch { bad++; }
     }
     status.set(`Poprawiono kontury: ${ok}` + (bad ? `, błędy: ${bad}` : '') + '.', bad ? 'error' : 'neutral');
     invalidateConfirmed(); st.index = G.toolIndex(st.cat, overrides()); paintFix(); drawList();
@@ -133,7 +134,7 @@ export function mountBuilder(el, ctx) {
         box.append(h('span', { class: 'tile-ok-on', title: 'Kontur potwierdzony (PSWT, kolumna BH): ' + p.BH }, '✓ ' + p.BH),
           h('button', { class: 'btn small', title: 'Cofnij potwierdzenie konturu', onclick: async () => {
             if (!(await confirmBox('Potwierdzenie konturu', `Cofnąć potwierdzenie konturu ${t.productCode}?`, 'Cofnij'))) return;
-            try { await api('ndConfirmContour', [t.productCode, '', null, null]); p.BH = ''; after(t, box, false); toast('Cofnięto potwierdzenie'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
+            try { await api('ndConfirmContour', [t.productCode, '', null, null]); p.BH = ''; ndPatch(t.productCode, p, st.cd.v[nc(t)]); after(t, box, false); toast('Cofnięto potwierdzenie'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
           } }, '↺'));
         return;
       }
@@ -142,7 +143,7 @@ export function mountBuilder(el, ctx) {
         if (!(await confirmBox('Akceptacja konturu', `Zatwierdzić kontur narzędzia ${t.productCode} (${src.label}, bez zmian)? Do arkusza PSWT trafi: potwierdzenie (kolumna BH) i kontur – prawa połowa (kolumna BC).` + (src.regions ? ` Narzędzie monolityczne – podział wg długości roboczej (kolumna K): ${src.regions} (kolumna BE).` : ' Rejony (kolumna BE) zostają bez zmian.'), 'Zatwierdź'))) return;
         const d = new Date(), who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
         const value = `OK ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}${who ? ' ' + who : ''}`;
-        try { await api('ndConfirmContour', [t.productCode, value, src.svg, src.regions]); p.BH = value; p.BC = src.svg; if (src.regions) p.BE = src.regions; after(t, box, true); toast('Kontur zatwierdzony – kafelek przeniesiony na koniec listy'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
+        try { await api('ndConfirmContour', [t.productCode, value, src.svg, src.regions]); p.BH = value; p.BC = src.svg; if (src.regions) p.BE = src.regions; ndPatch(t.productCode, p, st.cd.v[nc(t)]); after(t, box, true); toast('Kontur zatwierdzony – kafelek przeniesiony na koniec listy'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
       } }, '✓ Akceptuj kontur'));
     };
     box._paint = paint; paint();
