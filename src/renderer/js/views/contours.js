@@ -59,6 +59,8 @@ export function mountContours(el, ctx) {
   }
   const tOf = (t) => (st.details.get(normCode(t.productCode)) || {}).columnAY || '';
   const vOf = (t) => st.v[normCode(t.productCode)] || '';
+  /** Potwierdzenie poprawności konturu z PSWT (kolumna BH) – tekst albo ''. */
+  const okOf = (t) => ((st.params[normCode(t.productCode)] || {}).BH || '');
   /** Kontur z danych (PSWT D:N + mocowanie z zakładki „kontury”) w 0,1 mm albo null. */
   /** Parametry D:N narzędzia: z arkusza PSWT albo – dla wybranego narzędzia – zmienione do sprawdzenia (bez zapisu). */
   const paramsOf = (t) => (st.tool && t && st.tool.productCode === t.productCode && st.test ? st.test : st.params[normCode(t.productCode)]);
@@ -89,6 +91,7 @@ export function mountContours(el, ctx) {
       return h('div', { class: 'click', style: { padding: '3px 6px', borderBottom: '1px solid #eee', background: on ? '#d3e3fd' : '', cursor: 'pointer' }, onclick: () => pick(t) },
         h('b', {}, t.productCode), ' ', tOf(t) ? h('span', { title: 'Jest kontur w kolumnie T', style: { fontSize: '10px', color: '#666' } }, 'T') : null, ' ',
         vOf(t) ? h('span', { title: 'Jest kontur w kolumnie V', style: { fontSize: '10px', color: '#2e7d32', fontWeight: 700 } }, 'V') : null,
+        okOf(t) ? h('span', { title: 'Kontur potwierdzony (PSWT, kolumna BH): ' + okOf(t), style: { fontSize: '11px', color: '#fff', background: '#2e7d32', borderRadius: '3px', padding: '0 3px', marginLeft: '3px' } }, '✓') : null,
         h('div', { class: 'muted', style: { fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, description(t)));
     }, 150);
   }
@@ -110,6 +113,7 @@ export function mountContours(el, ctx) {
     if (!t) { editBox.append(h('p', { class: 'muted' }, 'Wybierz narzędzie z listy po lewej.')); drawPreview(); return; }
     editBox.append(h('div', {}, h('b', { style: { fontSize: '15px' } }, t.productCode), h('div', { class: 'muted', style: { fontSize: '12px' } }, description(t)),
       h('div', { style: { fontSize: '12px' } }, `Φ ${t.columnF || '—'} · L ${t.columnJ || '—'} · Ms ${t.columnM || '—'} · Mk ${t.columnN || '—'}`)));
+    editBox.append(confirmBox2(t));
     editBox.append(paramsPanel(t));
     editBox.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px' } },
       h('button', { class: 'btn small', disabled: !tOf(t), title: 'Pełny kontur z kolumny T (bez zmian)', onclick: () => { setFull(G.parseContour(tOf(t)), 'kolumna T'); st.dirty = true; status.set('Wczytano pełny kontur z kolumny T (bez zmian).', 'neutral'); drawEditor(); } }, 'Z kolumny T'),
@@ -148,6 +152,31 @@ export function mountContours(el, ctx) {
     });
     clear(st.tableHost).append(h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['#', 'Z [mm]', 'R [mm]', 'Zaokr.', ''].map((x) => h('th', {}, x)))), tb));
   }
+  /** Potwierdzenie poprawności konturu: zapis w PSWT, kolumna BH („OK data kto”); MASTER / GOD. */
+  function confirmBox2(t) {
+    const ok = okOf(t), inPswt = !!st.params[normCode(t.productCode)];
+    const box = h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', padding: '4px 6px', borderRadius: '6px', border: '1px solid ' + (ok ? '#2e7d32' : '#bbb'), background: ok ? '#e8f5e9' : '#fafafa' } },
+      h('b', { style: { color: ok ? '#2e7d32' : '#666' } }, ok ? '✓ Kontur potwierdzony' : 'Kontur niepotwierdzony'), ok ? h('span', { class: 'muted', style: { fontSize: '12px' } }, ok) : null);
+    const who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
+    const save = async (value) => {
+      try {
+        await api('ndConfirmContour', [t.productCode, value]);
+        st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value };
+        status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
+        drawList(); drawEditor();
+      } catch (e) { status.set('Nie zapisano potwierdzenia: ' + e.message, 'error'); }
+    };
+    if (canSave && inPswt) {
+      if (!ok) box.append(h('button', { class: 'btn small primary', title: 'Zapisuje w arkuszu PSWT (kolumna BH) potwierdzenie, że kontur narzędzia jest poprawny', onclick: async () => {
+        if (!(await confirmBox('Potwierdzenie konturu', `Potwierdzić poprawność konturu ${t.productCode}? Wpis trafi do arkusza PSWT, kolumna BH.`, 'Potwierdź'))) return;
+        const d = new Date(), dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+        save(`OK ${dd}${who ? ' ' + who : ''}`);
+      } }, '✓ Potwierdź poprawność konturu'));
+      else box.append(h('button', { class: 'btn small', onclick: async () => { if (await confirmBox('Potwierdzenie konturu', `Cofnąć potwierdzenie konturu ${t.productCode}?`, 'Cofnij')) save(''); } }, 'Cofnij potwierdzenie'));
+    } else if (!inPswt) box.append(h('span', { class: 'muted', style: { fontSize: '11px' } }, '(brak narzędzia w PSWT albo dane nie wczytane)'));
+    return box;
+  }
+
   /** Parametry D:N z PSWT – do wglądu; zmiana tylko do sprawdzenia konturu (nie zapisuje się w arkuszu). */
   function paramsPanel(t) {
     const base = st.params[normCode(t.productCode)];
@@ -296,4 +325,5 @@ export function mountContours(el, ctx) {
         canSave ? h('button', { class: 'btn primary', onclick: () => save(false) }, 'Zapisz do kolumny V') : h('span', { class: 'muted' }, 'Zapis do arkusza: MASTER lub GOD')))));
   drawEditor();
   load(false);
+  return { dirty: () => st.dirty };
 }

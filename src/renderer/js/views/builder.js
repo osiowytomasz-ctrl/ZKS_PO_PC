@@ -1,7 +1,7 @@
 // ToolBuilder – jak w aplikacji na Androida (BuilderScreen.kt): składanie zestawu narzędzi. Pierwsze narzędzie z listy z filtrami,
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
-import { h, clear, api, toast, modal, alertBox } from '../ui.js';
+import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
@@ -10,7 +10,7 @@ import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
-import { openContoursFor } from './contours.js';
+import { openContoursFor, mountContours } from './contours.js';
 
 const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
 
@@ -41,7 +41,7 @@ export function mountBuilder(el, ctx) {
 
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
   // ikonka narzędzia: Kontury z tym narzędziem; karta narzędzia – prawy przycisk myszy na wierszu / kafelku
-  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => { openContoursFor(t.productCode); ctx.go('kontury'); } });
+  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => contoursWindow(t) });
   const row = (t, opts = {}) => (st.view === 'tiles'
     ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts })
     : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts }));
@@ -90,6 +90,33 @@ export function mountBuilder(el, ctx) {
     if (!String(t.columnM ?? '').trim()) status.set('Brak danych w kolumnie M dla wybranego narzędzia.', 'neutral');
     else if (!shown().length) status.set('Brak dalszych powiązanych narzędzi.', 'neutral');
     else status.set('');
+  }
+
+  /**
+   * Kontury nad ToolBuilderem: okno na prawie cały ekran, reszta wyszarzona i nieaktywna; „Zamknij” albo Esc wraca do ToolBuildera
+   * (przy niezapisanych zmianach – pytanie). ToolBuilder zostaje otwarty ze swoim stanem.
+   */
+  function contoursWindow(t) {
+    openContoursFor(t.productCode);
+    const host = h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } });
+    let api2 = null;
+    const close = async () => {
+      if (api2 && api2.dirty() && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
+      document.removeEventListener('keydown', onKey, true); m.close();
+    };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      const overlays = document.querySelectorAll('.overlay');
+      if (overlays[overlays.length - 1] !== m.root.parentElement) return;   // Esc zamyka najpierw okna otwarte w Konturach
+      e.preventDefault(); e.stopPropagation(); close();
+    };
+    const m = modal(null, h('div', { class: 'fs-dialog' },
+      h('div', { class: 'row', style: { marginBottom: '6px' } }, h('h3', { style: { margin: 0, flex: 1 } }, `Kontury – ${t.productCode}`),
+        h('span', { class: 'muted', style: { fontSize: '12px' } }, 'Esc – zamknij'), h('button', { class: 'btn', onclick: close }, 'Zamknij')),
+      host), { wide: true, sticky: true });
+    m.root.classList.add('fs');
+    document.addEventListener('keydown', onKey, true);
+    api2 = mountContours(host, ctx);
   }
 
   /** Karta narzędzia: kod, lokalizacja i zużycie; duży rysunek 2D, obracany 3D, parametry w kafelkach, części ze stanem; dodanie do zestawu. */

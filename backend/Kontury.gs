@@ -80,15 +80,41 @@ function nd_contourData_() {
   var p = ss.getSheetByName('PSWT');
   if (p && p.getLastRow() > 1) {
     var keys = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
-    p.getRange(2, 2, p.getLastRow() - 1, 13).getDisplayValues().forEach(function (r) {
+    var n = p.getLastRow() - 1;
+    var bh = p.getRange(2, ND_PSWT_OK_COL, n, 1).getDisplayValues();   // potwierdzenie poprawności konturu
+    p.getRange(2, 2, n, 13).getDisplayValues().forEach(function (r, idx) {
       var code = nd_norm_(r[0]);
       if (!code || !String(r[2] || '').trim()) return;
       var o = {};
       for (var i = 1; i < keys.length; i++) o[keys[i]] = String(r[i] || '').trim();
+      o.BH = String(bh[idx][0] || '').trim();
       params[code] = o;
     });
   }
   return { mounts: mounts, params: params };
+}
+
+var ND_PSWT_OK_COL = 60; // BH – potwierdzenie poprawności konturu (PSWT)
+
+/**
+ * Potwierdzenie poprawności konturu narzędzia [code] w arkuszu PSWT, kolumna BH ([value] – np. „OK 20.11.2026 Kowalski”, pusty – cofnięcie).
+ *   ndConfirmContour: { write: true, run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx); } },
+ */
+function nd_confirmContour_(code, value, ctx) {
+  api_requireGrafikLevel_(ctx, 'master');
+  var want = nd_norm_(code);
+  if (!want) throw new Error('Brak kodu narzędzia.');
+  var p = SpreadsheetApp.getActive().getSheetByName('PSWT');
+  if (!p) throw new Error('Arkusz PSWT nie istnieje!');
+  var n = p.getLastRow() - 1;
+  var codes = p.getRange(2, 2, n, 1).getDisplayValues();
+  for (var i = 0; i < n; i++) {
+    if (nd_norm_(codes[i][0]) !== want) continue;
+    var row = i + 2;
+    p.getRange(row, ND_PSWT_OK_COL).setValue(String(value || '').slice(0, 200));
+    return { row: row, value: String(value || '') };
+  }
+  throw new Error('Nie ma narzędzia ' + code + ' w kolumnie B arkusza PSWT.');
 }
 
 /** Zapis wielu konturów naraz: { kod: ścieżka SVG } do kolumny V (jeden zapis kolumny). Wynik: { saved, missing: [kody] }. */
