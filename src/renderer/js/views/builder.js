@@ -2,7 +2,10 @@
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
 import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
-import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick, invalidateConfirmed } from '../catalog.js';
+import * as E from '../logic/contourEditor.js';
+import { fullContour } from '../logic/contourGen.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
 import { toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
@@ -35,15 +38,75 @@ export function mountBuilder(el, ctx) {
       // kolory lokalizacji z kolorów stanowisk (Ustawienia programu – config/main)
       try { const { sdk, db } = await firebase(); const snap = await sdk.getDoc(sdk.doc(db, 'config', 'main')); setToolStations(stationList(snap.exists() ? snap.data() : null)); } catch { setToolStations(null); }
       draw();
+      st.cat = cat; loadContourData();
     } catch (e) { clear(list).append(h('div', { class: 'err', style: { padding: '12px' } }, 'Nie wczytano narzędzi: ' + e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
     st.loading = false;
   }
+
+  // ---------- akceptacja konturu z kafelka: to samo co „✓ Potwierdź poprawność konturu” w Konturach (PSWT: BH, BC, BE) ----------
+  const canConfirm = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  async function loadContourData() {
+    if (!canConfirm) return;
+    try {
+      const [cd, v] = await Promise.all([api('ndContourData', [], { timeoutMs: 180000 }), api('ndContoursV', []).catch(() => ({}))]);
+      st.cd = { params: (cd && cd.params) || {}, mounts: (cd && cd.mounts) || {}, v: v || {} };
+      st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params));
+      if (st.view === 'tiles') drawList();
+    } catch (e) { st.cdError = e.message; if (st.view === 'tiles') drawList(); }
+  }
+  const nc = (t) => String(t.productCode || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  /** Kontur, który Kontury wczytałyby przy otwarciu (bez zmian): kolumna V, T albo dane D:N → prawa połowa SVG. */
+  function autoContour(t) {
+    const k = nc(t), v = st.cd.v[k] || '';
+    if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfSvg(E.halfFromContour(pts)), label: 'z kolumny V (roboczy)' }; }
+    const tp = G.parseContour(((st.index && st.index.details(t.productCode)) || {}).columnAY || '');
+    if (tp.length >= 3 && !((st.index.details(t.productCode) || {}).confirmedContour)) return { svg: E.halfSvg(E.halfFromContour(tp)), label: 'z kolumny T' };
+    const p = st.cd.params[k], g = p ? G.parseContour(fullContour(p, st.cd.mounts) || '') : [];
+    if (g.length >= 3) return { svg: E.halfSvg(E.halfFromContour(g)), label: 'z danych PSWT (D:N)' };
+    return null;
+  }
+  function okButton(t) {
+    if (!canConfirm) return null;
+    const box = h('div', { class: 'tile-ok', onclick: (e) => e.stopPropagation(), oncontextmenu: (e) => e.stopPropagation() });
+    const paint = () => {
+      clear(box);
+      if (!st.cd) { box.append(h('span', { class: 'muted', style: { fontSize: '11px' } }, st.cdError ? 'Kontur: brak danych PSWT' : 'Kontur: wczytywanie…')); return; }
+      const p = st.cd.params[nc(t)];
+      if (!p) { box.append(h('button', { class: 'btn small', disabled: true, title: 'Brak narzędzia w kolumnie B arkusza PSWT' }, '✓ Akceptuj kontur')); return; }
+      if (p.BH) {
+        box.append(h('span', { class: 'tile-ok-on', title: 'Kontur potwierdzony (PSWT, kolumna BH): ' + p.BH }, '✓ ' + p.BH),
+          h('button', { class: 'btn small', title: 'Cofnij potwierdzenie konturu', onclick: async () => {
+            if (!(await confirmBox('Potwierdzenie konturu', `Cofnąć potwierdzenie konturu ${t.productCode}?`, 'Cofnij'))) return;
+            try { await api('ndConfirmContour', [t.productCode, '', null, null]); p.BH = ''; after(t, box, false); toast('Cofnięto potwierdzenie'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
+          } }, '↺'));
+        return;
+      }
+      const src = autoContour(t);
+      box.append(h('button', { class: 'btn small primary', disabled: !src, title: src ? 'Zatwierdza kontur ' + src.label + ' – jak „Potwierdź poprawność konturu” w Konturach' : 'Brak konturu (T, V ani danych D:N)', onclick: async () => {
+        if (!(await confirmBox('Akceptacja konturu', `Zatwierdzić kontur narzędzia ${t.productCode} (${src.label}, bez zmian)? Do arkusza PSWT trafi: potwierdzenie (kolumna BH) i kontur – prawa połowa (kolumna BC). Rejony (kolumna BE) zostają bez zmian.`, 'Zatwierdź'))) return;
+        const d = new Date(), who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
+        const value = `OK ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}${who ? ' ' + who : ''}`;
+        try { await api('ndConfirmContour', [t.productCode, value, src.svg, null]); p.BH = value; p.BC = src.svg; after(t, box, true); toast('Kontur zatwierdzony – kafelek przeniesiony na koniec listy'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
+      } }, '✓ Akceptuj kontur'));
+    };
+    box._paint = paint; paint();
+    return box;
+  }
+  /** Po zmianie potwierdzenia: zatwierdzone kontury (BC zamiast T) w miniaturach i podglądach, przerysowanie kafelków. */
+  function after(t, box, toEnd) {
+    invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params));
+    const tile = box.closest('.tool-tile');
+    if (toEnd && tile && st.stopFill && st.stopFill.add) { tile.remove(); st.stopFill.add(t); }   // zatwierdzony – na sam dół, bez przewijania listy
+    else if (tile) tile.replaceWith(row(t, { onclick: () => select(t) }));
+  }
+  /** Kafelki: zatwierdzone kontury (PSWT BH) na końcu listy. */
+  const okLast = (items) => (st.view === 'tiles' && st.cd ? [...items.filter((t) => !(st.cd.params[nc(t)] || {}).BH), ...items.filter((t) => (st.cd.params[nc(t)] || {}).BH)] : items);
 
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
   // ikonka narzędzia: Kontury z tym narzędziem; karta narzędzia – prawy przycisk myszy na wierszu / kafelku
   const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => contoursWindow(t) });
   const row = (t, opts = {}) => (st.view === 'tiles'
-    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts })
+    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, footer: okButton(t), ...opts })
     : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts }));
 
   function draw() {
@@ -59,7 +122,7 @@ export function mountBuilder(el, ctx) {
   }
 
   function drawList() {
-    const items = shown();
+    const items = okLast(shown());
     if (st.stopFill) st.stopFill();
     clear(list);
     if (st.selected.length) {

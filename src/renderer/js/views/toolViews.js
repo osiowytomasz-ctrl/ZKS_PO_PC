@@ -201,12 +201,12 @@ export function statusLine() {
 export { clear };
 
 /** Kafelek narzędzia (widok kafelków): kod na pasku zużycia, lokalizacja, duża miniatura, opis i parametry; ramka i poświata wg lokalizacji. */
-export function toolTile(t, { warning = false, onclick, oncontextmenu, mini = null, description = null } = {}) {
+export function toolTile(t, { warning = false, onclick, oncontextmenu, mini = null, description = null, footer = null } = {}) {
   const lc = locColor(t.location);
   return h('div', { class: 'tool-tile' + (onclick ? ' click' : ''), onclick, oncontextmenu, style: frameStyle(t.location) },
     h('div', { class: 'tile-head' }, wearCodeCell(t.wear, t.location, warning, h('b', {}, t.productCode)),
       h('span', { class: 'tile-loc', style: { background: lc || '#eee', color: lc ? contrast(lc) : '#333' } }, t.location || '—')),
-    h('div', { class: 'tile-body' }, mini ? h('div', { class: 'tile-mini' }, mini) : null, toolCard(description ?? T.description(t), toolParams(t))));
+    h('div', { class: 'tile-body' }, mini ? h('div', { class: 'tile-mini' }, mini) : null, toolCard(description ?? T.description(t), toolParams(t))), footer);
 }
 /** Czarny albo biały tekst na tle [bg]. */
 export function contrast(bg) {
@@ -222,5 +222,8 @@ export function lazyFill(container, items, make, step = 120) {
   container.append(sentinel);
   more();
   if (n < items.length) io.observe(sentinel);
-  return () => io.disconnect();
+  const stop = () => io.disconnect();
+  /** Dodanie elementu na koniec listy (dorysowany od razu, gdy lista jest już cała na ekranie). */
+  stop.add = (item) => { items.push(item); if (!sentinel.isConnected && n === items.length - 1) { container.append(make(item)); n++; } };
+  return stop;
 }

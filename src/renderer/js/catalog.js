@@ -30,6 +30,9 @@ export function confirmedContours(force = false) {
   return confirmed;
 }
 
+/** Po zatwierdzeniu / cofnięciu konturu – następne odczyty pobiorą świeże dane. */
+export function invalidateConfirmed() { confirmed = null; }
+
 /** Jak confirmedContours, ale czeka najwyżej [ms] – moduł otwiera się od razu (przy następnym otwarciu dane są już w pamięci). */
 export const confirmedContoursQuick = (ms = 4000) => Promise.race([confirmedContours(), new Promise((r) => setTimeout(() => r(null), ms))]);
 

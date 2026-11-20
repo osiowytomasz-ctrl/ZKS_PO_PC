@@ -153,3 +153,7 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .tcard-param { background: #f5f7fb; border-radius: 6px; padding: 5px 8px; }
 .tcard-param span { display: block; font-size: 11px; color: #666; }
 .tcard-param b { font-size: 16px; }
+/* ToolBuilder: akceptacja konturu na kafelku */
+.tile-ok { display: flex; gap: 4px; align-items: center; padding: 3px 6px; border-top: 1px solid #eee; min-height: 26px; }
+.tile-ok .btn.small { padding: 1px 8px; }
+.tile-ok-on { flex: 1; min-width: 0; background: #2e7d32; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
