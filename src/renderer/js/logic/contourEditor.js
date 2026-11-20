@@ -112,6 +112,9 @@ export function confirmedOverrides(params) {
     const pts = expandHalf(svgToContour(o.BC));
     if (pts.length >= 3) m.set(String(k).trim().toLowerCase(), pts.map((p) => `${fmt(p.x)}_${fmt(p.y)}`).join(';'));
   }
+  // rejony ostrze / oprawka (BE) zatwierdzonych narzędzi – kolor części roboczej w 3D
+  m.regions = new Map();
+  for (const [k, o] of Object.entries(params || {})) if (o && String(o.BH || '').trim() && String(o.BE || '').trim()) m.regions.set(String(k).trim().toLowerCase(), parseRegionsText(o.BE));
   return m;
 }
 
@@ -231,4 +234,60 @@ export function addEdgeLines(svg) {
     if (k >= 0) { out.push(`L 0 ${fmt(y / 10)} L ${fmt(x / 10)} ${fmt(y / 10)}`); todo.splice(k, 1); }
   }
   return out.join(' ');
+}
+
+// ---------- narzędzia monolityczne: część robocza wg długości roboczej (PSWT, kolumna K) ----------
+/** Narzędzia z jednej części (frez / wiertło węglikowe i HSS, wiertło rurowe trepanacyjne) – ostrze i chwyt to jeden kontur. */
+export function isMonolithic(p) {
+  const d = String((p && p.D) || '').trim().toLowerCase(), e = String((p && p.E) || '').trim().toLowerCase();
+  return d === 'tre' || ((d === 'wie' || d === 'fre') && (e === 'hss' || e === 'węg'));
+}
+/** Długość robocza (mm) z kolumny K albo 0. */
+export const workLength = (p) => { const k = Number(String((p && p.K) || '').trim().replace(',', '.')); return Number.isFinite(k) && k > 0 ? k : 0; };
+/**
+ * Podział istniejącego konturu (połowa SVG, mm) wg długości roboczej: ostrze od czubka (największe Z) na długości [k],
+ * reszta – oprawka (chwyt). Wynik: { z (mm) – granica, regions: [{role, z1, z2}] } albo null.
+ */
+export function workSplit(svg, k) {
+  const pts = expandHalf(svgToContour(svg));
+  if (pts.length < 3 || !(k > 0)) return null;
+  const ys = pts.map((p) => p.y / 10), zMin = Math.min(...ys), zMax = Math.max(...ys), z = Math.round((zMax - k) * 1000) / 1000;
+  if (!(z > zMin && z < zMax)) return null;
+  return { z, regions: [{ role: 'oprawka', z1: Math.round(zMin * 1000) / 1000, z2: z }, { role: 'ostrze', z1: z, z2: Math.round(zMax * 1000) / 1000 }] };
+}
+/**
+ * Linia przez całą szerokość na wysokości [z] (mm) w połowie konturu (SVG): punkt na obrysie (przecięcie odcinka) i odcinek do osi.
+ * Gdy taka linia już jest – bez zmian. Łuki zostają (linia wstawiana tylko na odcinkach prostych).
+ */
+export function addLineAt(svg, z) {
+  const path = String(svg || '').trim(), Z = z * 10;
+  const pts = svgToContour(path);
+  if (pts.length < 3 || !isHalf(pts)) return path;
+  const near = (a, b) => Math.abs(a - b) < 0.02;
+  if (pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, Z) && near(q.y, Z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) > 0.02; })) return path;
+  const cmds = (path.match(/[MLAQZ][^MLAQZ]*/gi) || []).map((c) => c.trim());
+  const end = (c) => { const nums = (c.slice(1).match(/-?\d+(?:[.,]\d+)?(?:e-?\d+)?/gi) || []).map((x) => Number(x.replace(',', '.'))); return nums.length >= 2 ? { x: nums[nums.length - 2] * 10, y: nums[nums.length - 1] * 10 } : null; };
+  // kandydaci: punkt obrysu dokładnie na Z albo przecięcie odcinka prostego; wybierany najdalszy od osi (obrys zewnętrzny)
+  let best = null, prev = null, start = null;
+  cmds.forEach((c, i) => {
+    const cmd = c[0].toUpperCase(), e = cmd === 'Z' ? start : end(c);
+    if (cmd === 'M') start = e;
+    if (e && near(e.y, Z) && e.x > 0.02 && cmd !== 'Z' && (!best || e.x > best.x)) best = { i, x: e.x, at: true };
+    if (cmd === 'L' && prev && e && (prev.y - Z) * (e.y - Z) < 0) {
+      const x = prev.x + ((Z - prev.y) * (e.x - prev.x)) / (e.y - prev.y);
+      if (x > 0.02 && (!best || x > best.x)) best = { i, x, at: false };
+    }
+    if (e) prev = e;
+  });
+  if (!best) return path;
+  const X = fmt(best.x / 10), Zs = fmt(z), spur = `L 0 ${Zs} L ${X} ${Zs}`;
+  if (best.at) cmds.splice(best.i + 1, 0, spur);
+  else cmds.splice(best.i, 0, `L ${X} ${Zs} ${spur}`);
+  return cmds.join(' ');
+}
+
+/** Rejony z tekstu kolumny BE: „ostrze 0–45; oprawka 45–60” → [{ role, z1, z2 }] (mm). */
+export function parseRegionsText(text) {
+  return String(text || '').split(';').map((x) => /^(ostrze|oprawka)\s+(-?[\d.,]+)\s*[–-]\s*(-?[\d.,]+)$/i.exec(x.trim())).filter(Boolean)
+    .map((m) => ({ role: m[1].toLowerCase(), z1: Number(m[2].replace(',', '.')), z2: Number(m[3].replace(',', '.')) }));
 }

@@ -6,17 +6,31 @@ import * as G from '../logic/toolGeometry.js';
 
 let THREE_P = null;
 const three = () => (THREE_P ||= import('../../vendor/three.js'));
-const SEG = 128;   // podział obwodu – gładka bryła przy niewielkim koszcie (GPU)
+const SEG = 128;
+/** Kolor części roboczej i płytek – jak płytki w module Części (widok główny). */
+const WORK_COLOR = 0xc8a400;
+/** Profil z punktami wstawionymi na poziomach [zs] (0,1 mm) – granice rejonów leżą na krawędziach siatki. */
+function splitProfile(pr, zs) {
+  const out = [pr[0]];
+  for (let k = 0; k < pr.length - 1; k++) {
+    const a = pr[k], b = pr[k + 1];
+    const cut = zs.filter((z) => (z - a.y) * (z - b.y) < 0).sort((p, q) => (b.y > a.y ? p - q : q - p));
+    for (const z of cut) { const t = (z - a.y) / (b.y - a.y); out.push({ x: a.x + t * (b.x - a.x), y: z }); }
+    out.push(b);
+  }
+  return out;
+}   // podział obwodu – gładka bryła przy niewielkim koszcie (GPU)
 
 /** Geometria bryły obrotowej z profilu (punkty {x: promień, y: wysokość} w 0,1 mm → mm). Każdy odcinek profilu ma własne wierzchołki,
  *  więc normalne są gładkie wokół osi, a ostre na załamaniach (stożek → walec itp.). */
-function latheGeometry(T, profile, z0) {
+function latheGeometry(T, profile, z0, keep = null) {
   const pos = [], nrm = [], idx = [];
   let area = 0; for (let k = 0; k < profile.length; k++) { const a = profile[k], b = profile[(k + 1) % profile.length]; area += a.x * b.y - b.x * a.y; }
   const sg = area < 0 ? -1 : 1;   // kierunek obiegu profilu → normalne zawsze na zewnątrz
   const cs = [...Array(SEG + 1)].map((_, j) => [Math.cos((2 * Math.PI * j) / SEG), Math.sin((2 * Math.PI * j) / SEG)]);
   for (let k = 0; k < profile.length - 1; k++) {
     const a = profile[k], b = profile[k + 1];
+    if (keep && !keep(a, b)) continue;
     const r1 = a.x / 10, y1 = (a.y + z0) / 10, r2 = b.x / 10, y2 = (b.y + z0) / 10;
     if (r1 === 0 && r2 === 0) continue;
     const dy = y2 - y1, dr = r2 - r1, len = Math.hypot(dy, dr) || 1;
@@ -94,7 +108,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
     const edges = (g, color, op) => { const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color, transparent: true, opacity: op }); group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em); };
     // płytki skrawające: wielokąty z rysunku 2D wyciągnięte na grubość (w płaszczyźnie osi narzędzia)
     if (inserts && inserts.length) {
-      const im = new T.MeshStandardMaterial({ color: 0xc62828, metalness: 0.45, roughness: 0.35, flatShading: true }); mats.push(im);
+      const im = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.45, roughness: 0.35, flatShading: true }); mats.push(im);
       const lm = new T.LineBasicMaterial({ color: 0x3b0000, transparent: true, opacity: 0.6 }); mats.push(lm);
       for (const it0 of inserts) {
         const it = Array.isArray(it0) ? { poly: it0, z: 1, draft: 7, alone: true } : it0;
@@ -111,13 +125,20 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         }
       }
     }
-    (mesh ? mesh.profiles : []).forEach((pr, i) => {
-      if (!pr) return;
-      const g = latheGeometry(T, pr, mesh.offsets[i]); if (!g) return;
+    const workMat = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.55, roughness: 0.3, side: T.DoubleSide }); mats.push(workMat);
+    (mesh ? mesh.profiles : []).forEach((pr0, i) => {
+      if (!pr0) return;
+      // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
+      const regs = ((mesh.regions && mesh.regions[i]) || []).filter((r) => r.role === 'ostrze');
+      const pr = regs.length ? splitProfile(pr0, regs.flatMap((r) => [r.z1 * 10, r.z2 * 10])) : pr0;
+      const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
-      const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide });
-      group.add(new T.Mesh(g, m)); geos.push(g); mats.push(m);
-      edges(g, 0x2a2f36, 0.35);
+      const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide }); mats.push(m);
+      for (const [keep, mat] of regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
+        const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;
+        group.add(new T.Mesh(g, mat)); geos.push(g);
+        edges(g, 0x2a2f36, 0.35);
+      }
     });
     if (opts.xf) {   // przesunięcie / obrót całego narzędzia z płytkami (moduł Kontury)
       group.rotation.z = (opts.xf.ang * Math.PI) / 180;

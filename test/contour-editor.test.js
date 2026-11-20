@@ -81,3 +81,15 @@ test('linie krawędzi części obrotowej dopisywane do połowy konturu (uskok, s
   assert.equal(E.addEdgeLines(E.addEdgeLines(er)), E.addEdgeLines(er));   // bez powtórzeń
   assert.equal(E.addEdgeLines('M 0 0 L 8 0 L 8 60 L 0 60 Z'), 'M 0 0 L 8 0 L 8 60 L 0 60 Z');   // walec – bez linii
 });
+
+test('narzędzia monolityczne: podział istniejącego konturu wg długości roboczej (K)', () => {
+  assert.ok(E.isMonolithic({ D: 'wie', E: 'HSS' }) && E.isMonolithic({ D: 'fre', E: 'WĘG' }) && E.isMonolithic({ D: 'tre', E: 'TCT' }));
+  assert.ok(!E.isMonolithic({ D: 'fre', E: 'pal' }) && !E.isMonolithic({ D: 'opr', E: 'red' }));
+  const plain = 'M 0 -21 L 3 -21 L 3 54 L 0 54 Z';
+  const s = E.workSplit(plain, E.workLength({ K: '25' }));
+  assert.deepEqual(s, { z: 29, regions: [{ role: 'oprawka', z1: -21, z2: 29 }, { role: 'ostrze', z1: 29, z2: 54 }] });
+  assert.equal(E.addLineAt(plain, 29), 'M 0 -21 L 3 -21 L 3 29 L 0 29 L 3 29 L 3 54 L 0 54 Z');
+  assert.equal(E.addLineAt(E.addLineAt(plain, 29), 29), E.addLineAt(plain, 29));
+  assert.equal(E.workSplit(plain, 100), null);
+  assert.deepEqual(E.parseRegionsText('ostrze 29–54; oprawka -21–29'), [{ role: 'ostrze', z1: 29, z2: 54 }, { role: 'oprawka', z1: -21, z2: 29 }]);
+});

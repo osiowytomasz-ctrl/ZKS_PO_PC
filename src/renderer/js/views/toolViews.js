@@ -86,6 +86,7 @@ export function toolView3d(index, tools) {
   if (!index) return view3d(null);
   const stts = tools.map((t) => index.stackTool(t));
   const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])));
+  if (mesh) mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
   const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code) })) : [];
   return view3d(mesh, ins);
 }

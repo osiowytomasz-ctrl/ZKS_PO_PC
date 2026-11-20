@@ -13,7 +13,7 @@ import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
-import { openContoursFor, mountContours } from './contours.js';
+import { openContoursFor, mountContours, regionsText } from './contours.js';
 
 const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
 
@@ -57,7 +57,16 @@ export function mountBuilder(el, ctx) {
   }
   const nc = (t) => String(t.productCode || '').trim().toLowerCase().replace(/\s+/g, ' ');
   /** Kontur, który Kontury wczytałyby przy otwarciu (bez zmian): kolumna V, T albo dane D:N → prawa połowa SVG. */
-  function autoContour(t) { const r = autoContour0(t); return r ? { ...r, svg: E.addEdgeLines(r.svg) } : null; }   // + linie krawędzi części obrotowej
+  function autoContour(t) {
+    const r = autoContour0(t);
+    if (!r) return null;
+    let svg = E.addEdgeLines(r.svg);   // + linie krawędzi części obrotowej
+    const p = st.cd.params[nc(t)], sp = monoSplit(p, svg);
+    if (sp) svg = E.addLineAt(svg, sp.z);
+    return { ...r, svg, regions: sp ? regionsText(sp.regions) : null };
+  }
+  /** Narzędzie monolityczne bez rejonów w BE: podział istniejącego konturu wg długości roboczej (K) – ostrze od czubka, reszta oprawka. */
+  const monoSplit = (p, svg) => (p && !String(p.BE || '').trim() && E.isMonolithic(p) && E.workLength(p) > 0 ? E.workSplit(svg, E.workLength(p)) : null);
   function autoContour0(t) {
     const k = nc(t), v = st.cd.v[k] || '';
     if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfPathSvg(pts), label: 'z kolumny V (roboczy)' }; }
@@ -89,18 +98,20 @@ export function mountBuilder(el, ctx) {
         if (E.halfSvg(E.halfFromContour(pts)) === svg) { svg = E.halfPathSvg(pts); break; }
       }
       svg = E.addEdgeLines(svg);   // brakujące linie krawędzi części obrotowej
-      if (svg !== p.BC.trim()) out.push({ t, p, svg });
+      const sp = monoSplit(p, svg);   // monolityczne bez rejonów – podział wg długości roboczej
+      if (sp) svg = E.addLineAt(svg, sp.z);
+      if (svg !== p.BC.trim() || sp) out.push({ t, p, svg, regions: sp ? regionsText(sp.regions) : null });
     }
     return out;
   }
   async function fixConfirmed() {
     const list2 = fixableConfirmed();
     if (!list2.length) { toast('Brak konturów do poprawy'); return; }
-    if (!(await confirmBox('Popraw zatwierdzone kontury', `Zatwierdzone kontury bez linii krawędzi (${list2.length}). Zapisać je jeszcze raz w PSWT (kolumna BC) – z liniami krawędzi elementów i części obrotowej? Potwierdzenie (BH) i rejony (BE) się nie zmienią.\n\n${list2.slice(0, 12).map((x) => x.t.productCode).join(', ')}${list2.length > 12 ? ' …' : ''}`, 'Popraw'))) return;
+    if (!(await confirmBox('Popraw zatwierdzone kontury', `Zatwierdzone kontury do uzupełnienia (${list2.length}): linie krawędzi elementów i części obrotowej (kolumna BC), a w narzędziach monolitycznych bez rejonów – podział ostrze / oprawka wg długości roboczej (kolumna BE). Zapisać je jeszcze raz w PSWT? Potwierdzenie (BH) się nie zmieni.\n\n${list2.slice(0, 12).map((x) => x.t.productCode).join(', ')}${list2.length > 12 ? ' …' : ''}`, 'Popraw'))) return;
     let ok = 0, bad = 0;
     for (const x of list2) {
       status.set(`Poprawianie konturów… ${ok + bad + 1} / ${list2.length}`, 'neutral');
-      try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, null]); x.p.BC = x.svg; ok++; } catch { bad++; }
+      try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, x.regions]); x.p.BC = x.svg; if (x.regions) x.p.BE = x.regions; ok++; } catch { bad++; }
     }
     status.set(`Poprawiono kontury: ${ok}` + (bad ? `, błędy: ${bad}` : '') + '.', bad ? 'error' : 'neutral');
     invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params)); paintFix(); drawList();
@@ -126,10 +137,10 @@ export function mountBuilder(el, ctx) {
       }
       const src = autoContour(t);
       box.append(h('button', { class: 'btn small primary', disabled: !src, title: src ? 'Zatwierdza kontur ' + src.label + ' – jak „Potwierdź poprawność konturu” w Konturach' : 'Brak konturu (T, V ani danych D:N)', onclick: async () => {
-        if (!(await confirmBox('Akceptacja konturu', `Zatwierdzić kontur narzędzia ${t.productCode} (${src.label}, bez zmian)? Do arkusza PSWT trafi: potwierdzenie (kolumna BH) i kontur – prawa połowa (kolumna BC). Rejony (kolumna BE) zostają bez zmian.`, 'Zatwierdź'))) return;
+        if (!(await confirmBox('Akceptacja konturu', `Zatwierdzić kontur narzędzia ${t.productCode} (${src.label}, bez zmian)? Do arkusza PSWT trafi: potwierdzenie (kolumna BH) i kontur – prawa połowa (kolumna BC).` + (src.regions ? ` Narzędzie monolityczne – podział wg długości roboczej (kolumna K): ${src.regions} (kolumna BE).` : ' Rejony (kolumna BE) zostają bez zmian.'), 'Zatwierdź'))) return;
         const d = new Date(), who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
         const value = `OK ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}${who ? ' ' + who : ''}`;
-        try { await api('ndConfirmContour', [t.productCode, value, src.svg, null]); p.BH = value; p.BC = src.svg; after(t, box, true); toast('Kontur zatwierdzony – kafelek przeniesiony na koniec listy'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
+        try { await api('ndConfirmContour', [t.productCode, value, src.svg, src.regions]); p.BH = value; p.BC = src.svg; if (src.regions) p.BE = src.regions; after(t, box, true); toast('Kontur zatwierdzony – kafelek przeniesiony na koniec listy'); } catch (e) { toast('Nie zapisano: ' + e.message, true); }
       } }, '✓ Akceptuj kontur'));
     };
     box._paint = paint; paint();

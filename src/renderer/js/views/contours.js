@@ -134,6 +134,8 @@ export function mountContours(el, ctx) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
     st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.insSel = null; pv.ptEdit = null; st.insAdj = {}; st.xf = { dx: 0, dz: 0, ang: 0 };
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
+    // narzędzie monolityczne bez zapisanych rejonów: ostrze wg długości roboczej (K) – ustawiane po narysowaniu konturu
+    { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.workLength(p) > 0; }
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = bcOf(t) ? [fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)] : vOf(t) ? [fromSvg(vOf(t)), 'kolumna V', vOf(t)] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
     setFull(src && src[0], src && src[1], src && src[2]);
@@ -198,7 +200,8 @@ export function mountContours(el, ctx) {
     const save = async (value) => {
       try {
         // zatwierdzony nowy kontur → PSWT kolumna BC (SVG, mm), rejony ostrze / oprawka → kolumna BE
-        const bc = value ? E.addEdgeLines(svgOut.value) : null;   // + linie krawędzi części obrotowej
+        let bc = value ? E.addEdgeLines(svgOut.value) : null;   // + linie krawędzi części obrotowej
+        if (bc) for (const r of (st.regions || []).slice(0, -1)) bc = E.addLineAt(bc, r.z2);   // + linie podziału ostrze / oprawka
         await api('ndConfirmContour', [t.productCode, value, bc, value ? regionsText(st.regions) : null]);
         st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: bc, BE: regionsText(st.regions) } : {}) };
         status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
@@ -317,6 +320,7 @@ export function mountContours(el, ctx) {
       clear(prev3d);
       const f0 = st.xf || { dx: 0, dz: 0, ang: 0 };   // bryła z konturu przed przesunięciem, przesunięcie / obrót całości w scenie
       const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))]) : null;
+      if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
       const set = insertSetup(t);
       const ins = t && pv.showIns ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft })) : [];
       prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
@@ -532,6 +536,17 @@ export function mountContours(el, ctx) {
   }
   function drawRegionBar() {
     clear(regionBar);
+    const p = st.tool && st.params[normCode(st.tool.productCode)], k = E.workLength(p);
+    if (st.autoSplit && svgOut.value) {
+      st.autoSplit = false;
+      const s = E.workSplit(svgOut.value, k);
+      if (s) { st.regions = s.regions; setTimeout(drawPreview, 0); status.set(`Narzędzie monolityczne: ostrze – ${String(k).replace('.', ',')} mm od czubka (długość robocza, kolumna K), reszta – oprawka. Zapis przy potwierdzeniu konturu.`, 'neutral'); }
+    }
+    if (k > 0 && svgOut.value && !pv.sel) regionBar.append(h('button', { class: 'btn small', title: 'Ostrze od czubka na długości roboczej (PSWT, kolumna K), reszta konturu – oprawka. Kontur się nie zmienia, dochodzi linia podziału.', onclick: () => {
+      const s = E.workSplit(svgOut.value, k);
+      if (!s) { status.set('Długość robocza nie mieści się w konturze.', 'error'); return; }
+      st.regions = s.regions; st.dirty = true; drawPreview();
+    } }, `Podziel wg L roboczej (${String(k).replace('.', ',')} mm)`));
     if (pv.sel) regionBar.append(h('b', {}, `Rejon Z ${String(pv.sel.z1).replace('.', ',')}–${String(pv.sel.z2).replace('.', ',')} mm:`),
       h('button', { class: 'btn small', style: { background: '#d50000', color: '#fff' }, onclick: () => setRole('ostrze') }, 'Ostrze'),
       h('button', { class: 'btn small', style: { background: '#616161', color: '#fff' }, onclick: () => setRole('oprawka') }, 'Oprawka'),
