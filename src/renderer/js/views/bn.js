@@ -5,7 +5,7 @@ import { h, clear, apiCached } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { wearCodeCell, toolCard, stackSvg, view3d, partsTable, fullScreen, filterDropdown, statusLine } from './toolViews.js';
+import { wearCodeCell, toolCard, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine } from './toolViews.js';
 
 const FILTERS = [['group', 'Grupa'], ['type', 'Rodzaj'], ['diameter', 'Φ'], ['length', 'L']];
 const empty = () => ({ group: '', type: '', diameter: '', length: '' });
@@ -59,7 +59,7 @@ export function mountBn(el, ctx) {
     if (!st.index) content = h('p', {}, st.indexError ? 'Brak danych narzędzi: ' + st.indexError : 'Ładowanie danych narzędzi…');
     else if (view === 'parts') content = partsTable(st.index.partRows(codes));
     else if (view === 'd2') { const s = G.buildStack(codes.map((c) => st.index.stackTool(c)).filter(Boolean), true, false); content = s ? stackSvg(s, { labels: true, width: 900, height: 900 }) : h('p', {}, 'Brak danych konturu 2D.'); }
-    else content = view3d(G.buildMesh(codes.map((c) => G.parseContour((st.index.details(c) || {}).columnAY))));
+    else content = toolView3d(st.index, codes);
     fullScreen(title, content);
   }
 

@@ -403,6 +403,17 @@ export function buildMesh(contours, segments = 36) {
   const [x0, x1] = mm(vx), [y0, y1] = mm(vy), [z0, z1] = mm(vz);
   return { vx, vy, vz, quads, faceTool, normals, faceCount: faces, profiles, offsets, center: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], size: Math.max(1, x1 - x0, y1 - y0, z1 - z0) };
 }
+/** Płytki zestawu do podglądu 3D: wielokąty (0,1 mm) w układzie siatki buildMesh – rozmieszczenie jak na rysunku 2D (buildStack), wysokość + offsets[i]. */
+export function insertsForMesh(stackTools, offsets) {
+  const out = [];
+  stackTools.forEach((stt, i) => {
+    if (!stt || !stt.inserts || !stt.inserts.length || !stt.contour || stt.contour.length < 3) return;
+    const s = buildStack([stt], true, false); if (!s) return;
+    const b = bounds(stt.contour), off = (offsets && offsets[i]) || 0;
+    for (const poly of s.layers[0].inserts) out.push(poly.map((p) => pt(p.x, b.maxY - p.y + off)));
+  });
+  return out;
+}
 /** Kamera obracająca się wokół środka bryły: ustawienie początkowe jak w wersji webowej (1,3; 0,8; 1,8). */
 export function initialCamera(size) {
   const x = 1.3, y = 0.8, z = 1.8, len = Math.hypot(x, y, z);

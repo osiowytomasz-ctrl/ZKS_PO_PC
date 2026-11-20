@@ -7,7 +7,7 @@ import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { statusLine, filterDropdown, lazyFill } from './toolViews.js';
+import { statusLine, filterDropdown, lazyFill, view3d } from './toolViews.js';
 import * as B from '../logic/builder.js';
 
 let pendingCode = null;
@@ -39,9 +39,11 @@ export function mountContours(el, ctx) {
   const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
   const stepSel = h('select', { onchange: () => { pv.step = Number(stepSel.value); drawPreview(); } }, ...[['0', 'siatka: auto'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm']].map(([v, l]) => h('option', { value: v }, l)));
   const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
+  const prev3d = h('div', { style: { flex: 1, minHeight: '320px', border: '1px solid #ccc', display: 'none' } });
+  const mode3d = h('button', { class: 'btn small', title: 'Podgląd 3D nowego konturu z płytkami', onclick: () => { pv.d3 = !pv.d3; mode3d.classList.toggle('primary', pv.d3); mode3d.textContent = pv.d3 ? '2D' : '3D'; drawPreview(); } }, '3D');
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel,
-    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'),
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
@@ -139,6 +141,7 @@ export function mountContours(el, ctx) {
       h('button', { class: 'btn small', disabled: !genOf(t), title: 'Kontur policzony z kolumn D:N arkusza PSWT i mocowania z zakładki „kontury” (jak dawna formuła)', onclick: () => { setFull(genOf(t), 'dane D:N'); st.dirty = true; status.set('Wczytano pełny kontur policzony z danych (D:N) – z liniami rzutu bocznego.', 'neutral'); drawEditor(); } }, 'Z danych (D:N)'),
       h('button', { class: 'btn small', onclick: () => setRows([{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }], 'Wyczyszczono.') }, 'Od nowa'),
       h('button', { class: 'btn small', onclick: () => { st.rows.push({ z: '', r: '', rad: '' }); st.dirty = true; drawEditor(); } }, '+ punkt')));
+    editBox.append(moveBox());
     editBox.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Połowa konturu od osi na zewnątrz, w kolejności obrysu: Z – pozycja wzdłuż osi (mm, 0 jak w kolumnie T), R – promień od osi (mm), Zaokr. – promień zaokrąglenia w tym punkcie (mm, puste – ostry narożnik). Druga połowa powstaje sama (odbicie lustrzane).'));
     st.noteHost = h('div', {});
     st.tableHost = h('div', {});
@@ -239,6 +242,33 @@ export function mountContours(el, ctx) {
     return box;
   }
 
+  /** Przesunięcie / obrót całego konturu: X, Z (mm) i kąt (°, dodatni – przeciwnie do wskazówek zegara, wokół punktu 0,0). */
+  function moveBox() {
+    const inp = (ph) => h('input', { type: 'text', placeholder: ph, style: { width: '58px', padding: '1px 4px' } });
+    const ix = inp('0'), iz = inp('0'), ia = inp('0');
+    const n = (i) => { const v = Number(String(i.value || '0').replace(',', '.')); return Number.isFinite(v) ? v : NaN; };
+    const apply = () => {
+      const dx = n(ix), dz = n(iz), a = n(ia);
+      if ([dx, dz, a].some(Number.isNaN)) { status.set('Wpisz liczby (mm, °).', 'error'); return; }
+      if (!dx && !dz && !a) return;
+      if (!st.full && !dx && !a) {   // tylko Z w trybie połowy – zachowuje zaokrąglenia
+        for (const r of st.rows) if (String(r.z).trim() !== '') r.z = fmtMm(Number(String(r.z).replace(',', '.')) * 10 + dz * 10);
+      } else {
+        const errs = st.full ? [] : E.validate(st.rows);
+        if (errs.length) { status.set('Najpierw popraw tabelę: ' + errs[0], 'error'); return; }
+        const pts = st.full ? st.full.map((p) => ({ ...p })) : E.svgToContour(E.toSvg(st.rows));
+        const c = Math.cos((a * Math.PI) / 180), s = Math.sin((a * Math.PI) / 180);
+        const moved = pts.map((p) => ({ x: Math.round((p.x * c - p.y * s + dx * 10) * 1000) / 1000, y: Math.round((p.x * s + p.y * c + dz * 10) * 1000) / 1000 }));
+        setFull(moved, (st.fullLabel ? st.fullLabel + ', ' : '') + 'przesunięty');
+      }
+      st.dirty = true; pv.view = null;
+      status.set(`Kontur przesunięty: X ${dx} mm, Z ${dz} mm, obrót ${a}°.` + (dx || a ? ' Przesunięcie w X / obrót daje kontur niesymetryczny – zapisywany jako pełny kontur.' : ''), 'neutral');
+      drawEditor();
+    };
+    return h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap', fontSize: '12px', background: '#f4f6f8', padding: '4px', borderRadius: '4px' } },
+      h('b', {}, 'Cały kontur:'), 'przesuń X', ix, 'Z', iz, 'mm · obróć', ia, '°', h('button', { class: 'btn small', onclick: apply }, 'Zastosuj'));
+  }
+
   function setRows(rows, msg) { st.full = null; st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
   /** Pełny kontur bez zmian (T / V / dane) – tabela pokazuje jego obrys (połowę) tylko do podglądu i ewentualnej edycji. */
   function setFull(points, label) {
@@ -252,6 +282,13 @@ export function mountContours(el, ctx) {
     errBox.textContent = errs.join('\n');
     const svg = !t ? '' : st.full ? E.contourToSvg(st.full) : !errs.length ? E.toSvg(st.rows) : '';
     svgOut.value = svg;
+    preview.style.display = pv.d3 ? 'none' : ''; prev3d.style.display = pv.d3 ? '' : 'none';
+    if (pv.d3) {
+      clear(prev3d);
+      const mesh = svg ? G.buildMesh([E.svgToContour(svg)]) : null;
+      const ins = t && pv.showIns ? insertsOf(t).flatMap((q) => [q.right, q.left]) : [];
+      prev3d.append(mesh || ins.length ? view3d(mesh, ins) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
+    }
     const layers = [];
     if (t && tOf(t)) layers.push({ pts: G.parseContour(tOf(t)), stroke: '#888', fill: 'none', dash: '6 4', label: 'kolumna T (dawny)' });
     if (t && genOf(t)) layers.push({ pts: genOf(t), stroke: '#ef6c00', fill: 'none', dash: '4 3', label: 'z danych D:N' });
@@ -521,7 +558,7 @@ export function mountContours(el, ctx) {
   h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
     editBox,
-    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, preview, info,
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, preview, prev3d, info,
       h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kontur do kolumny V (SVG, mm):'), svgOut,
       h('div', { class: 'row' },
         h('button', { class: 'btn', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(svgOut.value) : navigator.clipboard.writeText(svgOut.value)); toast('Skopiowano'); } catch (e) { toast(e.message, true); } } }, 'Kopiuj'),

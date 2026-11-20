@@ -5,7 +5,7 @@ import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { toolRow, toolTile, miniSvg, stackSvg, view3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
+import { toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
 import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
@@ -126,7 +126,6 @@ export function mountBuilder(el, ctx) {
     const wc = band === 'low' ? '#00c853' : band === 'medium' ? '#ffd600' : '#d50000';
     const one = st.index && st.index.stackTool(t);
     const stack = one ? G.buildStack([one], true, false) : null;
-    const mesh = G.buildMesh([G.parseContour(d && d.columnAY)]);
     const params = [['Firma', t.columnP], ['Grupa', t.columnD], ['Rodzaj', t.columnE], ['Φ', t.columnF], ['Długość', String(t.columnJ ?? '').trim() ? t.columnJ + ' mm' : ''],
       ['r / α', [t.columnG, t.columnH].find((x) => String(x ?? '').trim()) || ''], ['Ms', t.columnM], ['Mk', t.columnN], ['Stan', t.status], ['Dostępne', t.available]];
     const opis = [t.name, t.columnO].filter((x) => String(x ?? '').trim()).join(' · ');
@@ -141,7 +140,7 @@ export function mountBuilder(el, ctx) {
       opis ? h('div', { style: { marginTop: '4px', fontSize: '14px' } }, opis) : null,
       h('div', { class: 'tcard-grid' },
         h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Rysunek 2D (płytki na czerwono)'), h('div', { style: { flex: 1, minHeight: 0 } }, stack ? stackSvg(stack, { labels: false, width: 500, height: 600 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu 2D.'))),
-        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Podgląd 3D – przeciągnij, aby obrócić; kółko: przybliżenie'), h('div', { style: { flex: 1, minHeight: 0 } }, view3d(mesh))),
+        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Podgląd 3D – przeciągnij, aby obrócić; kółko: przybliżenie'), h('div', { style: { flex: 1, minHeight: 0 } }, toolView3d(st.index, [t]))),
         h('div', { class: 'tcard-pane', style: { overflow: 'auto' } }, h('div', { class: 'muted' }, 'Parametry'),
           h('div', { class: 'tcard-params' }, ...params.filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => h('div', { class: 'tcard-param' }, h('span', {}, k), h('b', {}, String(v))))),
           h('div', { class: 'muted' }, `Części (${parts.length})`), h('div', { style: { padding: '0 6px 6px' } }, partsTable(parts))))));
@@ -153,7 +152,6 @@ export function mountBuilder(el, ctx) {
     const ro = (label, value) => h('label', { class: 'f' }, h('span', {}, label), h('input', { type: 'text', value, readonly: true }));
     const komis = h('input', { type: 'text' }), ktk = h('input', { type: 'text' }), op = h('input', { type: 'text' });
     const stack = st.index ? G.buildStack(sel.map((t) => st.index.stackTool(t)), false, true) : null;
-    const mesh = st.index ? G.buildMesh(sel.map((t) => G.parseContour((st.index.details(t.productCode) || {}).columnAY))) : null;
     const save = h('button', { class: 'btn primary', onclick: async () => {
       const codes = B.codesText(sel), path = B.selectionPath(sel), len = String(B.totalLength(sel));
       if (!codes.trim() || !path.trim() || !len.trim()) { await alertBox('ToolBuilder', 'Wszystkie pola nieedytowalne muszą być wypełnione!'); return; }
@@ -174,7 +172,7 @@ export function mountBuilder(el, ctx) {
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 2D'),
         h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, stack ? stackSvg(stack) : h('p', { class: 'muted' }, 'Brak danych konturu 2D.'))),
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 3D'),
-        h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, view3d(mesh)))));
+        h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, toolView3d(st.index, sel)))));
     komis.focus();
   }
 

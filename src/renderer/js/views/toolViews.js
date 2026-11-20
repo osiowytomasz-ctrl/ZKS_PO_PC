@@ -76,9 +76,16 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
 
 /** Podgląd 3D bryły obrotowej (canvas): przeciągnij myszką – obrót, kółko – przybliżenie. */
 /** Podgląd 3D: WebGL (three.js, karta graficzna); gdy WebGL niedostępny – dawny rysunek na płótnie 2D. */
-export function view3d(mesh) {
-  if (!mesh || !webglOk()) return view3dCanvas(mesh);
-  return view3dGl(mesh, () => view3dCanvas(mesh));
+export function view3d(mesh, inserts = []) {
+  if ((!mesh && !inserts.length) || !webglOk()) return view3dCanvas(mesh);
+  return view3dGl(mesh, inserts, () => view3dCanvas(mesh));
+}
+/** Podgląd 3D narzędzi (kody albo obiekty narzędzi) razem z płytkami skrawającymi. */
+export function toolView3d(index, tools) {
+  if (!index) return view3d(null);
+  const stts = tools.map((t) => index.stackTool(t));
+  const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])));
+  return view3d(mesh, mesh ? G.insertsForMesh(stts, mesh.offsets) : []);
 }
 let GL_OK = null;
 function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }

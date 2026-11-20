@@ -33,7 +33,7 @@ function latheGeometry(T, profile, z0) {
   return g;
 }
 
-export function view3dGl(mesh, fallback) {
+export function view3dGl(mesh, inserts, fallback) {
   const wrap = h('div', { style: { width: '100%', height: '100%', minHeight: '260px', background: 'linear-gradient(#fafafa,#e3e6ea)', position: 'relative', overflow: 'hidden' } });
   const info = h('div', { class: 'muted', style: { position: 'absolute', left: '8px', bottom: '6px', fontSize: '11px', pointerEvents: 'none' } }, 'Lewy: obrót · prawy: przesuwanie · kółko: przybliżenie');
   const bar = h('div', { class: 'row', style: { position: 'absolute', right: '6px', top: '6px', gap: '4px', zIndex: 2 } });
@@ -54,14 +54,29 @@ export function view3dGl(mesh, fallback) {
     const sun = new T.DirectionalLight(0xffffff, 1.4); sun.position.set(1, 2, 1.5); scene.add(sun);
 
     const group = new T.Group(), geos = [], mats = [];
-    mesh.profiles.forEach((pr, i) => {
+    const edges = (g, color, op) => { const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color, transparent: true, opacity: op }); group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em); };
+    // płytki skrawające: wielokąty z rysunku 2D wyciągnięte na grubość (w płaszczyźnie osi narzędzia)
+    if (inserts && inserts.length) {
+      const im = new T.MeshStandardMaterial({ color: 0xc62828, metalness: 0.45, roughness: 0.35 }); mats.push(im);
+      for (const poly of inserts) {
+        if (!poly || poly.length < 3) continue;
+        const xs = poly.map((p) => p.x / 10), ys = poly.map((p) => p.y / 10);
+        const sz = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+        const depth = Math.min(6, Math.max(1, sz * 0.3));
+        const sh = new T.Shape(poly.map((p) => new T.Vector2(p.x / 10, p.y / 10)));
+        const g = new T.ExtrudeGeometry(sh, { depth, bevelEnabled: false, curveSegments: 1 });
+        g.translate(0, 0, -depth / 2);
+        group.add(new T.Mesh(g, im)); geos.push(g);
+        edges(g, 0x3b0000, 0.6);
+      }
+    }
+    (mesh ? mesh.profiles : []).forEach((pr, i) => {
       if (!pr) return;
       const g = latheGeometry(T, pr, mesh.offsets[i]); if (!g) return;
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
       const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide });
       group.add(new T.Mesh(g, m)); geos.push(g); mats.push(m);
-      const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color: 0x2a2f36, transparent: true, opacity: 0.35 });
-      group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em);
+      edges(g, 0x2a2f36, 0.35);
     });
     scene.add(group);
     const box = new T.Box3().setFromObject(group), size = box.getSize(new T.Vector3()), center = box.getCenter(new T.Vector3());
