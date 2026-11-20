@@ -6,3 +6,4 @@ dist/
 test/fixtures/harm-sample.json
 test/fixtures/harm-export.txt
 test/fixtures/graf-norm.txt
+dist-narz/

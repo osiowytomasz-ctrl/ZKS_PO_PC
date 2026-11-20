@@ -1,7 +1,7 @@
 {
   "name": "zks-po-pc",
   "productName": "ZKS PO",
-  "version": "1.50.0",
+  "version": "1.51.0",
   "description": "ZKS PO na komputer: odpowiednik aplikacji na Androida (Electron).",
   "main": "src/main/main.cjs",
   "type": "module",
@@ -11,7 +11,8 @@
     "dist": "electron-builder",
     "vendor": "esbuild src/renderer/vendor-src/firebase-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/firebase.js",
     "runtime": "node scripts/build-runtime.mjs",
-    "vendor:three": "esbuild src/renderer/vendor-src/three-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/three.js"
+    "vendor:three": "esbuild src/renderer/vendor-src/three-entry.js --bundle --format=esm --minify --outfile=src/renderer/vendor/three.js",
+    "dist:narz": "electron-builder --win portable zip --x64 -c.extraMetadata.zksEdition=narz -c.productName=\"ZKS PO Narzedziownia\" -c.appId=pl.zks.po.narz -c.directories.output=dist-narz -c.portable.artifactName=ZKS-PO-Narzedziownia-portable.exe -c.artifactName=ZKS-PO-Narzedziownia-${version}-${os}-${arch}.${ext}"
   },
   "build": {
     "appId": "pl.zks.po.pc",

@@ -1,26 +1,40 @@
 import { h, clear, api, apiCached, toast } from './ui.js';
 import { preload } from './catalog.js';
-import { startBackgroundRefresh } from './prefetch.js';
 import { permissionsSummary } from './logic/common.js';
-import { mountHome } from './views/home.js';
-import { mountCompetence } from './views/competence.js';
-import { mountMistrz } from './views/mistrz.js';
 import { grafikAccess, grafikLevelOf } from './logic/grafikAccess.js';
-import { mountSettings } from './views/settings.js';
-import { mountScanner } from './views/scanner.js';
-import { mountGrafik } from './views/grafik.js';
-import { mountZakupy } from './views/zakupy.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
-import { mountToolTrack } from './views/tooltrack.js';
-import { mountContours } from './views/contours.js';
-import { mountParts } from './views/parts.js';
-import { mountHarmLive } from './views/harmLive.js';
-import { mountPlan } from './views/plan.js';
-import { mountHelp } from './views/help.js';
-import { mountBuilder } from './views/builder.js';
-import { mountBn } from './views/bn.js';
 import { mountToolRoom } from './views/toolroom.js';
+
+/**
+ * Moduł ładowany dopiero przy otwarciu (szybszy start; wydanie „Narzędziownia” w ogóle nie wczytuje Grafiku, Planu itd.).
+ * Zwraca funkcję sprzątającą, gdy moduł ją podał (także z obietnicy).
+ */
+const lazy = (load, name) => (el, c) => {
+  let dead = false, inner = null;
+  el.append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie…'));
+  load().then((m) => {
+    if (dead) return;
+    clear(el);
+    Promise.resolve(m[name](el, c)).then((r) => { if (typeof r === 'function') { if (dead) r(); else inner = r; } });
+  }).catch((e) => { if (!dead) { clear(el); el.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Nie wczytano modułu: ' + e.message)); } });
+  return () => { dead = true; if (inner) inner(); };
+};
+const mountHome = lazy(() => import('./views/home.js'), 'mountHome');
+const mountSettings = lazy(() => import('./views/settings.js'), 'mountSettings');
+const mountCompetence = lazy(() => import('./views/competence.js'), 'mountCompetence');
+const mountMistrz = lazy(() => import('./views/mistrz.js'), 'mountMistrz');
+const mountScanner = lazy(() => import('./views/scanner.js'), 'mountScanner');
+const mountGrafik = lazy(() => import('./views/grafik.js'), 'mountGrafik');
+const mountZakupy = lazy(() => import('./views/zakupy.js'), 'mountZakupy');
+const mountToolTrack = lazy(() => import('./views/tooltrack.js'), 'mountToolTrack');
+const mountContours = lazy(() => import('./views/contours.js'), 'mountContours');
+const mountParts = lazy(() => import('./views/parts.js'), 'mountParts');
+const mountHarmLive = lazy(() => import('./views/harmLive.js'), 'mountHarmLive');
+const mountPlan = lazy(() => import('./views/plan.js'), 'mountPlan');
+const mountHelp = lazy(() => import('./views/help.js'), 'mountHelp');
+const mountBuilder = lazy(() => import('./views/builder.js'), 'mountBuilder');
+const mountBn = lazy(() => import('./views/bn.js'), 'mountBn');
 
 /** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
 export const MODULES = [
@@ -50,6 +64,7 @@ export const MODULES = [
 ];
 
 export const ctx = {
+  edition: 'full',     // 'full' – wszystkie moduły, 'narz' – wydanie „ZKS PO Narzędziownia” (same moduły narzędziowni)
   version: '',         // numer wersji programu PC (np. 1.1.0)
   user: null,          // { email, name, roles, permissions }
   homeTab: 'braki',    // ekran główny: Braki albo Workflow (przyciski w górnym pasku)
@@ -85,7 +100,9 @@ let cleanup = null;
 let current = 'home';
 
 /** Moduły z Narzędziowni wracają do Narzędziowni, moduły z Helpu do Helpu, reszta do ekranu głównego. */
+const isNarz = () => ctx.edition === 'narz';
 function backTarget(id) {
+  if (isNarz()) return 'home';
   const mod = MODULES.find((m) => m.id === id);
   if (mod && mod.inToolRoom) return 'narzedziownia';
   if (mod && mod.inHelp) return 'help';
@@ -97,22 +114,25 @@ function backTarget(id) {
  * więc między modułami przechodzi się jednym kliknięciem. Moduły z Narzędziowni i Helpu mają dodatkowo „← Wróć” i swój tytuł.
  */
 function topbar(title, showBack) {
-  const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO (PC) wersja ${ctx.version}` : '');
-  const sub = MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp));
+  const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO ${isNarz() ? 'Narzędziownia' : '(PC)'} wersja ${ctx.version}` : '');
+  const sub = isNarz() ? null : MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp));
   const activeMain = sub ? backTarget(current) : current;
   const navBtn = (label, onclick, { active = false, style = '', disabled = false, title: tip = '' } = {}) =>
     h('button', { class: 'nav ' + style + (active ? ' on' : ''), disabled, title: tip || label, onclick }, label);
   const nav = h('div', { class: 'nav-bar' });
-  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && (!x.visible || x.visible()))) {
+  if (isNarz()) {   // wydanie Narzędziownia: moduły narzędziowni w górnym pasku, bez Braki / Workflow
+    for (const m of MODULES.filter((x) => x.inToolRoom && !x.disabled)) nav.append(navBtn(m.title, () => go(m.id), { active: current === m.id, style: m.style || '' }));
+  } else for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && (!x.visible || x.visible()))) {
     const denied = m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
     nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: m.style || '', disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
   }
-  nav.append(h('span', { class: 'nav-sep' }));
-  for (const [tab, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) {
+  if (!isNarz()) nav.append(h('span', { class: 'nav-sep' }));
+  if (!isNarz()) for (const [tab, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) {
     nav.append(navBtn(label, () => { ctx.homeTab = tab; go('home'); }, { active: current === 'home' && (ctx.homeTab || 'braki') === tab, title: label === 'Braki' ? 'Braki części' : 'Workflow – zadania' }));
   }
   return h('div', { class: 'topbar' },
-    h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),
+    h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: isNarz() ? 'ZKS PO – Narzędziownia' : 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),
+    isNarz() ? h('b', { style: { color: '#fff', margin: '0 8px', whiteSpace: 'nowrap' } }, 'Narzędziownia') : null,
     nav,
     sub ? h('span', { class: 'sub' }, h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć'), h('b', {}, title)) : null,
     h('span', { class: 'grow' }),
@@ -121,6 +141,7 @@ function topbar(title, showBack) {
 }
 
 export function go(id) {
+  if (isNarz() && (id === 'home' || !MODULES.some((m) => m.id === id && m.inToolRoom)) && id !== 'settings') id = 'toolbuilder';
   try { sessionStorage.setItem('zks.current', id); } catch { /* bez pamięci sesji */ }
   if (cleanup) { try { cleanup(); } catch (e) { /* ignorujemy */ } cleanup = null; }
   current = id;
@@ -139,7 +160,7 @@ export function go(id) {
     else mount = (el, c) => mountPlaceholder(el, c, mod);
   }
   root.append(topbar(title, id !== 'home'), screen);
-  document.title = id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
+  document.title = isNarz() ? `${title} – ZKS PO Narzędziownia` : id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
   const result = mount(screen, ctx);
   if (typeof result === 'function') cleanup = result;
 }
@@ -149,6 +170,7 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
 (async () => {
   const cfg = await window.zks.getSettings();
   try { ctx.version = (await window.zks.appVersion?.()) || ''; } catch { ctx.version = ''; }
+  try { ctx.edition = (await window.zks.appEdition?.()) || 'full'; } catch { ctx.edition = 'full'; }
   if (cfg.url && cfg.key) await ctx.loadUser();
   // po naprawie pamięci bazy (fb.js: resetFirestoreCache – przeładowanie) wracamy do tego samego modułu
   let reopen = null;
@@ -156,7 +178,9 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   go(cfg.url && cfg.key ? (reopen && reopen !== 'settings' ? reopen : 'home') : 'settings');
   if (reopen) setTimeout(() => toast('Naprawiono pamięć lokalną bazy – dane pobrane z serwera od nowa'), 500);
   if (cfg.url && cfg.key) {
-    preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
-    startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none');
+    preload();
+    if (isNarz()) return;   // Narzędziownia: bez odświeżania grafiku / planu w tle
+    apiCached('getProductCodes', [], () => {}).catch(() => {});
+    import('./prefetch.js').then(({ startBackgroundRefresh }) => startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none')).catch(() => {});
   }
 })();
