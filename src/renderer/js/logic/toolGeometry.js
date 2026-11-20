@@ -2,6 +2,7 @@
 // Kontur trzonu (ND_CACHE kolumna T, w API `columnAY`) to pary `x_y` rozdzielone `;` w jednostkach 0,1 mm; kontury płytek (PL_kontur, kolumna G)
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
+import { halfFromContour } from './contourEditor.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -365,13 +366,14 @@ export function coordinatesText(tools) {
 /** Prawa połowa konturu bez powtórzeń, zamknięta do osi na dole i na górze. */
 export function profileOf(contour) {
   if (!contour || contour.length < 3) return null;
-  const right = contour.filter((p) => p.x >= 0).map((p) => pt(Math.abs(p.x), p.y));
-  if (right.length < 2) return null;
-  const clean = [];
-  for (const p of right) { const l = clean[clean.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) clean.push(p); }
-  if (clean.length < 2) return null;
-  const ys = clean.map((p) => p.y);
-  return [pt(0, Math.min(...ys)), ...clean, pt(0, Math.max(...ys))];
+  // obrys zewnętrzny: dla każdego poziomu Z największa odległość od osi (z obu stron), w kolejności Z – bez linii wewnętrznych
+  // (gniazda oprawek, linie rzutu bocznego), które przy obrocie dawały fałszywe stożki i lejki
+  const rows = halfFromContour(contour).map((r) => pt(Number(r.r) * 10, Number(r.z) * 10)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (rows.length < 2) return null;
+  const ys = rows.map((p) => p.y);
+  const out = [];
+  for (const p of [pt(0, Math.min(...ys)), ...rows, pt(0, Math.max(...ys))]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
+  return out.length >= 2 ? out : null;
 }
 /** Siatka brył obrotowych zestawu (kolejność: pierwsze = tnące). null, gdy brak konturów. */
 export function buildMesh(contours, segments = 36) {
