@@ -330,7 +330,9 @@ export function mountContours(el, ctx) {
       const f0 = st.xf || { dx: 0, dz: 0, ang: 0 };   // bryła z konturu przed przesunięciem, przesunięcie / obrót całości w scenie
       const tre = !!t && E.isTrepan(st.params[normCode(t.productCode)]);   // wiertło rurowe: kielich i płytki ostrza wg Ø
       const trd = tre && svg ? G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // kielich: wnęka z wymiarów
-      const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : null]) : null;
+      const hlN = t && !tre && String((st.params[normCode(t.productCode)] || {}).D || '').trim().toLowerCase() === 'opr' ? (st.params[normCode(t.productCode)] || {}).N : '';
+      const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // oprawka gwintująca: otwór
+      const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : hld ? hld.cavity : null]) : null;
       if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
       if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
@@ -385,6 +387,9 @@ export function mountContours(el, ctx) {
     out += triad2d(14, H - 26);
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
+    { const pr = (t && st.params[normCode(t.productCode)]) || {};   // oprawka gwintująca: otwór pod chwyt gwintownika – przerywana linia 1 px
+      const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg)) : null;
+      if (hd) out += hd.hidden.map((q) => `<polyline points="${q.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="none" stroke="#1565c0" stroke-width="1" stroke-dasharray="5 4" pointer-events="none"/>`).join(''); }
     if (trePv && svg) {   // wiertło rurowe: płytki w ściankach (żółte), wnęka i środek linii płytki – przerywana 1 px
       const d = G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg)), pp = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
       if (d) out += d.plates.map((q) => `<polygon points="${pp(q)}" fill="#c8a400" fill-opacity="0.85" stroke="none" pointer-events="none"/>`).join('')

@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole } from './contourGen.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -116,6 +116,16 @@ export function trepanDrawingFor(diameter, length, contour) {
   const j = Math.abs(b.maxY - num(length) * 10) > 1 ? b.maxY / 10 : num(length);
   return trepanDrawing(num(diameter), j);
 }
+/**
+ * Otwór pod chwyt gwintownika (oprawka gwintująca, kolumna N „D12,0□09,0_042”) dla konturu: linia niewidoczna (przerywana) i wnęka do 3D,
+ * od czubka konturu na głębokość z kolumny N. null – inna oprawka.
+ */
+export function holeDrawingFor(N, contour) {
+  const h = tapHole(N), b = bounds(contour);
+  if (!h || !b) return null;
+  const top = b.maxY, yb = top - h.depth;
+  return { hidden: [[pt(-h.r, top), pt(-h.r, yb), pt(h.r, yb), pt(h.r, top)]], cavity: { ri: h.r, yb, rb: 0, y7: Infinity } };
+}
 /** Rysunek wiertła rurowego przeniesiony do układu rysunku: [map] – punkt konturu → punkt rysunku. */
 export const mapTrepanDrawing = (d, map) => (d ? { plates: d.plates.map((q) => q.map(map)), hidden: d.hidden.map((q) => q.map(map)) } : null);
 
@@ -139,7 +149,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     });
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -203,7 +213,8 @@ export function buildMini(tool, details) {
     else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
   }
   const draw = group === 'tre' ? mapTrepanDrawing(trepanDrawingFor(diameter, length, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // wiertło rurowe: płytki żółte, wnęka przerywana
-  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw };
+  const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points)) : null;   // oprawka gwintująca: otwór przerywaną linią
+  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole };
 }
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
@@ -229,7 +240,7 @@ export function toolIndex(catalog, overrides = null) {
       if (!t) return null;
       const d = det(t.productCode);
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
-      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre };
+      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '' };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },

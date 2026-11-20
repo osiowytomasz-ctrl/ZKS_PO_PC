@@ -44,6 +44,16 @@ export function trepanDrawing(F, J) {
 /** Liczba płytek ostrza wg Ø roboczego (mm): liniowo od 4 dla Ø12 do 12 dla Ø130 (poza zakresem – 4 / 12). */
 export const trepanPlates = (dia) => Math.max(4, Math.min(12, Math.round(4 + ((nv(dia) - 12) * 8) / 118)));
 
+/**
+ * Otwór pod chwyt gwintownika w oprawce gwintującej: kolumna N „D12,0□09,0_042” – Ø12 (otwór), kwadrat 9, głębokość 42 mm od czubka.
+ * Wynik (0,1 mm): { r – promień otworu, depth – głębokość od czubka } albo null (inny zapis N).
+ */
+export function tapHole(N) {
+  const m = /^D(\d\d,\d)□(\d\d,\d)_(\d{3})$/.exec(txt(N).toUpperCase());
+  if (!m) return null;
+  const d = nv(m[1]), depth = Number(m[3]);
+  return d > 0 && depth > 0 ? { r: d * 5, depth: depth * 10 } : null;
+}
 /** Najniższe Y lewej części mocowania (głębokość mocowania). */
 export function minY(av) {
   const ys = txt(av).split(';').map((p) => p.split('_')[1]).filter((y) => y != null && y.trim() !== '').map(nv);
@@ -134,10 +144,7 @@ export function bodyContour(p, av = '') {
     return pts([[(-F * 10) / 2, 0], [(-F / 2) * 10, 10 * (J - K)], [(-I * 10) / 2, 10 * (J - K)], [(-I * 10) / 2, 10 * J], [(I * 10) / 2, 10 * J], [(I * 10) / 2, 10 * (J - K)],
       [(F / 2) * 10, 10 * (J - K)], [(F * 10) / 2, 0]]);
   }
-  if (D === 'opr' && E === 'red' && mid(N, 6, 1) === '□') {
-    const w = (midN(N, 2, 3) * 10) / 2, d = -10 * midN(N, 12, 3) + K * 10;
-    return pts([[-w, K * 10], [-w, d], [w, d], [w, K * 10]]);
-  }
+  // oprawka gwintująca (N = „D12,0□09,0_042”): otwór pod chwyt gwintownika nie jest w konturze – rysuje go [tapHole] linią przerywaną i jako wydrążenie 3D
   if (D === 'opr' && E === 'prz' && N3 === 'MK_') {
     const a = (F * 10) / 2;
     return pts([[a, avY], [a, J * 10], [-a, J * 10], [-a, avY]]);

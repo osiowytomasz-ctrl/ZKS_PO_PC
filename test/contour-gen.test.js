@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
 import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines } from '../src/renderer/js/logic/contourEditor.js';
-import { profileOf, trepanBlade } from '../src/renderer/js/logic/toolGeometry.js';
+import { profileOf, trepanBlade, holeDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
   ABS040: { left: '0_-200;100_-200;100_0;-200_0', right: '200_0;-100_0;-100_-200;0_-200' },
@@ -132,4 +132,17 @@ test('linie krawędzi średnic w generatorze – wszędzie (poza wiertłem rurow
   assert.equal(h.filter((q) => q.x === 0 && q.y === 96.595).length, 1);
   // drugi raz nic nie dopisuje (np. przy akceptacji)
   assert.deepEqual(withEdgeLines(h), h);
+});
+
+test('oprawka gwintująca (N „D12,0□09,0_042”): otwór Ø12 × 42 mm od czubka tylko jako linia przerywana i wnęka 3D, nie w konturze', () => {
+  assert.deepEqual(C.tapHole('D12,0□09,0_042'), { r: 60, depth: 420 }); assert.equal(C.tapHole('FRE016'), null); assert.equal(C.tapHole(''), null);
+  const o = { D: 'opr', E: 'red', F: '31', I: '50', J: '70', K: '34', M: 'FZS_031', N: 'D12,0□09,0_042' };
+  const full = C.fullContour(o, {});
+  assert.equal(full, C.mounting({}, 'FZS_031').left + ';' + C.mounting({}, 'FZS_031').right, 'w konturze tylko mocowanie FZS_031');
+  const pts = parseContour(full), h = holeDrawingFor(o.N, pts);
+  assert.deepEqual(h.hidden[0].map((q) => [q.x, q.y]), [[-60, 340], [-60, -80], [60, -80], [60, 340]]);   // czubek 340 (góra konturu) − 42 mm
+  assert.deepEqual(h.cavity, { ri: 60, yb: -80, rb: 0, y7: Infinity });
+  const cup = profileOf(pts, h.cavity);
+  assert.ok(cup.some((q) => q.x === 60 && q.y === 340) && cup.some((q) => q.x === 60 && q.y === -80) && cup.some((q) => q.x === 0 && q.y === -80));
+  assert.equal(holeDrawingFor('FRE016', pts), null);
 });
