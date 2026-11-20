@@ -190,7 +190,7 @@ export function buildMini(tool, details) {
     } else if (isWiePly && (company.includes('iscar') || company.includes('amec'))) polygons.push(polygon(true));
     else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
   }
-  return { outline, inserts: polygons };
+  return { outline, inserts: polygons, axisX: centerAxisX };
 }
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
@@ -374,6 +374,24 @@ export function profileOf(contour) {
   const out = [];
   for (const p of [pt(0, Math.min(...ys)), ...rows, pt(0, Math.max(...ys))]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
   return out.length >= 2 ? out : null;
+}
+/**
+ * Linie obrysu do rysowania (ścieżka SVG „M … L …”): krawędzie zamkniętego konturu bez odcinków leżących na osi narzędzia
+ * (x = [axis] dla obu końców) – to ślad połówki konturu po odbiciu, a nie krawędź elementu. [map] – punkt → [x, y] na rysunku.
+ */
+export function outlinePath(points, map, axis = 0) {
+  const P = points || [], n = P.length, onAxis = (p) => Math.abs(p.x - axis) < 1e-3;
+  if (n < 2) return '';
+  let d = '', pen = false;
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n];
+    if (onAxis(a) && onAxis(b)) { pen = false; continue; }
+    const [ax, ay] = map(a), [bx, by] = map(b);
+    if (!pen) d += `M${ax.toFixed(2)},${ay.toFixed(2)}`;
+    d += `L${bx.toFixed(2)},${by.toFixed(2)}`;
+    pen = true;
+  }
+  return d;
 }
 /** Siatka brył obrotowych zestawu (kolejność: pierwsze = tnące). null, gdy brak konturów. */
 export function buildMesh(contours, segments = 36) {

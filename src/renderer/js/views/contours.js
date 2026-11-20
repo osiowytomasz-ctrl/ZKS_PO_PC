@@ -365,7 +365,8 @@ export function mountContours(el, ctx) {
       out += `<g pointer-events="none" stroke="#d50000" fill="#d50000" stroke-width="1.6"><line x1="${f2(ox)}" y1="${f2(oy)}" x2="${f2(ox + L)}" y2="${f2(oy)}"/><polygon points="${f2(ox + L + 6)},${f2(oy)} ${f2(ox + L)},${f2(oy - 3)} ${f2(ox + L)},${f2(oy + 3)}"/>`
         + `<line x1="${f2(ox)}" y1="${f2(oy)}" x2="${f2(ox)}" y2="${f2(oy - L)}"/><polygon points="${f2(ox)},${f2(oy - L - 6)} ${f2(ox - 3)},${f2(oy - L)} ${f2(ox + 3)},${f2(oy - L)}"/><circle cx="${f2(ox)}" cy="${f2(oy)}" r="2.2"/></g>`; }
     out += triad2d(14, H - 26);
-    for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
+    for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
+      + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
     const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
     ins.forEach((q, j) => {
       const on = pv.insSel === j;

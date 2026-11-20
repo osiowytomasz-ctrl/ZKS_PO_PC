@@ -98,3 +98,10 @@ test('bryła 3D i indeks katalogu', () => {
   assert.ok(idx.hasPartWarning('TR 1')); assert.deepEqual(idx.usages('pl1'), [{ toolCode: 'TR 1', role: 'cutting' }]);
   assert.equal(idx.stackTool('TR 1').contour.length, 3);
 });
+
+test('obrys do rysowania bez odcinków na osi', () => {
+  const pts = [P(0, 0), P(10, 0), P(10, 20), P(0, 20), P(0, 30), P(10, 30), P(10, 40), P(0, 40), P(-10, 40), P(-10, 0)];
+  const d = G.outlinePath(pts, (p) => [p.x, p.y]);
+  assert.ok(!d.includes('L0.00,30.00M') && !/0\.00,20\.00L0\.00,30\.00/.test(d));
+  assert.ok(d.startsWith('M0.00,0.00L10.00,0.00'));
+});

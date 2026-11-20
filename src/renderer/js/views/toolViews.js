@@ -49,7 +49,8 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   const box = h('div', { class: 'tool-mini', style: { width: w + 'px', height: hgt + 'px', cursor: onclick ? 'pointer' : '' }, onclick: onclick ? (e) => { e.stopPropagation(); onclick(); } : null });
   if (!mini) { box.append(h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak')); return box; }
   const s = Math.min(w / G.MINI_W, hgt / G.MINI_H);
-  box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="#000" stroke-width="0.5"/>`
+  box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="none"/>`
+    + `<path d="${G.outlinePath(mini.outline, (p) => [p.x * s, p.y * s], mini.axisX ?? NaN)}" fill="none" stroke="#000" stroke-width="0.5"/>`
     + mini.inserts.map((p) => `<polygon points="${poly(p, s)}" fill="#c8a400" stroke="#000" stroke-width="0.5"/>`).join('') + '</svg>';
   return box;
 }
@@ -62,7 +63,7 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">`;
   stack.layers.forEach((l, i) => {
     const c = G.TOOL_PALETTE[i % G.TOOL_PALETTE.length];
-    svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="${c}" stroke-width="1"/>`;
+    svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
     for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#d50000" fill-opacity="0.2" stroke="#d50000" stroke-width="1.5"/>`;
     if (labels) {
       const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
