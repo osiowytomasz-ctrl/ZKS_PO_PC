@@ -57,7 +57,8 @@ export function mountBuilder(el, ctx) {
   }
   const nc = (t) => String(t.productCode || '').trim().toLowerCase().replace(/\s+/g, ' ');
   /** Kontur, który Kontury wczytałyby przy otwarciu (bez zmian): kolumna V, T albo dane D:N → prawa połowa SVG. */
-  function autoContour(t) {
+  function autoContour(t) { const r = autoContour0(t); return r ? { ...r, svg: E.addEdgeLines(r.svg) } : null; }   // + linie krawędzi części obrotowej
+  function autoContour0(t) {
     const k = nc(t), v = st.cd.v[k] || '';
     if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfPathSvg(pts), label: 'z kolumny V (roboczy)' }; }
     const tp = origT(t);
@@ -82,18 +83,20 @@ export function mountBuilder(el, ctx) {
       const v = st.cd.v[nc(t)] || ''; if (v) srcs.push(E.svgToContour(v));
       const tp = origT(t); if (tp.length >= 3) srcs.push(tp);
       const g = G.parseContour(fullContour(p, st.cd.mounts) || ''); if (g.length >= 3) srcs.push(g);
-      for (const pts of srcs) {
+      let svg = p.BC.trim();
+      for (const pts of srcs) {   // zapisany sam obrys – weź połowę z liniami z tego samego źródła
         if (E.isHalf(pts)) continue;
-        const env = E.halfSvg(E.halfFromContour(pts)), full = E.halfPathSvg(pts);
-        if (env === p.BC.trim() && full !== env) { out.push({ t, p, svg: full }); break; }
+        if (E.halfSvg(E.halfFromContour(pts)) === svg) { svg = E.halfPathSvg(pts); break; }
       }
+      svg = E.addEdgeLines(svg);   // brakujące linie krawędzi części obrotowej
+      if (svg !== p.BC.trim()) out.push({ t, p, svg });
     }
     return out;
   }
   async function fixConfirmed() {
     const list2 = fixableConfirmed();
     if (!list2.length) { toast('Brak konturów do poprawy'); return; }
-    if (!(await confirmBox('Popraw zatwierdzone kontury', `Kontury zatwierdzone bez zmian (${list2.length}) mają zapisany tylko obrys zewnętrzny. Zapisać je jeszcze raz w PSWT (kolumna BC) – obrys i linie krawędzi elementów? Potwierdzenie (BH) i rejony (BE) się nie zmienią.\n\n${list2.slice(0, 12).map((x) => x.t.productCode).join(', ')}${list2.length > 12 ? ' …' : ''}`, 'Popraw'))) return;
+    if (!(await confirmBox('Popraw zatwierdzone kontury', `Zatwierdzone kontury bez linii krawędzi (${list2.length}). Zapisać je jeszcze raz w PSWT (kolumna BC) – z liniami krawędzi elementów i części obrotowej? Potwierdzenie (BH) i rejony (BE) się nie zmienią.\n\n${list2.slice(0, 12).map((x) => x.t.productCode).join(', ')}${list2.length > 12 ? ' …' : ''}`, 'Popraw'))) return;
     let ok = 0, bad = 0;
     for (const x of list2) {
       status.set(`Poprawianie konturów… ${ok + bad + 1} / ${list2.length}`, 'neutral');
@@ -102,7 +105,7 @@ export function mountBuilder(el, ctx) {
     status.set(`Poprawiono kontury: ${ok}` + (bad ? `, błędy: ${bad}` : '') + '.', bad ? 'error' : 'neutral');
     invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params)); paintFix(); drawList();
   }
-  const fixBtn = h('button', { class: 'btn', style: { display: 'none' }, title: 'Kontury zatwierdzone bez zmian, zapisane jako sam obrys – dopisanie linii krawędzi elementów', onclick: () => fixConfirmed() });
+  const fixBtn = h('button', { class: 'btn', style: { display: 'none' }, title: 'Zatwierdzone kontury bez linii krawędzi – dopisanie linii krawędzi elementów i części obrotowej', onclick: () => fixConfirmed() });
   const paintFix = () => { const n = canConfirm ? fixableConfirmed().length : 0; fixBtn.style.display = n ? '' : 'none'; fixBtn.textContent = `Popraw zatwierdzone kontury (${n})`; };
 
   function okButton(t) {

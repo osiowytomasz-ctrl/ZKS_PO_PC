@@ -185,3 +185,50 @@ export function contourToSvg(points) {
   if (P.length < 2) return '';
   return P.map((p, i) => `${i ? 'L' : 'M'} ${fmt(p.x / 10)} ${fmt(p.y / 10)}`).join(' ') + ' Z';
 }
+
+/**
+ * Poziomy krawędzi części obrotowej (0,1 mm) z połowy konturu: na każdym załamaniu obrysu (uskok, przejście stożek → walec;
+ * kąt > 15°, więc nie na łagodnych łukach) w widoku z boku widać krawędź – linię przez całą szerokość. Bez czoła i podstawy.
+ * Wynik: [{ z, r }] – r: mniejszy promień na tym poziomie (od osi do r brakuje linii).
+ */
+export function edgeLevels(halfPts) {
+  const rows = halfFromContour(expandHalf(halfPts)).map((q) => ({ r: Number(q.r) * 10, z: Number(q.z) * 10 }));
+  if (rows.length < 3) return [];
+  const zMin = Math.min(...rows.map((q) => q.z)), zMax = Math.max(...rows.map((q) => q.z)), same = (a, b) => Math.abs(a - b) < 1e-6;
+  const out = [];
+  const add = (z, r) => { if (r > 1e-6 && !same(z, zMin) && !same(z, zMax) && !out.some((o) => same(o.z, z))) out.push({ z, r }); };
+  for (let i = 1; i < rows.length - 1; i++) {
+    const a = rows[i - 1], p = rows[i], b = rows[i + 1];
+    const atZ = rows.filter((q) => same(q.z, p.z));
+    if (atZ.length > 1) { add(p.z, Math.min(...atZ.map((q) => q.r))); continue; }   // uskok
+    const ux = p.r - a.r, uy = p.z - a.z, vx = b.r - p.r, vy = b.z - p.z, lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+    if (lu < 1e-9 || lv < 1e-9) continue;
+    const ang = (Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (lu * lv)))) * 180) / Math.PI;
+    if (ang > 15) add(p.z, p.r);
+  }
+  return out;
+}
+/**
+ * Dopisanie do ścieżki połowy konturu (SVG, mm) brakujących linii krawędzi części obrotowej: w punkcie (r, z) odcinek do osi i z powrotem
+ * („L 0 z L r z”; po odbiciu – linia przez całą szerokość). Łuki zostają; linie już narysowane nie są powtarzane.
+ */
+export function addEdgeLines(svg) {
+  const path = String(svg || '').trim();
+  const pts = svgToContour(path);
+  if (pts.length < 3 || !isHalf(pts)) return path;
+  const near = (a, b) => Math.abs(a - b) < 0.02;   // 0,002 mm w jednostkach 0,1 mm
+  const has = (lv) => pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, lv.z) && near(q.y, lv.z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) >= lv.r - 0.02; });
+  const todo = edgeLevels(pts).filter((lv) => !has(lv));
+  if (!todo.length) return path;
+  const cmds = path.match(/[MLAQZ][^MLAQZ]*/gi) || [];
+  const out = [];
+  for (const c of cmds) {
+    out.push(c.trim());
+    const nums = (c.slice(1).match(/-?\d+(?:[.,]\d+)?(?:e-?\d+)?/gi) || []).map((x) => Number(x.replace(',', '.')));
+    if (nums.length < 2) continue;
+    const x = nums[nums.length - 2] * 10, y = nums[nums.length - 1] * 10;
+    const k = todo.findIndex((lv) => near(lv.z, y) && near(lv.r, x));
+    if (k >= 0) { out.push(`L 0 ${fmt(y / 10)} L ${fmt(x / 10)} ${fmt(y / 10)}`); todo.splice(k, 1); }
+  }
+  return out.join(' ');
+}

@@ -71,3 +71,13 @@ test('prawa połowa z liniami krawędzi (nakrętka ER) i odbicie', () => {
   // linie krawędzi na Z = 20 i 21 mm są po obu stronach osi
   for (const y of [200, 210]) assert.ok(full.some((p) => p.x === -95 && p.y === y) && full.some((p) => p.x === 95 && p.y === y));
 });
+
+test('linie krawędzi części obrotowej dopisywane do połowy konturu (uskok, stożek, łuk zostaje)', () => {
+  assert.equal(E.addEdgeLines('M 0 0 L 15 0 L 15 20 L 20 20 L 20 30 L 30 30 L 30 70 L 0 70 Z'),
+    'M 0 0 L 15 0 L 15 20 L 0 20 L 15 20 L 20 20 L 20 30 L 0 30 L 20 30 L 30 30 L 30 70 L 0 70 Z');
+  assert.equal(E.addEdgeLines('M 0 0 L 10 0 L 10 40 L 14 44 L 14 60 L 0 60 Z'), 'M 0 0 L 10 0 L 10 40 L 0 40 L 10 40 L 14 44 L 0 44 L 14 44 L 14 60 L 0 60 Z');
+  assert.ok(E.addEdgeLines('M 0 0 L 6 0 L 6 30 A 3 3 0 0 0 9 33 L 12 33 L 12 70 L 0 70 Z').includes(' A 3 3 0 0 0 9 33 L 0 33 L 9 33 '));
+  const er = 'M 0 0 L 9.5 0 L 9.5 20 L 0 20 L 0 21 L 9.5 21 L 9.5 34 L 6 38 L 0 38 Z';
+  assert.equal(E.addEdgeLines(E.addEdgeLines(er)), E.addEdgeLines(er));   // bez powtórzeń
+  assert.equal(E.addEdgeLines('M 0 0 L 8 0 L 8 60 L 0 60 Z'), 'M 0 0 L 8 0 L 8 60 L 0 60 Z');   // walec – bez linii
+});

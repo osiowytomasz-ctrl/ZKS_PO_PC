@@ -198,8 +198,9 @@ export function mountContours(el, ctx) {
     const save = async (value) => {
       try {
         // zatwierdzony nowy kontur → PSWT kolumna BC (SVG, mm), rejony ostrze / oprawka → kolumna BE
-        await api('ndConfirmContour', [t.productCode, value, value ? svgOut.value : null, value ? regionsText(st.regions) : null]);
-        st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: svgOut.value, BE: regionsText(st.regions) } : {}) };
+        const bc = value ? E.addEdgeLines(svgOut.value) : null;   // + linie krawędzi części obrotowej
+        await api('ndConfirmContour', [t.productCode, value, bc, value ? regionsText(st.regions) : null]);
+        st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: bc, BE: regionsText(st.regions) } : {}) };
         status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
         if (st.cat) st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.params));
         drawList(); drawEditor();
