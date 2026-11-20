@@ -33,7 +33,44 @@ function latheGeometry(T, profile, z0) {
   return g;
 }
 
-export function view3dGl(mesh, inserts, fallback) {
+/**
+ * Płytka 3D: kontur płytki (0,1 mm, prawa płytka – x > 0) leży powierzchnią natarcia w płaszczyźnie osi narzędzia (z = 0),
+ * grubość idzie do tyłu (−z), a ściany są pochylone o [draft]° (przyłożenie – tylny przekrój mniejszy, płytka nie trze tyłem).
+ */
+function insertGeometry(T, poly, draft) {
+  let P = (poly || []).map((p) => new T.Vector2(p.x / 10, p.y / 10));
+  if (P.length > 2 && P[0].distanceTo(P[P.length - 1]) < 1e-6) P.pop();
+  if (P.length < 3) return null;
+  if (T.ShapeUtils.isClockWise(P)) P = P.reverse();   // przeciwnie do wskazówek zegara → normalne na zewnątrz
+  const xs = P.map((p) => p.x), ys = P.map((p) => p.y);
+  const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const depth = Math.min(6, Math.max(1, size * 0.3));
+  const off = Math.min(size * 0.2, depth * Math.tan((Math.max(0, draft || 0) * Math.PI) / 180));
+  // tylny przekrój: kontur odsunięty do środka o [off] (przecięcie przesuniętych krawędzi, ograniczone przy ostrych narożach)
+  const n = P.length, inN = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1; return new T.Vector2(-dy / l, dx / l); };
+  const B = P.map((p, i) => {
+    const n1 = inN(P[(i - 1 + n) % n], p), n2 = inN(p, P[(i + 1) % n]);
+    const m = n1.clone().add(n2), d = 1 + n1.dot(n2);
+    const k = d > 0.25 ? off / d : off * 4;
+    return p.clone().addScaledVector(m.lengthSq() > 1e-12 ? m : n1, d > 0.25 ? k : k / Math.max(m.length(), 1e-6));
+  });
+  const tris = T.ShapeUtils.triangulateShape(P, []);
+  const pos = [];
+  const v = (q, z) => pos.push(q.x, q.y, z);
+  for (const [a, b, c] of tris) { v(P[a], 0); v(P[b], 0); v(P[c], 0); }               // przód (natarcie) – w płaszczyźnie osi
+  for (const [a, b, c] of tris) { v(B[a], -depth); v(B[c], -depth); v(B[b], -depth); } // tył – mniejszy
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    v(P[i], 0); v(B[i], -depth); v(P[j], 0);
+    v(P[j], 0); v(B[i], -depth); v(B[j], -depth);
+  }
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+export function view3dGl(mesh, inserts, fallback, opts = {}) {
   const wrap = h('div', { style: { width: '100%', height: '100%', minHeight: '260px', background: 'linear-gradient(#fafafa,#e3e6ea)', position: 'relative', overflow: 'hidden' } });
   const info = h('div', { class: 'muted', style: { position: 'absolute', left: '8px', bottom: '6px', fontSize: '11px', pointerEvents: 'none' } }, 'Lewy: obrót · prawy: przesuwanie · kółko: przybliżenie');
   const bar = h('div', { class: 'row', style: { position: 'absolute', right: '6px', top: '6px', gap: '4px', zIndex: 2 } });
@@ -57,17 +94,21 @@ export function view3dGl(mesh, inserts, fallback) {
     const edges = (g, color, op) => { const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color, transparent: true, opacity: op }); group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em); };
     // płytki skrawające: wielokąty z rysunku 2D wyciągnięte na grubość (w płaszczyźnie osi narzędzia)
     if (inserts && inserts.length) {
-      const im = new T.MeshStandardMaterial({ color: 0xc62828, metalness: 0.45, roughness: 0.35 }); mats.push(im);
-      for (const poly of inserts) {
-        if (!poly || poly.length < 3) continue;
-        const xs = poly.map((p) => p.x / 10), ys = poly.map((p) => p.y / 10);
-        const sz = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-        const depth = Math.min(6, Math.max(1, sz * 0.3));
-        const sh = new T.Shape(poly.map((p) => new T.Vector2(p.x / 10, p.y / 10)));
-        const g = new T.ExtrudeGeometry(sh, { depth, bevelEnabled: false, curveSegments: 1 });
-        g.translate(0, 0, -depth / 2);
-        group.add(new T.Mesh(g, im)); geos.push(g);
-        edges(g, 0x3b0000, 0.6);
+      const im = new T.MeshStandardMaterial({ color: 0xc62828, metalness: 0.45, roughness: 0.35, flatShading: true }); mats.push(im);
+      const lm = new T.LineBasicMaterial({ color: 0x3b0000, transparent: true, opacity: 0.6 }); mats.push(lm);
+      for (const it0 of inserts) {
+        const it = Array.isArray(it0) ? { poly: it0, z: 1, draft: 7, alone: true } : it0;
+        const g = insertGeometry(T, it.poly, it.draft);
+        if (!g) continue;
+        geos.push(g);
+        const eg = new T.EdgesGeometry(g, 20); geos.push(eg);
+        const z = it.alone ? 1 : Math.max(1, Math.min(60, Math.round(it.z || 2)));
+        for (let k = 0; k < z; k++) {   // z płytek co 360°/z wokół osi narzędzia (oś Y sceny)
+          const holder = new T.Group();
+          holder.add(new T.Mesh(g, im), new T.LineSegments(eg, lm));
+          holder.rotation.y = (k * 2 * Math.PI) / z;
+          group.add(holder);
+        }
       }
     }
     (mesh ? mesh.profiles : []).forEach((pr, i) => {
@@ -78,6 +119,10 @@ export function view3dGl(mesh, inserts, fallback) {
       group.add(new T.Mesh(g, m)); geos.push(g); mats.push(m);
       edges(g, 0x2a2f36, 0.35);
     });
+    if (opts.xf) {   // przesunięcie / obrót całego narzędzia z płytkami (moduł Kontury)
+      group.rotation.z = (opts.xf.ang * Math.PI) / 180;
+      group.position.set(opts.xf.dx, opts.xf.dz, 0);
+    }
     scene.add(group);
     const box = new T.Box3().setFromObject(group), size = box.getSize(new T.Vector3()), center = box.getCenter(new T.Vector3());
     const R = Math.max(size.x, size.y, size.z, 1);

@@ -76,16 +76,39 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
 
 /** Podgląd 3D bryły obrotowej (canvas): przeciągnij myszką – obrót, kółko – przybliżenie. */
 /** Podgląd 3D: WebGL (three.js, karta graficzna); gdy WebGL niedostępny – dawny rysunek na płótnie 2D. */
-export function view3d(mesh, inserts = []) {
+export function view3d(mesh, inserts = [], opts = {}) {
   if ((!mesh && !inserts.length) || !webglOk()) return view3dCanvas(mesh);
-  return view3dGl(mesh, inserts, () => view3dCanvas(mesh));
+  return view3dGl(mesh, inserts, () => view3dCanvas(mesh), opts);
 }
-/** Podgląd 3D narzędzi (kody albo obiekty narzędzi) razem z płytkami skrawającymi. */
+/** Podgląd 3D narzędzi (kody albo obiekty narzędzi) razem z płytkami skrawającymi (z= płytek na obwodzie, pochylenie ścian). */
 export function toolView3d(index, tools) {
   if (!index) return view3d(null);
   const stts = tools.map((t) => index.stackTool(t));
   const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])));
-  return view3d(mesh, mesh ? G.insertsForMesh(stts, mesh.offsets) : []);
+  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code) })) : [];
+  return view3d(mesh, ins);
+}
+
+// ---------- płytki w 3D: liczba zębów i pochylenie ścian (ustawia narzędziowiec w module Kontury; pamięć tego komputera) ----------
+const INS_KEY = 'zks.tools.inserts';
+const insStore = () => { try { return JSON.parse(localStorage.getItem(INS_KEY) || '{}') || {}; } catch { return {}; } };
+const codeOf = (t) => String((t && t.productCode) || t || '').trim().toLowerCase();
+/** Liczba zębów z nazwy / opisu narzędzia („Z4”, „z=3”), inaczej 2. */
+function teethFromTool(t) {
+  if (!t || typeof t !== 'object') return 2;
+  const m = [t.columnO, t.name, t.columnL].map((v) => String(v ?? '')).join(' ').match(/(?:^|[^a-ząćęłńóśźż])z\s*=?\s*(\d{1,2})(?!\d)/i);
+  const z = m ? Number(m[1]) : 0;
+  return z >= 1 && z <= 60 ? z : 2;
+}
+/** { z, draft } płytek narzędzia: zapisane w Konturach albo domyślne (z z opisu narzędzia / 2, pochylenie 7°). */
+export function insertSetup(t) {
+  const o = insStore()[codeOf(t)] || {};
+  return { z: Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), draft: Number.isFinite(Number(o.draft)) && o.draft !== '' && o.draft != null ? Math.max(0, Math.min(30, Number(o.draft))) : 7 };
+}
+export function saveInsertSetup(t, patch) {
+  const all = insStore(), k = codeOf(t);
+  all[k] = { ...insertSetup(t), ...(all[k] || {}), ...patch };
+  try { localStorage.setItem(INS_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
 }
 let GL_OK = null;
 function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }

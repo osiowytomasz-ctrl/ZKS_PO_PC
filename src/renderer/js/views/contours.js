@@ -7,7 +7,7 @@ import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { statusLine, filterDropdown, lazyFill, view3d } from './toolViews.js';
+import { statusLine, filterDropdown, lazyFill, view3d, insertSetup, saveInsertSetup } from './toolViews.js';
 import * as B from '../logic/builder.js';
 
 let pendingCode = null;
@@ -50,9 +50,12 @@ export function mountContours(el, ctx) {
   const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
   const prev3d = h('div', { style: { flex: 1, minHeight: '320px', border: '1px solid #ccc', display: 'none' } });
   const mode3d = h('button', { class: 'btn small', title: 'Podgląd 3D nowego konturu z płytkami', onclick: () => { pv.d3 = !pv.d3; mode3d.classList.toggle('primary', pv.d3); mode3d.textContent = pv.d3 ? '2D' : '3D'; drawPreview(); } }, '3D');
+  // płytki w 3D: liczba zębów z= (kopie płytki co 360°/z) i pochylenie wyciągnięcia (przyłożenie z tyłu płytki) – zapamiętywane dla narzędzia
+  const zI = h('input', { type: 'number', min: 1, max: 60, style: { width: '46px' }, title: 'Liczba płytek (zębów) na obwodzie – widok 3D', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { z: Number(zI.value) }); drawPreview(); } } });
+  const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel,
-    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), mode3d,
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
@@ -129,7 +132,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.insSel = null; pv.ptEdit = null; st.insAdj = {};
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.insSel = null; pv.ptEdit = null; st.insAdj = {}; st.xf = { dx: 0, dz: 0, ang: 0 };
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = bcOf(t) ? [fromSvg(bcOf(t)), 'kolumna BC – zatwierdzony', bcOf(t)] : vOf(t) ? [fromSvg(vOf(t)), 'kolumna V', vOf(t)] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
@@ -256,32 +259,40 @@ export function mountContours(el, ctx) {
     return box;
   }
 
-  /** Przesunięcie / obrót całego konturu: X, Z (mm) i kąt (°, dodatni – przeciwnie do wskazówek zegara, wokół punktu 0,0). */
+  /** Przesunięcie / obrót całego konturu razem z płytkami – wartości bezwzględne (względem konturu przed przesunięciem):
+   *  X, Z w mm, kąt w ° (dodatni – przeciwnie do wskazówek zegara, wokół punktu 0,0). „Zeruj” wraca do położenia wyjściowego. */
   function moveBox() {
-    const inp = (ph) => h('input', { type: 'text', placeholder: ph, style: { width: '58px', padding: '1px 4px' } });
-    const ix = inp('0'), iz = inp('0'), ia = inp('0');
+    const xf = st.xf || { dx: 0, dz: 0, ang: 0 };
+    const inp = (v) => h('input', { type: 'text', value: String(v).replace('.', ','), style: { width: '58px', padding: '1px 4px' } });
+    const ix = inp(xf.dx), iz = inp(xf.dz), ia = inp(xf.ang);
     const n = (i) => { const v = Number(String(i.value || '0').replace(',', '.')); return Number.isFinite(v) ? v : NaN; };
-    const apply = () => {
-      const dx = n(ix), dz = n(iz), a = n(ia);
-      if ([dx, dz, a].some(Number.isNaN)) { status.set('Wpisz liczby (mm, °).', 'error'); return; }
-      if (!dx && !dz && !a) return;
-      if (!st.full && !dx && !a) {   // tylko Z w trybie połowy – zachowuje zaokrąglenia
-        for (const r of st.rows) if (String(r.z).trim() !== '') r.z = fmtMm(Number(String(r.z).replace(',', '.')) * 10 + dz * 10);
+    const apply = (nx) => {
+      if ([nx.dx, nx.dz, nx.ang].some(Number.isNaN)) { status.set('Wpisz liczby (mm, °).', 'error'); return; }
+      const old = st.xf || { dx: 0, dz: 0, ang: 0 };
+      if (!st.full && !old.dx && !old.ang && !nx.dx && !nx.ang) {   // tylko Z w trybie połowy – zachowuje zaokrąglenia
+        const d = (nx.dz - old.dz) * 10;
+        for (const r of st.rows) if (String(r.z).trim() !== '') r.z = fmtMm(Number(String(r.z).replace(',', '.')) * 10 + d);
       } else {
         const errs = st.full ? [] : E.validate(st.rows);
         if (errs.length) { status.set('Najpierw popraw tabelę: ' + errs[0], 'error'); return; }
         const pts = st.full ? st.full.map((p) => ({ ...p })) : E.svgToContour(E.toSvg(st.rows));
-        const c = Math.cos((a * Math.PI) / 180), s = Math.sin((a * Math.PI) / 180);
-        const moved = pts.map((p) => ({ x: Math.round((p.x * c - p.y * s + dx * 10) * 1000) / 1000, y: Math.round((p.x * s + p.y * c + dz * 10) * 1000) / 1000 }));
-        setFull(moved, (st.fullLabel ? st.fullLabel + ', ' : '') + 'przesunięty');
+        const base = pts.map((p) => unXf(p, old));   // kontur przed dotychczasowym przesunięciem
+        const moved = base.map((p) => { const q = doXf(p, nx); return { x: Math.round(q.x * 1000) / 1000, y: Math.round(q.y * 1000) / 1000 }; });
+        const label = String(st.fullLabel || '').replace(/, przesunięty$/, '');
+        setFull(moved, nx.dx || nx.dz || nx.ang ? (label ? label + ', ' : '') + 'przesunięty' : label);
       }
-      st.dirty = true; pv.view = null;
-      status.set(`Kontur przesunięty: X ${dx} mm, Z ${dz} mm, obrót ${a}°.` + (dx || a ? ' Przesunięcie w X / obrót daje kontur niesymetryczny – zapisywany jako pełny kontur.' : ''), 'neutral');
+      st.xf = { ...nx }; st.dirty = true; pv.view = null;
+      status.set(`Położenie konturu z płytkami: X ${nx.dx} mm, Z ${nx.dz} mm, obrót ${nx.ang}° (względem położenia wyjściowego).`, 'neutral');
       drawEditor();
     };
     return h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap', fontSize: '12px', background: '#f4f6f8', padding: '4px', borderRadius: '4px' } },
-      h('b', {}, 'Cały kontur:'), 'przesuń X', ix, 'Z', iz, 'mm · obróć', ia, '°', h('button', { class: 'btn small', onclick: apply }, 'Zastosuj'));
+      h('b', {}, 'Cały kontur z płytkami:'), 'X', ix, 'Z', iz, 'mm · obrót', ia, '°',
+      h('button', { class: 'btn small', onclick: () => apply({ dx: n(ix), dz: n(iz), ang: n(ia) }) }, 'Ustaw'),
+      h('button', { class: 'btn small', onclick: () => apply({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'));
   }
+  /** Przesunięcie konturu (0,1 mm): obrót wokół 0,0 o ang°, potem przesunięcie o dx, dz (mm); unXf – odwrotnie. */
+  const doXf = (p, f) => { const c = Math.cos((f.ang * Math.PI) / 180), s = Math.sin((f.ang * Math.PI) / 180); return { x: p.x * c - p.y * s + f.dx * 10, y: p.x * s + p.y * c + f.dz * 10 }; };
+  const unXf = (p, f) => { const x = p.x - f.dx * 10, y = p.y - f.dz * 10, c = Math.cos((f.ang * Math.PI) / 180), s = Math.sin((f.ang * Math.PI) / 180); return { x: x * c + y * s, y: -x * s + y * c }; };
 
   function setRows(rows, msg) { st.full = null; st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
   /** Pełny kontur bez zmian (T / V / dane) – tabela pokazuje jego obrys (połowę) tylko do podglądu i ewentualnej edycji. */
@@ -297,14 +308,17 @@ export function mountContours(el, ctx) {
     errBox.textContent = errs.join('\n');
     const svg = !t ? '' : st.full ? E.contourToSvg(st.full) : !errs.length ? E.toSvg(st.rows) : '';
     // zapisywana jest tylko prawa połowa (od osi); podgląd 2D – odbicie lustrzane, 3D – obrót połowy
+    if (t) { const set = insertSetup(t); if (document.activeElement !== zI) zI.value = set.z; if (document.activeElement !== drI) drI.value = set.draft; }
     svgOut.value = !t ? '' : st.full ? (st.srcHalf || (st.rows.length >= 2 ? E.halfSvg(st.rows) : '')) : !errs.length ? E.halfSvg(st.rows) : '';
     if (saveVBtn) { const ok = t && okOf(t); saveVBtn.disabled = !!ok; saveVBtn.title = ok ? 'Kontur zatwierdzony – jest w PSWT (kolumna BC), zapis w kolumnie V niepotrzebny.' : 'Wersja robocza konturu (prawa połowa) w ND_CACHE, kolumna V.'; }
     preview.style.display = pv.d3 ? 'none' : ''; prev3d.style.display = pv.d3 ? '' : 'none';
     if (pv.d3) {
       clear(prev3d);
-      const mesh = svg ? G.buildMesh([E.svgToContour(svg)]) : null;
-      const ins = t && pv.showIns ? insertsOf(t).flatMap((q) => [q.right, q.left]) : [];
-      prev3d.append(mesh || ins.length ? view3d(mesh, ins) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
+      const f0 = st.xf || { dx: 0, dz: 0, ang: 0 };   // bryła z konturu przed przesunięciem, przesunięcie / obrót całości w scenie
+      const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))]) : null;
+      const set = insertSetup(t);
+      const ins = t && pv.showIns ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft })) : [];
+      prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
     }
     const layers = [];
     if (t && tOf(t)) layers.push({ pts: G.parseContour(tOf(t)), stroke: '#888', fill: 'none', dash: '6 4', label: 'kolumna T (dawny)' });
@@ -450,7 +464,8 @@ export function mountContours(el, ctx) {
       const auto = conv(raw[j * 2 + 1]), a = adjOf(j);
       const cx = auto.reduce((s2, p) => s2 + p.x, 0) / auto.length, cy = auto.reduce((s2, p) => s2 + p.y, 0) / auto.length;
       const right = auto.map((p) => { const r = G.rotateAround(p, { x: cx, y: cy }, -a.ang); return { x: r.x + a.dx * 10, y: r.y + a.dz * 10 }; });
-      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto, right, left: right.map((p) => ({ x: -p.x, y: p.y })) });
+      const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
+      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right });
     }
     return out;
   }
