@@ -35,11 +35,13 @@ export function mountContours(el, ctx) {
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
   const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc', touchAction: 'none', userSelect: 'none' } });
   // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
-  const pv = { snap: true, step: 0, drag: null, view: null, sel: null };
+  const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null };
   const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
   const stepSel = h('select', { onchange: () => { pv.step = Number(stepSel.value); drawPreview(); } }, ...[['0', 'siatka: auto'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm']].map(([v, l]) => h('option', { value: v }, l)));
   const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
+  const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel,
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'),
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
@@ -65,6 +67,7 @@ export function mountContours(el, ctx) {
       const cat = await toolCatalog(force);
       st.tools = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim()).sort((a, b) => String(a.productCode).localeCompare(String(b.productCode), 'pl', { numeric: true }));
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
+      st.index = G.toolIndex(cat);
       try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
       await loadData();
       drawFilters(); drawList();
@@ -112,7 +115,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null;
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.insSel = null; pv.ptEdit = null; st.insAdj = {};
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = vOf(t) ? [E.svgToContour(vOf(t)), 'kolumna V'] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
@@ -254,7 +257,9 @@ export function mountContours(el, ctx) {
     if (t && genOf(t)) layers.push({ pts: genOf(t), stroke: '#ef6c00', fill: 'none', dash: '4 3', label: 'z danych D:N' });
     if (t && vOf(t)) layers.push({ pts: E.svgToContour(vOf(t)), stroke: '#2e7d32', fill: 'none', dash: '2 3', label: 'kolumna V (zapisany)' });
     if (svg) layers.push({ pts: E.svgToContour(svg), stroke: '#1565c0', fill: 'rgba(21,101,192,.18)', dash: '', label: 'nowy kontur' });
-    const all = layers.flatMap((l) => l.pts);
+    // płytki skrawające: rozmieszczenie jak w zestawie (algorytm ToolBuildera) + korekta prawej płytki (lewa – odbicie lustrzane)
+    const ins = t && pv.showIns ? insertsOf(t) : [];
+    const all = [...layers.flatMap((l) => l.pts), ...ins.flatMap((q) => [...q.right, ...q.left])];
     if (!all.length) { preview.innerHTML = '<p class="muted" style="padding:10px">Brak konturu do pokazania.</p>'; info.textContent = ''; drawRegionBar(); return; }
     const W = 600, H = 600, pad = 30;
     // widok zamrożony w czasie przeciągania (żeby rysunek nie „uciekał” spod kursora)
@@ -287,6 +292,13 @@ export function mountContours(el, ctx) {
     out += `<line x1="0" y1="${f2(Y(0))}" x2="${W}" y2="${f2(Y(0))}" stroke="#d50000" stroke-width="1.2"/><text x="${W - 14}" y="${f2(Y(0) - 4)}" font-size="13" font-weight="700" fill="#d50000">X</text>`;
     out += `<line x1="${f2(X(0))}" y1="0" x2="${f2(X(0))}" y2="${H}" stroke="#0d2a6b" stroke-width="1.2" stroke-dasharray="10 4 2 4"/><text x="${f2(X(0) + 5)}" y="14" font-size="13" font-weight="700" fill="#0d2a6b">Z</text>`;
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
+    const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
+    ins.forEach((q, j) => {
+      const on = pv.insSel === j;
+      out += `<polygon points="${poly(q.left)}" fill="#d50000" fill-opacity="0.15" stroke="#d50000" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
+      out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#d50000" fill-opacity="${on ? 0.45 : 0.3}" stroke="${on ? '#ff6d00' : '#d50000'}" stroke-width="${on ? 2.2 : 1.3}" style="cursor:move"/>`;
+      out += `<circle cx="${f2(X(q.right[0].x))}" cy="${f2(Y(q.right[0].y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
+    });
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
     const hp = st.full ? st.full.map((p) => ({ x: p.x, y: p.y })) : (svg ? E.fullPoints(st.rows).slice(0, st.rows.length).map((p) => ({ x: p.x * 10, y: p.y * 10 })) : []);
     const closed = !!st.full;
@@ -299,6 +311,8 @@ export function mountContours(el, ctx) {
     out += layers.map((l, i) => `<text x="8" y="${16 + i * 14}" font-size="11" fill="${l.stroke}" pointer-events="none">— ${esc(l.label)}</text>`).join('')
       + `<text x="8" y="${H - 8}" font-size="10" fill="#888" pointer-events="none">siatka ${String(step).replace('.', ',')} mm</text></svg>`;
     preview.innerHTML = out;
+    preview._ins = ins;
+    drawOverlays();
     drawRegionBar();
     const d = svg ? (() => { const b2 = G.bounds(E.svgToContour(svg)); return { diameter: Math.max(Math.abs(b2.minX), Math.abs(b2.maxX)) / 5, length: (b2.maxY - b2.minY) / 10 }; })() : null;
     // składanie zestawu (ToolBuilder, Viewer): R = największe Y (od osi odniesienia Y = 0), M = głębokość poniżej zera (mocowanie)
@@ -325,7 +339,12 @@ export function mountContours(el, ctx) {
   preview.addEventListener('pointerdown', (e) => {
     if (!st.tool) return;
     const w = world(e); if (!w) return;
-    const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]');
+    const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]'), insEl = e.target.closest('[data-ins]');
+    if (insEl) {
+      const j = Number(insEl.dataset.ins), a = adjOf(j);
+      pv.drag = { ins: j, start: w, orig: { ...a }, moved: false };
+      preview.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
     if (ptEl || segEl) {
       const k = Number((ptEl || segEl).dataset.pt ?? segEl.dataset.seg);
       const n = st.full ? st.full.length : st.rows.length;
@@ -337,6 +356,11 @@ export function mountContours(el, ctx) {
   preview.addEventListener('pointermove', (e) => {
     const d = pv.drag; if (!d || d.click) return;
     const w = world(e); if (!w) return;
+    if (d.ins != null) {   // przesuwanie płytki w całości (bez deformacji); lewa płytka – odbicie
+      const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
+      st.insAdj[d.ins] = { ...d.orig, dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) };
+      d.moved = true; pv.insSel = d.ins; drawPreview(); return;
+    }
     let dx = w.x - d.start.x, dy = w.y - d.start.y;
     if (d.idx.length === 1) { d.idx.forEach((k, j) => setPoint(k, snapV(d.orig[j].x + dx), snapV(d.orig[j].y + dy))); }
     else { dx = pv.snap ? snapV(dx) : dx; dy = pv.snap ? snapV(dy) : dy; d.idx.forEach((k, j) => setPoint(k, d.orig[j].x + dx, d.orig[j].y + dy)); }
@@ -345,9 +369,71 @@ export function mountContours(el, ctx) {
   preview.addEventListener('pointerup', (e) => {
     const d = pv.drag; pv.drag = null;
     if (!d) return;
-    if (d.click) { pickRegion(d.click.y / 10); return; }
-    if (d.moved) { drawTable(); drawPreview(); }
+    if (d.click) { pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
+    if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); return; }
+    if (d.moved) { drawTable(); drawPreview(); return; }
+    if (d.idx && d.idx.length === 1) { pv.ptEdit = d.idx[0]; pv.insSel = null; drawPreview(); }   // kliknięcie w punkt – okienko z parametrami
   });
+  // ---------- płytki: rozmieszczenie z algorytmu i korekta ----------
+  const round3 = (v) => Math.round(v * 1000) / 1000;
+  const adjOf = (j) => (st.insAdj && st.insAdj[j]) || { dx: 0, dz: 0, ang: 0 };
+  /** Płytki narzędzia w układzie konturu (0,1 mm): auto – jak w zestawie ToolBuildera; right – po korekcie (dX, dZ, kąt wokół środka), left – odbicie. */
+  function insertsOf(t) {
+    if (!st.index) return [];
+    const stt = st.index.stackTool(t);
+    if (!stt || !stt.inserts.length || stt.contour.length < 3) return [];
+    const stack = G.buildStack([stt], true, false);
+    if (!stack) return [];
+    const bT = G.bounds(stt.contour), conv = (pts) => pts.map((p) => ({ x: p.x, y: bT.maxY - p.y }));
+    const det = st.index.details(t.productCode) || {}, codes = (det.insertContours || []).filter((x) => G.parseInsertPath(x.contour).length >= 2).map((x) => String(x.code || '').toUpperCase());
+    const out = [], raw = stack.layers[0].inserts;
+    for (let j = 0; j * 2 + 1 < raw.length; j++) {
+      const auto = conv(raw[j * 2 + 1]), a = adjOf(j);
+      const cx = auto.reduce((s2, p) => s2 + p.x, 0) / auto.length, cy = auto.reduce((s2, p) => s2 + p.y, 0) / auto.length;
+      const right = auto.map((p) => { const r = G.rotateAround(p, { x: cx, y: cy }, -a.ang); return { x: r.x + a.dx * 10, y: r.y + a.dz * 10 }; });
+      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto, right, left: right.map((p) => ({ x: -p.x, y: p.y })) });
+    }
+    return out;
+  }
+  /** Okienka przy rysunku: parametry klikniętego punktu albo korekta wybranej płytki. */
+  function drawOverlays() {
+    preview.style.position = 'relative';
+    const svgEl = preview.querySelector('svg');
+    const at = (sel) => { const el = preview.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(), pr = preview.getBoundingClientRect(); return { x: r.left - pr.left + r.width / 2, y: r.top - pr.top + r.height / 2 }; };
+    const box = (x, y, ...kids) => preview.append(h('div', { style: { position: 'absolute', left: Math.min(x + 12, preview.clientWidth - 250) + 'px', top: Math.max(4, y - 10) + 'px', zIndex: 3, background: '#fff', border: '1px solid #1565c0', borderRadius: '6px', boxShadow: '0 2px 8px rgba(0,0,0,.25)', padding: '6px 8px', fontSize: '12px', minWidth: '210px' },
+      onpointerdown: (e) => e.stopPropagation() }, ...kids));
+    const num = (v, on) => h('input', { type: 'text', value: String(v).replace('.', ','), style: { width: '70px', padding: '1px 4px' }, onchange: (e) => on(Number(String(e.target.value).replace(',', '.'))) });
+    const rowI = (label, inp, unit = 'mm') => h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' } }, label), inp, h('span', { class: 'muted' }, unit));
+    const closeBtn = (fn) => h('button', { class: 'btn small', style: { float: 'right' }, onclick: fn }, '✕');
+    if (!svgEl) return;
+    if (pv.ptEdit != null) {
+      const k = pv.ptEdit, pos = at(`[data-pt="${k}"]`);
+      if (pos) {
+        const p = getPoint(k);
+        const kids = [closeBtn(() => { pv.ptEdit = null; drawPreview(); }), h('b', {}, st.full ? `Punkt ${k + 1}` : `Punkt ${k + 1} (połowa)`),
+          rowI(st.full ? 'X' : 'X (promień)', num(round3(p.x / 10), (v) => { if (Number.isFinite(v)) { setPoint(k, v * 10, p.y); st.dirty = true; drawTable(); drawPreview(); } })),
+          rowI('Z', num(round3(p.y / 10), (v) => { if (Number.isFinite(v)) { setPoint(k, p.x, v * 10); st.dirty = true; drawTable(); drawPreview(); } }))];
+        if (!st.full) kids.push(rowI('Łuk – promień R', num(st.rows[k].rad || 0, (v) => { if (Number.isFinite(v) && v >= 0) { st.rows[k].rad = v ? String(v) : ''; st.dirty = true; drawTable(); drawPreview(); } })),
+          h('div', { class: 'muted', style: { fontSize: '10px' } }, 'R > 0 – zaokrąglenie narożnika w tym punkcie (łuk styczny).'));
+        else kids.push(h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Pełny kontur: łuki są odcinkami. Promień zmienisz w trybie połowy („Użyj połowy z tabeli”).'));
+        box(pos.x, pos.y, ...kids);
+      }
+    }
+    const ins = preview._ins || [];
+    if (pv.insSel != null && ins[pv.insSel]) {
+      const j = pv.insSel, q = ins[j], a = adjOf(j), pos = at(`[data-ins="${j}"]`) || { x: 20, y: 20 };
+      const set = (patch) => { st.insAdj[j] = { ...adjOf(j), ...patch }; drawPreview(); };
+      const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
+      const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.auto[0])} → po korekcie ${mm(q.right[0])} (mm)`;
+      box(pos.x, pos.y, closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
+        h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
+        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
+        h('div', { style: { fontSize: '11px', margin: '3px 0' } }, 'Punkt bazowy (●): z algorytmu ', h('b', {}, mm(q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.right[0]))),
+        h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'),
+          h('button', { class: 'btn small primary', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(report) : navigator.clipboard.writeText(report)); toast('Skopiowano opis korekty'); } catch (e2) { toast(e2.message, true); } } }, 'Kopiuj opis korekty')));
+    }
+  }
+
   /** Rejony: pasy między kolejnymi poziomami Z nowego konturu (zamknięte przekrojem konturu). */
   function zLevels() {
     const pts = svgOut.value ? E.svgToContour(svgOut.value) : [];
