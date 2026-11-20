@@ -375,3 +375,19 @@ test('Workflow: filtry i sortowanie jak w Zakupach', () => {
   // status A jest widoczny w filtrze kolumny A po wartości „x”
   assert.deepEqual(W.options(items, {}, 'A').map((o) => [o.value, o.count]), [['x', 1], ['', 3]]);
 });
+
+test('ToolBuilder: filtry po mocowaniu na wejściu (Ms, kolumna M) i na wyjściu (Mk, kolumna N)', async () => {
+  const B = await import('../src/renderer/js/logic/builder.js');
+  const tools = [
+    { productCode: 'A', columnD: 'opr', columnM: 'ISO050', columnN: 'WEL016' },
+    { productCode: 'B', columnD: 'opr', columnM: 'ISO050', columnN: 'MK_003' },
+    { productCode: 'C', columnD: 'opr', columnM: 'FZS_031', columnN: 'WEL016' },
+  ];
+  const f = (o) => ({ ...B.emptyFilters(), ...o });
+  assert.deepEqual(B.filterTools(tools, f({ mIn: 'iso050' })).map((t) => t.productCode), ['A', 'B']);
+  assert.deepEqual(B.filterTools(tools, f({ mOut: 'WEL016' })).map((t) => t.productCode), ['A', 'C']);
+  assert.deepEqual(B.filterTools(tools, f({ mIn: 'ISO050', mOut: 'WEL016' })).map((t) => t.productCode), ['A']);
+  // opcje listy zależą od pozostałych filtrów (jak w autofiltrze)
+  assert.deepEqual(B.options(tools, f({ mIn: 'ISO050' }), 'mOut'), ['MK_003', 'WEL016']);
+  assert.deepEqual(B.options(tools, f({ mOut: 'WEL016' }), 'mIn'), ['FZS_031', 'ISO050']);
+});

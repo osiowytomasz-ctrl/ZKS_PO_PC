@@ -161,3 +161,17 @@ test('gniazdo żeńskie oprawki z męskiego zakończenia N (ABS, Weldon, Capto, 
   const cup = profileOf(pts, h.cavity);
   assert.ok(cup.some((q) => q.x === 80 && q.y === 340) && cup.some((q) => q.x === 0 && q.y === -140));
 });
+
+test('gniazdo: T__ / SP (termo), poziome linie przerywane na załamaniach profilu (MHD, MK)', () => {
+  assert.deepEqual(C.socketProfile('T__006'), [[0, -68], [30.6, -68], [34, 0]]);   // wzór męskiego zakończenia T__ (dno na osi)
+  assert.deepEqual(C.socketProfile('SP_15'), [[0, -128], [57.6, -128], [64, 0]]);
+  const top = (code) => { const pts = parseContour(C.fullContour({ D: 'opr', E: 'red', F: '40', I: '90', J: '150', K: '110', M: 'ISO050', N: code }, {})); return holeDrawingFor(code, pts); };
+  const mhd = top('MHD063'), t = Math.max(...parseContour(C.fullContour({ D: 'opr', E: 'red', F: '40', I: '90', J: '150', K: '110', M: 'ISO050', N: 'MHD063' }, {})).map((q) => q.y));
+  // MHD: linia przez walec na poziomie przejścia stożek → walec (−157,5 od otworu), na całej szerokości walca
+  assert.deepEqual(mhd.hidden[1].map((q) => [q.x, q.y]), [[-157.5, t - 157.5], [157.5, t - 157.5]]); assert.equal(mhd.hidden.length, 2);
+  // MK: linia w środku na poziomie dolnej krawędzi stożka (nad kołkiem ø8): połowa szerokości kołka
+  const mk = top('MK_003'), t2 = Math.max(...parseContour(C.fullContour({ D: 'opr', E: 'red', F: '40', I: '90', J: '150', K: '110', M: 'ISO050', N: 'MK_003' }, {})).map((q) => q.y));
+  assert.deepEqual(mk.hidden[1].map((q) => [q.x, q.y]), [[-40, t2 - 690], [40, t2 - 690]]); assert.equal(mk.hidden.length, 2);
+  // proste gniazda (ABS, Weldon, Capto, T__) nie mają dodatkowych linii poziomych
+  for (const k of ['ABS040', 'WEL016', 'CAP080', 'T__010']) assert.equal(top(k).hidden.length, 1, k);
+});

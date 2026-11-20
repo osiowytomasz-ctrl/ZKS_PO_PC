@@ -16,7 +16,7 @@ import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
 import { openContoursFor, mountContours, regionsText } from './contours.js';
 
-const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
+const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α'], ['mIn', 'Ms (wejście)'], ['mOut', 'Mk (wyjście)']];
 
 export function mountBuilder(el, ctx) {
   const st = { all: [], listed: [], index: null, filters: B.emptyFilters(), selected: [], loading: false, view: 'list', stopFill: null };

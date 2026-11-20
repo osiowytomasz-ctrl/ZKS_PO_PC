@@ -127,7 +127,12 @@ export function holeDrawingFor(N, contour) {
     const sk = socketProfile(N);
     if (!sk) return null;
     const prof = sk.map(([x, z]) => pt(x, b.maxY + z)), poly = [...[...prof].reverse().map((p) => pt(p.x ? -p.x : 0, p.y)), ...prof].filter((p, i, a) => !i || Math.abs(p.x - a[i - 1].x) > 1e-6 || Math.abs(p.y - a[i - 1].y) > 1e-6);
-    return { hidden: [poly], cavity: { prof, rb: 0, y7: Infinity } };
+    // krawędzie średnic wewnątrz gniazda: pozioma linia przerywana na każdym załamaniu profilu (np. stożek → walec w MHD, stożek → kołek w Morse'ie);
+    // na poziomie z kilkoma punktami – środkowa część, bo boki są już w linii gniazda
+    const edge = new Map();
+    for (let i = 1; i < prof.length - 1; i++) { const q = prof[i]; if (q.y > prof[0].y + 1e-6 && q.x > 1e-6) edge.set(q.y, Math.min(edge.get(q.y) ?? Infinity, q.x)); }
+    const lines = [...edge].map(([y, x]) => [pt(-x, y), pt(x, y)]);
+    return { hidden: [poly, ...lines], cavity: { prof, rb: 0, y7: Infinity } };
   }
   const top = b.maxY, yb = top - h.depth;
   return { hidden: [[pt(-h.r, top), pt(-h.r, yb), pt(h.r, yb), pt(h.r, top)]], cavity: { ri: h.r, yb, rb: 0, y7: Infinity } };

@@ -4,14 +4,14 @@ import { norm, isBlockedLocation, description } from './tooltrack.js';
 
 export { description };
 const num = (v) => { const n = Number(String(v ?? '').trim().replace(',', '.')); return Number.isFinite(n) ? n : 0; };
-export const FIELDS = ['code', 'location', 'group', 'type', 'company', 'diameter', 'length', 'rAlpha'];
+export const FIELDS = ['code', 'location', 'group', 'type', 'company', 'diameter', 'length', 'rAlpha', 'mIn', 'mOut'];   // mIn – mocowanie na wejściu (Ms, kolumna M), mOut – na wyjściu (Mk, kolumna N)
 export const emptyFilters = () => Object.fromEntries(FIELDS.map((f) => [f, '']));
 
 export const isListed = (t) => !!String(t.columnD ?? '').trim() && !isBlockedLocation(t.location);
 export const rAlphaValue = (t) => { const g = num(t.columnG); return g !== 0 ? g : num(t.columnH); };
 export const rAlphaText = (t) => { const v = rAlphaValue(t); return v !== 0 ? v.toFixed(2) : null; };
 
-const value = (t, f) => ({ code: t.productCode, location: t.location, group: t.columnD, type: t.columnE, company: t.columnP, diameter: t.columnF, length: t.columnJ, rAlpha: rAlphaText(t) ?? '' }[f]);
+const value = (t, f) => ({ code: t.productCode, location: t.location, group: t.columnD, type: t.columnE, company: t.columnP, diameter: t.columnF, length: t.columnJ, rAlpha: rAlphaText(t) ?? '', mIn: t.columnM, mOut: t.columnN }[f]);
 function matches(t, f, wanted) {
   if (f === 'code') return norm(t.productCode).includes(norm(wanted));
   if (f === 'diameter' || f === 'length') return num(value(t, f)) === num(wanted);
