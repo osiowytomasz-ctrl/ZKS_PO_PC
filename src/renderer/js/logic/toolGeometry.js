@@ -205,7 +205,7 @@ export function toolIndex(catalog, overrides = null) {
   for (const [k, d] of Object.entries((catalog && catalog.detailsMap) || {})) details.set(normCode(k), d);
   const tool = (code) => tools.get(normCode(code)) || null;
   // zatwierdzony kontur (PSWT BC) zastępuje kontur z kolumny T
-  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); return o ? { ...(d || {}), columnAY: o, confirmedContour: true } : d; };
+  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); return o ? { ...(d || {}), columnAY: o, confirmedContour: true, originalAY: d ? d.columnAY : '' } : d; };
   let usage = null;
   const idx = {
     tool, details: det,

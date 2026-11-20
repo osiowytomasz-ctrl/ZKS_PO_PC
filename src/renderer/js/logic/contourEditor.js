@@ -66,8 +66,36 @@ export function expandHalf(points) {
   const P = (points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!isHalf(P)) return P;
   const right = P.map((p) => ({ x: Math.max(0, p.x), y: p.y }));
-  return [...right, ...[...right].reverse().filter((p) => p.x > 1e-6).map((p) => ({ x: -p.x, y: p.y }))];
+  // lewa strona – odbicie całej ścieżki w odwrotnej kolejności (także linie krawędzi wewnątrz obrysu)
+  const all = [...right, ...[...right].reverse().map((p) => ({ x: p.x > 1e-6 ? -p.x : 0, y: p.y }))];
+  const out = all.filter((p, i) => !i || Math.abs(p.x - all[i - 1].x) > 1e-6 || Math.abs(p.y - all[i - 1].y) > 1e-6);
+  while (out.length > 2 && Math.abs(out[0].x - out[out.length - 1].x) < 1e-6 && Math.abs(out[0].y - out[out.length - 1].y) < 1e-6) out.pop();
+  return out;
 }
+/**
+ * Prawa połowa pełnego konturu (0,1 mm) z zachowaniem przebiegu ścieżki: obrys zewnętrzny i linie krawędzi elementów
+ * (np. nakrętka ER, krawędzie skrawające) po stronie x ≥ 0; w miejscach przejścia przez oś – punkt na osi.
+ * Ścieżka zaczyna się i kończy na osi (pominięta lewa strona = odcinek wzdłuż osi przy zamknięciu „Z”).
+ */
+export function halfPath(points) {
+  const P = (points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (P.length < 2) return [];
+  if (isHalf(P)) return P.map((p) => ({ x: Math.max(0, p.x), y: p.y }));
+  const out = [], n = P.length, eq = (a, b) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
+  const push = (p) => { const q = { x: Math.round(p.x * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }; if (!out.length || !eq(out[out.length - 1], q)) out.push(q); };
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n];
+    if (a.x >= 0) push(a);
+    if ((a.x >= 0) !== (b.x >= 0) && a.x !== 0 && b.x !== 0) { const t = a.x / (a.x - b.x); push({ x: 0, y: a.y + t * (b.y - a.y) }); }
+  }
+  if (out.length > 1 && eq(out[0], out[out.length - 1])) out.pop();
+  // początek w punkcie wejścia na prawą stronę: odcinek oś → oś przed nim to pominięta lewa strona (zamknięcie ścieżki)
+  let k = out.findIndex((p, i) => p.x === 0 && out[(i - 1 + out.length) % out.length].x === 0 && out[(i + 1) % out.length].x > 0);
+  if (k < 0) k = out.findIndex((p) => p.x === 0);
+  return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
+}
+/** Prawa połowa (z liniami krawędzi) pełnego konturu jako ścieżka SVG w mm – zapis do BC / V. */
+export const halfPathSvg = (points) => contourToSvg(halfPath(points));
 /** Prawa połowa konturu z wierszy (mm) jako zamknięta ścieżka SVG: od osi, punkty z zaokrągleniami, z powrotem do osi. */
 export function halfSvg(rows) {
   const right = rows.filter((r) => Number.isFinite(n(r.z)) && Number.isFinite(n(r.r)))

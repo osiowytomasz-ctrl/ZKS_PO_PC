@@ -51,6 +51,7 @@ export function mountBuilder(el, ctx) {
       const [cd, v] = await Promise.all([api('ndContourData', [], { timeoutMs: 180000 }), api('ndContoursV', []).catch(() => ({}))]);
       st.cd = { params: (cd && cd.params) || {}, mounts: (cd && cd.mounts) || {}, v: v || {} };
       st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params));
+      paintFix();
       if (st.view === 'tiles') drawList();
     } catch (e) { st.cdError = e.message; if (st.view === 'tiles') drawList(); }
   }
@@ -58,13 +59,52 @@ export function mountBuilder(el, ctx) {
   /** Kontur, który Kontury wczytałyby przy otwarciu (bez zmian): kolumna V, T albo dane D:N → prawa połowa SVG. */
   function autoContour(t) {
     const k = nc(t), v = st.cd.v[k] || '';
-    if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfSvg(E.halfFromContour(pts)), label: 'z kolumny V (roboczy)' }; }
-    const tp = G.parseContour(((st.index && st.index.details(t.productCode)) || {}).columnAY || '');
-    if (tp.length >= 3 && !((st.index.details(t.productCode) || {}).confirmedContour)) return { svg: E.halfSvg(E.halfFromContour(tp)), label: 'z kolumny T' };
+    if (v) { const pts = E.svgToContour(v); return { svg: E.isHalf(pts) ? v : E.halfPathSvg(pts), label: 'z kolumny V (roboczy)' }; }
+    const tp = origT(t);
+    if (tp.length >= 3) return { svg: E.halfPathSvg(tp), label: 'z kolumny T' };
     const p = st.cd.params[k], g = p ? G.parseContour(fullContour(p, st.cd.mounts) || '') : [];
-    if (g.length >= 3) return { svg: E.halfSvg(E.halfFromContour(g)), label: 'z danych PSWT (D:N)' };
+    if (g.length >= 3) return { svg: E.halfPathSvg(g), label: 'z danych PSWT (D:N)' };
     return null;
   }
+  /** Kontur z kolumny T (ND_CACHE) – także gdy w podglądach zastępuje go zatwierdzony BC. */
+  function origT(t) { const d = (st.index && st.index.details(t.productCode)) || {}; return G.parseContour((d.confirmedContour ? d.originalAY : d.columnAY) || ''); }
+  /**
+   * Naprawa konturów zatwierdzonych bez zmian w wersji 1.50–1.53 (BC = sam obrys zewnętrzny z T / V / danych D:N):
+   * zapis BC jeszcze raz – prawa połowa z liniami krawędzi; potwierdzenie (BH) i rejony (BE) bez zmian.
+   */
+  function fixableConfirmed() {
+    if (!st.cd) return [];
+    const out = [];
+    for (const t of st.listed) {
+      const p = st.cd.params[nc(t)];
+      if (!p || !p.BH || !p.BC) continue;
+      const srcs = [];
+      const v = st.cd.v[nc(t)] || ''; if (v) srcs.push(E.svgToContour(v));
+      const tp = origT(t); if (tp.length >= 3) srcs.push(tp);
+      const g = G.parseContour(fullContour(p, st.cd.mounts) || ''); if (g.length >= 3) srcs.push(g);
+      for (const pts of srcs) {
+        if (E.isHalf(pts)) continue;
+        const env = E.halfSvg(E.halfFromContour(pts)), full = E.halfPathSvg(pts);
+        if (env === p.BC.trim() && full !== env) { out.push({ t, p, svg: full }); break; }
+      }
+    }
+    return out;
+  }
+  async function fixConfirmed() {
+    const list2 = fixableConfirmed();
+    if (!list2.length) { toast('Brak konturów do poprawy'); return; }
+    if (!(await confirmBox('Popraw zatwierdzone kontury', `Kontury zatwierdzone bez zmian (${list2.length}) mają zapisany tylko obrys zewnętrzny. Zapisać je jeszcze raz w PSWT (kolumna BC) – obrys i linie krawędzi elementów? Potwierdzenie (BH) i rejony (BE) się nie zmienią.\n\n${list2.slice(0, 12).map((x) => x.t.productCode).join(', ')}${list2.length > 12 ? ' …' : ''}`, 'Popraw'))) return;
+    let ok = 0, bad = 0;
+    for (const x of list2) {
+      status.set(`Poprawianie konturów… ${ok + bad + 1} / ${list2.length}`, 'neutral');
+      try { await api('ndConfirmContour', [x.t.productCode, x.p.BH, x.svg, null]); x.p.BC = x.svg; ok++; } catch { bad++; }
+    }
+    status.set(`Poprawiono kontury: ${ok}` + (bad ? `, błędy: ${bad}` : '') + '.', bad ? 'error' : 'neutral');
+    invalidateConfirmed(); st.index = G.toolIndex(st.cat, E.confirmedOverrides(st.cd.params)); paintFix(); drawList();
+  }
+  const fixBtn = h('button', { class: 'btn', style: { display: 'none' }, title: 'Kontury zatwierdzone bez zmian, zapisane jako sam obrys – dopisanie linii krawędzi elementów', onclick: () => fixConfirmed() });
+  const paintFix = () => { const n = canConfirm ? fixableConfirmed().length : 0; fixBtn.style.display = n ? '' : 'none'; fixBtn.textContent = `Popraw zatwierdzone kontury (${n})`; };
+
   function okButton(t) {
     if (!canConfirm) return null;
     const box = h('div', { class: 'tile-ok', onclick: (e) => e.stopPropagation(), oncontextmenu: (e) => e.stopPropagation() });
@@ -265,7 +305,7 @@ export function mountBuilder(el, ctx) {
   }
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms). Ikonka narzędzia – Kontury; prawy przycisk – karta narzędzia.'), viewBtn, newBtn,
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms). Ikonka narzędzia – Kontury; prawy przycisk – karta narzędzia.'), fixBtn, viewBtn, newBtn,
     h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), filtersBox, status, list);
   load(false);
 }

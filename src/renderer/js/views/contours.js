@@ -172,7 +172,7 @@ export function mountContours(el, ctx) {
     clear(st.noteHost);
     st.noteEl = null;
     if (st.full) st.noteHost.append(st.noteEl = h('div', { style: { background: '#fff3e0', border: '1px solid #ef6c00', padding: '4px 6px', fontSize: '12px' } },
-      `Podgląd: pełny kontur (${st.fullLabel}). Zapisywana jest tylko prawa połowa – obrys z tabeli (linie wewnętrzne rzutu bocznego nie są zapisywane). Zmiana punktu przełącza na kontur z połowy.`,
+      `Pełny kontur (${st.fullLabel}). Zapisywana jest prawa połowa – obrys i linie krawędzi elementów (rzut boczny). Tabela pokazuje tylko obrys; zmiana punktu w tabeli przełącza na kontur z połowy bez linii wewnętrznych.`,
       ' ', h('button', { class: 'btn small', onclick: () => { st.full = null; st.dirty = true; status.set('Przełączono na kontur z połowy (odbicie).', 'neutral'); drawEditor(); } }, 'Użyj połowy z tabeli')));
   }
   function drawTable() {
@@ -309,7 +309,7 @@ export function mountContours(el, ctx) {
     const svg = !t ? '' : st.full ? E.contourToSvg(st.full) : !errs.length ? E.toSvg(st.rows) : '';
     // zapisywana jest tylko prawa połowa (od osi); podgląd 2D – odbicie lustrzane, 3D – obrót połowy
     if (t) { const set = insertSetup(t); if (document.activeElement !== zI) zI.value = set.z; if (document.activeElement !== drI) drI.value = set.draft; }
-    svgOut.value = !t ? '' : st.full ? (st.srcHalf || (st.rows.length >= 2 ? E.halfSvg(st.rows) : '')) : !errs.length ? E.halfSvg(st.rows) : '';
+    svgOut.value = !t ? '' : st.full ? (st.srcHalf || E.halfPathSvg(st.full)) : !errs.length ? E.halfSvg(st.rows) : '';
     if (saveVBtn) { const ok = t && okOf(t); saveVBtn.disabled = !!ok; saveVBtn.title = ok ? 'Kontur zatwierdzony – jest w PSWT (kolumna BC), zapis w kolumnie V niepotrzebny.' : 'Wersja robocza konturu (prawa połowa) w ND_CACHE, kolumna V.'; }
     preview.style.display = pv.d3 ? 'none' : ''; prev3d.style.display = pv.d3 ? '' : 'none';
     if (pv.d3) {
@@ -569,7 +569,7 @@ export function mountContours(el, ctx) {
       let saved = 0;
       try {
         for (let i = 0; i < l.length; i += 300) {
-          const items = Object.fromEntries(l.slice(i, i + 300).map((x) => [x.t.productCode, E.halfSvg(E.halfFromContour(x.g))]));
+          const items = Object.fromEntries(l.slice(i, i + 300).map((x) => [x.t.productCode, E.halfPathSvg(x.g)]));
           const r = await api('ndSaveContoursV', [items], { timeoutMs: 180000 });
           saved += r.saved || 0;
           for (const [c, v] of Object.entries(items)) st.v[normCode(c)] = v;

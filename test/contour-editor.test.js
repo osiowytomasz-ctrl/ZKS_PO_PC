@@ -63,3 +63,11 @@ test('zatwierdzone kontury z PSWT (BH + BC) → kontur x_y dla toolIndex', () =>
   assert.deepEqual([...m.keys()], ['fx-1']);
   assert.equal(m.get('fx-1'), '0_0;80_0;80_600;0_600;-80_600;-80_0');
 });
+
+test('prawa połowa z liniami krawędzi (nakrętka ER) i odbicie', () => {
+  const er = parseContour('-95_0;95_0;95_200;-95_200;-95_210;95_210;95_340;60_380;-60_380;-95_340;-95_210');
+  assert.equal(E.halfPathSvg(er), 'M 0 0 L 9.5 0 L 9.5 20 L 0 20 L 0 21 L 9.5 21 L 9.5 34 L 6 38 L 0 38 Z');
+  const full = E.expandHalf(E.svgToContour(E.halfPathSvg(er)));
+  // linie krawędzi na Z = 20 i 21 mm są po obu stronach osi
+  for (const y of [200, 210]) assert.ok(full.some((p) => p.x === -95 && p.y === y) && full.some((p) => p.x === 95 && p.y === y));
+});
