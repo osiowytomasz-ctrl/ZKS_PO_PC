@@ -41,7 +41,7 @@ export function parseInsertPath(path, { absY = true } = {}) {
   let i = 0, cmd = '', cur = null;
   const isNum = (t) => t != null && Number.isFinite(Number(t));
   const read = () => { const t = tokens[i++]; return isNum(t) ? Number(t) : NaN; };
-  const push = (x, y) => { if (!Number.isNaN(x) && !Number.isNaN(y)) points.push(pt(x * 10, (absY ? Math.abs(y) : y) * 10)); };
+  const push = (x, y) => { if (!Number.isNaN(x) && !Number.isNaN(y)) points.push(pt(x * 10, y * 10)); };
   while (i < tokens.length) {
     if (!isNum(tokens[i])) cmd = tokens[i++].toUpperCase();
     if (cmd === 'M' || cmd === 'L') {
@@ -58,6 +58,12 @@ export function parseInsertPath(path, { absY = true } = {}) {
       }
     } else if (cmd === 'Z') break;
     else i++;
+  }
+  // płytki: Y dodatnie w górę – kontur odwrócony jako całość, gdy leży głównie pod osią (dawniej |y| dla każdego punktu
+  // odbijało pojedyncze łuki narożników przekraczające Y = 0 i promień „wywracał się” w drugą stronę)
+  if (absY && points.length) {
+    const ys = points.map((p) => p.y), lo = Math.min(...ys), hi = Math.max(...ys);
+    if (Math.abs(lo) > Math.abs(hi)) for (const p of points) p.y = -p.y;
   }
   return points;
 }

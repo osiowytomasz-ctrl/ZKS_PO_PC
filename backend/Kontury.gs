@@ -82,25 +82,32 @@ function nd_contourData_() {
     var keys = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
     var n = p.getLastRow() - 1;
     var bh = p.getRange(2, ND_PSWT_OK_COL, n, 1).getDisplayValues();   // potwierdzenie poprawności konturu
+    var bc = p.getRange(2, ND_PSWT_CONTOUR_COL, n, 1).getDisplayValues();   // zatwierdzony nowy kontur (SVG, mm)
+    var be = p.getRange(2, ND_PSWT_REGIONS_COL, n, 1).getDisplayValues();   // rejony ostrze / oprawka
     p.getRange(2, 2, n, 13).getDisplayValues().forEach(function (r, idx) {
       var code = nd_norm_(r[0]);
       if (!code || !String(r[2] || '').trim()) return;
       var o = {};
       for (var i = 1; i < keys.length; i++) o[keys[i]] = String(r[i] || '').trim();
       o.BH = String(bh[idx][0] || '').trim();
+      o.BC = String(bc[idx][0] || '').trim();
+      o.BE = String(be[idx][0] || '').trim();
       params[code] = o;
     });
   }
   return { mounts: mounts, params: params };
 }
 
-var ND_PSWT_OK_COL = 60; // BH – potwierdzenie poprawności konturu (PSWT)
+var ND_PSWT_OK_COL = 60;        // BH – potwierdzenie poprawności konturu (PSWT)
+var ND_PSWT_CONTOUR_COL = 55;   // BC – zatwierdzony nowy kontur (ścieżka SVG w mm)
+var ND_PSWT_REGIONS_COL = 57;   // BE – rejony konturu: „ostrze 0–45; oprawka 45–60” (Z w mm)
 
 /**
- * Potwierdzenie poprawności konturu narzędzia [code] w arkuszu PSWT, kolumna BH ([value] – np. „OK 20.11.2026 Kowalski”, pusty – cofnięcie).
- *   ndConfirmContour: { write: true, run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx); } },
+ * Potwierdzenie poprawności konturu narzędzia [code] w arkuszu PSWT, kolumna BH ([value] – np. „OK 20.11.2026 Kowalski”, pusty – cofnięcie);
+ * przy potwierdzeniu także zatwierdzony kontur [contour] (SVG, mm) do kolumny BC i rejony [regions] do kolumny BE.
+ *   ndConfirmContour: { write: true, run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx, a[2], a[3]); } },
  */
-function nd_confirmContour_(code, value, ctx) {
+function nd_confirmContour_(code, value, ctx, contour, regions) {
   api_requireGrafikLevel_(ctx, 'master');
   var want = nd_norm_(code);
   if (!want) throw new Error('Brak kodu narzędzia.');
@@ -112,6 +119,12 @@ function nd_confirmContour_(code, value, ctx) {
     if (nd_norm_(codes[i][0]) !== want) continue;
     var row = i + 2;
     p.getRange(row, ND_PSWT_OK_COL).setValue(String(value || '').slice(0, 200));
+    if (value && contour != null) {
+      var path = String(contour || '').trim();
+      if (path && !/^M[\s\d\-.,MLAQZ]+$/i.test(path)) throw new Error('Kontur nie jest ścieżką SVG (M, L, A, Q, Z).');
+      p.getRange(row, ND_PSWT_CONTOUR_COL).setValue(path.slice(0, 45000));
+    }
+    if (value && regions != null) p.getRange(row, ND_PSWT_REGIONS_COL).setValue(String(regions || '').slice(0, 1000));
     return { row: row, value: String(value || '') };
   }
   throw new Error('Nie ma narzędzia ' + code + ' w kolumnie B arkusza PSWT.');

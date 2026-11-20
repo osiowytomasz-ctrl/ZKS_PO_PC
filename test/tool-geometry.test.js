@@ -16,7 +16,15 @@ test('num, parseContour, bounds', () => {
 });
 
 test('płytki: ×10, |y|, łuki i krzywe', () => {
-  assert.deepEqual(G.parseInsertPath('M 1 2 L 3 -4 Z'), [P(10, 20), P(30, 40)]);
+  // kontur leżący głównie pod osią – odwrócony jako całość (bez odbijania pojedynczych punktów)
+  assert.deepEqual(G.parseInsertPath('M 1 2 L 3 -4 Z'), [P(10, -20), P(30, 40)]);
+  assert.deepEqual(G.parseInsertPath('M 1 -2 L 3 -4 Z'), [P(10, 20), P(30, 40)]);
+  // płytka na środku osi (SNMG): bez „składania” – połowa punktów nad, połowa pod osią
+  const sq = G.parseInsertPath('M -5 -5 L 5 -5 L 5 5 L -5 5 Z');
+  assert.equal(sq.filter((p) => p.y > 0).length, 2); assert.equal(sq.filter((p) => p.y < 0).length, 2);
+  // narożnik z promieniem przekraczającym Y = 0 (CNMG): łuk zostaje po tej samej stronie, bez „dziubka”
+  const rh = G.parseInsertPath('M 0 -0.5 A 0.8 0.8 0 0 1 0.8 0.2 L 10 0.2 L 8 -10 L -2 -10 Z');
+  assert.ok(rh.every((p) => p.y >= -3), JSON.stringify(rh.slice(0, 4)));
   const arc = G.parseInsertPath('M 0 0 A 1 1 0 0 1 2 0');
   assert.equal(arc.length, 19); near(arc[arc.length - 1].x, 20, 1e-4); near(arc[arc.length - 1].y, 0, 1e-4);
   const q = G.parseInsertPath('M 0 0 Q 1 1 2 0'); assert.equal(q.length, 13); near(q[q.length - 1].x, 20);

@@ -15,6 +15,13 @@ let pendingCode = null;
 export function openContoursFor(code) { pendingCode = code; }
 import { fullContour, bodyContour, mounting } from '../logic/contourGen.js';
 
+/** Rejony ostrze / oprawka jako tekst do arkusza (PSWT, kolumna BE): „ostrze 0–45; oprawka 45–60” (Z w mm). */
+export const regionsText = (list) => (list || []).map((r) => `${r.role} ${String(r.z1).replace('.', ',')}–${String(r.z2).replace('.', ',')}`).join('; ');
+export function parseRegions(text) {
+  return String(text || '').split(';').map((x) => /^(ostrze|oprawka)\s+(-?[\d.,]+)\s*[–-]\s*(-?[\d.,]+)$/i.exec(x.trim())).filter(Boolean)
+    .map((m) => ({ role: m[1].toLowerCase(), z1: Number(m[2].replace(',', '.')), z2: Number(m[3].replace(',', '.')) }));
+}
+
 const PARAMS = [['D', 'Grupa narzędzi'], ['E', 'Rodzaj narzędzia'], ['F', 'Fi_mniejsze'], ['G', 'Pochylenie płytki'], ['H', 'Promień'], ['I', 'Fi_większe'],
   ['J', 'Długość 1'], ['K', 'Długość robocza'], ['L', 'Ząb / num. gwint. / zbieżność / ap'], ['M', 'Mocowanie początkowe'], ['N', 'Mocowanie końcowe']];
 
@@ -26,7 +33,14 @@ export function mountContours(el, ctx) {
   const status = statusLine();
   const listBox = h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0, border: '1px solid #ccc', background: '#fff' } });
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
-  const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc' } });
+  const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc', touchAction: 'none', userSelect: 'none' } });
+  // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
+  const pv = { snap: true, step: 0, drag: null, view: null, sel: null };
+  const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
+  const stepSel = h('select', { onchange: () => { pv.step = Number(stepSel.value); drawPreview(); } }, ...[['0', 'siatka: auto'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm']].map(([v, l]) => h('option', { value: v }, l)));
+  const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
+  const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel,
+    h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
   const errBox = h('div', { class: 'err', style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
@@ -98,7 +112,8 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null;
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null;
+    st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     const g = genOf(t), tp = G.parseContour(tOf(t));
     const src = vOf(t) ? [E.svgToContour(vOf(t)), 'kolumna V'] : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N'] : null;
     setFull(src && src[0], src && src[1]);
@@ -160,15 +175,16 @@ export function mountContours(el, ctx) {
     const who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
     const save = async (value) => {
       try {
-        await api('ndConfirmContour', [t.productCode, value]);
-        st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value };
+        // zatwierdzony nowy kontur → PSWT kolumna BC (SVG, mm), rejony ostrze / oprawka → kolumna BE
+        await api('ndConfirmContour', [t.productCode, value, value ? svgOut.value : null, value ? regionsText(st.regions) : null]);
+        st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: svgOut.value, BE: regionsText(st.regions) } : {}) };
         status.set(value ? `Potwierdzono kontur ${t.productCode} (PSWT, kolumna BH).` : `Cofnięto potwierdzenie konturu ${t.productCode}.`);
         drawList(); drawEditor();
       } catch (e) { status.set('Nie zapisano potwierdzenia: ' + e.message, 'error'); }
     };
     if (canSave && inPswt) {
       if (!ok) box.append(h('button', { class: 'btn small primary', title: 'Zapisuje w arkuszu PSWT (kolumna BH) potwierdzenie, że kontur narzędzia jest poprawny', onclick: async () => {
-        if (!(await confirmBox('Potwierdzenie konturu', `Potwierdzić poprawność konturu ${t.productCode}? Wpis trafi do arkusza PSWT, kolumna BH.`, 'Potwierdź'))) return;
+        if (!(await confirmBox('Potwierdzenie konturu', `Potwierdzić poprawność konturu ${t.productCode}? Do arkusza PSWT trafi: potwierdzenie (kolumna BH), nowy kontur (kolumna BC, SVG w mm) i rejony ostrze / oprawka (kolumna BE).`, 'Potwierdź'))) return;
         const d = new Date(), dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
         save(`OK ${dd}${who ? ' ' + who : ''}`);
       } }, '✓ Potwierdź poprawność konturu'));
@@ -239,23 +255,126 @@ export function mountContours(el, ctx) {
     if (t && vOf(t)) layers.push({ pts: E.svgToContour(vOf(t)), stroke: '#2e7d32', fill: 'none', dash: '2 3', label: 'kolumna V (zapisany)' });
     if (svg) layers.push({ pts: E.svgToContour(svg), stroke: '#1565c0', fill: 'rgba(21,101,192,.18)', dash: '', label: 'nowy kontur' });
     const all = layers.flatMap((l) => l.pts);
-    if (!all.length) { preview.innerHTML = '<p class="muted" style="padding:10px">Brak konturu do pokazania.</p>'; info.textContent = ''; return; }
-    const b = G.bounds(all), W = 600, H = 600, pad = 30;
-    const s = Math.min((W - 2 * pad) / Math.max(b.maxX - b.minX, 1), (H - 2 * pad) / Math.max(b.maxY - b.minY, 1));
-    const X = (x) => (W / 2 + x * s).toFixed(2), Y = (y) => (pad + (b.maxY - y) * s).toFixed(2);
+    if (!all.length) { preview.innerHTML = '<p class="muted" style="padding:10px">Brak konturu do pokazania.</p>'; info.textContent = ''; drawRegionBar(); return; }
+    const W = 600, H = 600, pad = 30;
+    // widok zamrożony w czasie przeciągania (żeby rysunek nie „uciekał” spod kursora)
+    if (!pv.drag || !pv.view) {
+      const b = G.bounds(all);
+      const sc = Math.min((W - 2 * pad) / Math.max(b.maxX - b.minX, 1), (H - 2 * pad) / Math.max(b.maxY - b.minY, 1));
+      pv.view = { b, s: sc, W, H, pad };
+    }
+    const { b, s: sc } = pv.view;
+    const X = (x) => (W / 2 + x * sc), Y = (y) => (pad + (b.maxY - y) * sc);
+    const f2 = (v) => v.toFixed(2);
+    // siatka (krok w mm; auto – ok. 15 linii na rysunek)
+    const span = Math.max(b.maxX - b.minX, b.maxY - b.minY) / 10;
+    const step = pv.step || [0.5, 1, 2, 5, 10, 20, 50, 100].find((q) => span / q <= 18) || 100;
+    pv.gridStep = step;
+    const xMin = (0 - W / 2) / sc, xMax = (W - W / 2) / sc, yMax = b.maxY + pad / sc, yMin = b.maxY - (H - pad) / sc;
     let out = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`;
-    out += `<line x1="${X(0)}" y1="4" x2="${X(0)}" y2="${H - 4}" stroke="#d50000" stroke-width="1" stroke-dasharray="10 4 2 4"/>`;
-    for (const l of layers) out += `<polygon points="${l.pts.map((p) => X(p.x) + ',' + Y(p.y)).join(' ')}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''}/>`;
-    // punkty wpisanej połowy z numerami
-    if (svg && !st.full) E.fullPoints(st.rows).slice(0, st.rows.length).forEach((p, i) => { out += `<circle cx="${X(p.x * 10)}" cy="${Y(p.y * 10)}" r="3" fill="#1565c0"/><text x="${(+X(p.x * 10) + 5).toFixed(1)}" y="${(+Y(p.y * 10) - 4).toFixed(1)}" font-size="11" fill="#1565c0">${i + 1}</text>`; });
-    out += layers.map((l, i) => `<text x="8" y="${16 + i * 14}" font-size="11" fill="${l.stroke}">— ${esc(l.label)}</text>`).join('') + '</svg>';
+    for (let g = Math.ceil(xMin / (step * 10)) * step * 10; g <= xMax; g += step * 10) out += `<line x1="${f2(X(g))}" y1="0" x2="${f2(X(g))}" y2="${H}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
+    for (let g = Math.ceil(yMin / (step * 10)) * step * 10; g <= yMax; g += step * 10) out += `<line x1="0" y1="${f2(Y(g))}" x2="${W}" y2="${f2(Y(g))}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
+    // rejony ostrze / oprawka – pasy Z przycięte do nowego konturu
+    const nPts = svg ? E.svgToContour(svg) : [];
+    if (nPts.length >= 3) out += `<defs><clipPath id="kclip"><polygon points="${nPts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}"/></clipPath></defs>`;
+    for (const r of st.regions || []) {
+      const col = r.role === 'ostrze' ? '#d50000' : '#616161';
+      out += `<rect x="0" y="${f2(Y(r.z2 * 10))}" width="${W}" height="${f2((r.z2 - r.z1) * 10 * sc)}" fill="${col}" fill-opacity="0.35" clip-path="url(#kclip)"/>`
+        + `<text x="${W - 6}" y="${f2((Y(r.z1 * 10) + Y(r.z2 * 10)) / 2 + 4)}" font-size="11" text-anchor="end" fill="${col}" font-weight="700">${r.role}</text>`;
+    }
+    if (pv.sel) out += `<rect x="0" y="${f2(Y(pv.sel.z2 * 10))}" width="${W}" height="${f2((pv.sel.z2 - pv.sel.z1) * 10 * sc)}" fill="none" stroke="#ff9800" stroke-width="2" stroke-dasharray="6 3"/>`;
+    // układ współrzędnych: X – czerwona, Z – ciemnoniebieska
+    out += `<line x1="0" y1="${f2(Y(0))}" x2="${W}" y2="${f2(Y(0))}" stroke="#d50000" stroke-width="1.2"/><text x="${W - 14}" y="${f2(Y(0) - 4)}" font-size="13" font-weight="700" fill="#d50000">X</text>`;
+    out += `<line x1="${f2(X(0))}" y1="0" x2="${f2(X(0))}" y2="${H}" stroke="#0d2a6b" stroke-width="1.2" stroke-dasharray="10 4 2 4"/><text x="${f2(X(0) + 5)}" y="14" font-size="13" font-weight="700" fill="#0d2a6b">Z</text>`;
+    for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
+    // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
+    const hp = st.full ? st.full.map((p) => ({ x: p.x, y: p.y })) : (svg ? E.fullPoints(st.rows).slice(0, st.rows.length).map((p) => ({ x: p.x * 10, y: p.y * 10 })) : []);
+    const closed = !!st.full;
+    for (let k = 0; k < hp.length - (closed ? 0 : 1); k++) {
+      const a = hp[k], c = hp[(k + 1) % hp.length];
+      out += `<line data-seg="${k}" x1="${f2(X(a.x))}" y1="${f2(Y(a.y))}" x2="${f2(X(c.x))}" y2="${f2(Y(c.y))}" stroke="transparent" stroke-width="9" style="cursor:move"/>`;
+    }
+    hp.forEach((p, k) => { out += `<circle data-pt="${k}" cx="${f2(X(p.x))}" cy="${f2(Y(p.y))}" r="${st.full ? 3.5 : 4.5}" fill="#1565c0" stroke="#fff" stroke-width="1" style="cursor:grab"/>`
+      + (st.full ? '' : `<text x="${f2(X(p.x) + 6)}" y="${f2(Y(p.y) - 5)}" font-size="11" fill="#1565c0" pointer-events="none">${k + 1}</text>`); });
+    out += layers.map((l, i) => `<text x="8" y="${16 + i * 14}" font-size="11" fill="${l.stroke}" pointer-events="none">— ${esc(l.label)}</text>`).join('')
+      + `<text x="8" y="${H - 8}" font-size="10" fill="#888" pointer-events="none">siatka ${String(step).replace('.', ',')} mm</text></svg>`;
     preview.innerHTML = out;
+    drawRegionBar();
     const d = svg ? (() => { const b2 = G.bounds(E.svgToContour(svg)); return { diameter: Math.max(Math.abs(b2.minX), Math.abs(b2.maxX)) / 5, length: (b2.maxY - b2.minY) / 10 }; })() : null;
     // składanie zestawu (ToolBuilder, Viewer): R = największe Y (od osi odniesienia Y = 0), M = głębokość poniżej zera (mocowanie)
     const rm = (pts) => { const b2 = G.bounds(pts); return b2 ? `R ${(b2.r / 10).toFixed(2)} · M ${(b2.m / 10).toFixed(2)} mm` : '—'; };
     const tPts = t && G.parseContour(tOf(t));
     info.textContent = d ? `Nowy kontur: największa średnica ${d.diameter.toFixed(2)} mm, długość ${d.length.toFixed(2)} mm · składanie: ${rm(E.svgToContour(svg))}`
       + (tPts && tPts.length >= 3 ? ` (kolumna T: ${rm(tPts)})` : '') + (t.columnF ? ` · katalog: Φ ${t.columnF}` : '') + (t.columnJ ? `, L ${t.columnJ}` : '') : '';
+  }
+
+  // ---------- przeciąganie punktów i odcinków; kliknięcie – wybór rejonu ----------
+  const world = (e) => {
+    const svgEl = preview.querySelector('svg'); if (!svgEl || !pv.view) return null;
+    const pt = svgEl.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(svgEl.getScreenCTM().inverse());
+    return { x: (q.x - pv.view.W / 2) / pv.view.s, y: pv.view.b.maxY - (q.y - pv.view.pad) / pv.view.s };   // 0,1 mm
+  };
+  const snapV = (v) => { if (!pv.snap) return v; const g = (pv.gridStep || 1) * 10; return Math.round(v / g) * g; };
+  const fmtMm = (v) => String(Math.round(v * 100) / 1000);
+  const setPoint = (k, x, y) => {
+    if (st.full) st.full[k] = { x, y };
+    else if (st.rows[k]) { st.rows[k].z = fmtMm(y); st.rows[k].r = fmtMm(Math.abs(x)); }
+  };
+  const getPoint = (k) => (st.full ? { ...st.full[k] } : { x: Number(String(st.rows[k].r).replace(',', '.')) * 10, y: Number(String(st.rows[k].z).replace(',', '.')) * 10 });
+  preview.addEventListener('pointerdown', (e) => {
+    if (!st.tool) return;
+    const w = world(e); if (!w) return;
+    const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]');
+    if (ptEl || segEl) {
+      const k = Number((ptEl || segEl).dataset.pt ?? segEl.dataset.seg);
+      const n = st.full ? st.full.length : st.rows.length;
+      const idx = ptEl ? [k] : [k, (k + 1) % n];
+      pv.drag = { idx, start: w, orig: idx.map(getPoint), moved: false };
+      preview.setPointerCapture(e.pointerId); e.preventDefault();
+    } else pv.drag = { click: w, moved: false };
+  });
+  preview.addEventListener('pointermove', (e) => {
+    const d = pv.drag; if (!d || d.click) return;
+    const w = world(e); if (!w) return;
+    let dx = w.x - d.start.x, dy = w.y - d.start.y;
+    if (d.idx.length === 1) { d.idx.forEach((k, j) => setPoint(k, snapV(d.orig[j].x + dx), snapV(d.orig[j].y + dy))); }
+    else { dx = pv.snap ? snapV(dx) : dx; dy = pv.snap ? snapV(dy) : dy; d.idx.forEach((k, j) => setPoint(k, d.orig[j].x + dx, d.orig[j].y + dy)); }
+    d.moved = true; st.dirty = true; drawPreview();
+  });
+  preview.addEventListener('pointerup', (e) => {
+    const d = pv.drag; pv.drag = null;
+    if (!d) return;
+    if (d.click) { pickRegion(d.click.y / 10); return; }
+    if (d.moved) { drawTable(); drawPreview(); }
+  });
+  /** Rejony: pasy między kolejnymi poziomami Z nowego konturu (zamknięte przekrojem konturu). */
+  function zLevels() {
+    const pts = svgOut.value ? E.svgToContour(svgOut.value) : [];
+    return [...new Set(pts.map((p) => Math.round(p.y) / 10))].sort((a, b) => a - b);
+  }
+  function pickRegion(z) {
+    const lv = zLevels(); pv.sel = null;
+    for (let i = 0; i < lv.length - 1; i++) if (z >= lv[i] && z <= lv[i + 1]) { pv.sel = { z1: lv[i], z2: lv[i + 1] }; break; }
+    drawPreview();
+  }
+  function setRole(role) {
+    if (!pv.sel) return;
+    const { z1, z2 } = pv.sel;
+    let list = (st.regions || []).filter((r) => r.z2 <= z1 || r.z1 >= z2);   // nowy rejon zastępuje nakładające się
+    if (role) list.push({ z1, z2, role });
+    list.sort((a, b) => a.z1 - b.z1);
+    const merged = [];
+    for (const r of list) { const l = merged[merged.length - 1]; if (l && l.role === r.role && Math.abs(l.z2 - r.z1) < 1e-6) l.z2 = r.z2; else merged.push({ ...r }); }
+    st.regions = merged; st.dirty = true; pv.sel = null; drawPreview();
+  }
+  function drawRegionBar() {
+    clear(regionBar);
+    if (pv.sel) regionBar.append(h('b', {}, `Rejon Z ${String(pv.sel.z1).replace('.', ',')}–${String(pv.sel.z2).replace('.', ',')} mm:`),
+      h('button', { class: 'btn small', style: { background: '#d50000', color: '#fff' }, onclick: () => setRole('ostrze') }, 'Ostrze'),
+      h('button', { class: 'btn small', style: { background: '#616161', color: '#fff' }, onclick: () => setRole('oprawka') }, 'Oprawka'),
+      h('button', { class: 'btn small', onclick: () => setRole(null) }, 'Brak'));
+    else if ((st.regions || []).length) regionBar.append(h('span', { class: 'muted' }, 'Rejony: ' + regionsText(st.regions)));
   }
 
   async function save(clearIt) {
@@ -316,7 +435,7 @@ export function mountContours(el, ctx) {
   h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
     editBox,
-    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, preview, info,
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, preview, info,
       h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kontur do kolumny V (SVG, mm):'), svgOut,
       h('div', { class: 'row' },
         h('button', { class: 'btn', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(svgOut.value) : navigator.clipboard.writeText(svgOut.value)); toast('Skopiowano'); } catch (e) { toast(e.message, true); } } }, 'Kopiuj'),

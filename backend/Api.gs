@@ -269,7 +269,7 @@ var API_FUNCS = {
   },
   ndConfirmContour: {
     write: true,
-    run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx); }
+    run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx, a[2], a[3]); }
   },
   ndContourData: {
     run: function () { return nd_contourData_(); }
