@@ -48,6 +48,30 @@ function latheGeometry(T, profile, z0, keep = null) {
 }
 
 /**
+ * Płytka ostrza wiertła rurowego: wycinek pierścienia węglika (promień [rIn, rOut], wysokość [y1, y2], kąt [a0, a1] wokół osi Y sceny), mm.
+ * Powierzchnie walcowe gładkie, płaszczyzny (góra, dół, boki) płaskie.
+ */
+function sectorGeometry(T, rIn, rOut, y1, y2, a0, a1, steps) {
+  const pos = [], nrm = [], idx = [];
+  const quad = (v, n) => { const b = pos.length / 3; for (let k = 0; k < 4; k++) { pos.push(...v[k]); nrm.push(...(n[k] || n[0])); } idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
+  const P = (r, a, y) => [r * Math.cos(a), y, r * Math.sin(a)], N = (a, sg) => [sg * Math.cos(a), 0, sg * Math.sin(a)];
+  for (let j = 0; j < steps; j++) {
+    const u = a0 + ((a1 - a0) * j) / steps, w = a0 + ((a1 - a0) * (j + 1)) / steps;
+    quad([P(rOut, u, y1), P(rOut, w, y1), P(rOut, w, y2), P(rOut, u, y2)], [N(u, 1), N(w, 1), N(w, 1), N(u, 1)]);           // zewnętrzna ściana
+    quad([P(rIn, u, y1), P(rIn, u, y2), P(rIn, w, y2), P(rIn, w, y1)], [N(u, -1), N(u, -1), N(w, -1), N(w, -1)]);           // wewnętrzna ściana
+    quad([P(rIn, u, y2), P(rOut, u, y2), P(rOut, w, y2), P(rIn, w, y2)], [[0, 1, 0]]);                                       // góra (czoło)
+    quad([P(rIn, u, y1), P(rIn, w, y1), P(rOut, w, y1), P(rOut, u, y1)], [[0, -1, 0]]);                                      // dół
+  }
+  const cap = (a, sg) => quad(sg > 0 ? [P(rIn, a, y1), P(rOut, a, y1), P(rOut, a, y2), P(rIn, a, y2)] : [P(rIn, a, y1), P(rIn, a, y2), P(rOut, a, y2), P(rOut, a, y1)], [[-Math.sin(a) * sg, 0, Math.cos(a) * sg]]);
+  cap(a0, -1); cap(a1, 1);
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new T.BufferAttribute(new Float32Array(nrm), 3));
+  g.setIndex(idx);
+  return g;
+}
+
+/**
  * Płytka 3D: kontur płytki (0,1 mm, prawa płytka – x > 0) leży powierzchnią natarcia w płaszczyźnie osi narzędzia (z = 0),
  * grubość idzie do tyłu (−z), a ściany są pochylone o [draft]° (przyłożenie – tylny przekrój mniejszy, płytka nie trze tyłem).
  */
@@ -131,10 +155,20 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
       const regs = ((mesh.regions && mesh.regions[i]) || []).filter((r) => r.role === 'ostrze');
       const pr = regs.length ? splitProfile(pr0, regs.flatMap((r) => [r.z1 * 10, r.z2 * 10])) : pr0;
-      const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
+      const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: ostrze to osobne płytki (wycinki pierścienia), korpus – bryła wydrążona
+      const isWork = tb ? (a, b) => { const z = (a.y + b.y) / 20; return z > tb.z1 + 1e-6 && z <= tb.z2 + 1e-6; }
+        : (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
       const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide }); mats.push(m);
-      for (const [keep, mat] of regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
+      if (tb) {
+        const y1 = tb.z1 + mesh.offsets[i] / 10, y2 = tb.z2 + mesh.offsets[i] / 10, pitch = (2 * Math.PI) / tb.n, gap = Math.min(pitch * 0.3, 1.2 / Math.max(tb.rOut, 1));
+        for (let k = 0; k < tb.n; k++) {   // n płytek co 360°/n, między nimi szczeliny
+          const g = sectorGeometry(T, tb.rIn, tb.rOut, y1, y2, k * pitch + gap / 2, (k + 1) * pitch - gap / 2, Math.max(3, Math.ceil(SEG / tb.n / 2)));
+          group.add(new T.Mesh(g, workMat)); geos.push(g);
+          edges(g, 0x3b0000, 0.6);
+        }
+      }
+      for (const [keep, mat] of tb ? [[(a, b) => !isWork(a, b), m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
         const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;
         group.add(new T.Mesh(g, mat)); geos.push(g);
         edges(g, 0x2a2f36, 0.35);

@@ -44,13 +44,15 @@ export function frameStyle(location) {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const poly = (pts, sx = 1, ox = 0, oy = 0) => pts.map((p) => `${(ox + p.x * sx).toFixed(2)},${(oy + p.y * sx).toFixed(2)}`).join(' ');
 
-/** Miniatura 60 × 70: szary obrys i żółte płytki; brak konturu – „brak”. */
+let bladeId = 0;   // unikalne id przycięcia pasa ostrza
+/** Miniatura 60 × 70: szary obrys i żółte płytki (wiertło rurowe – żółte ostrze); brak konturu – „brak”. */
 export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   const box = h('div', { class: 'tool-mini', style: { width: w + 'px', height: hgt + 'px', cursor: onclick ? 'pointer' : '' }, onclick: onclick ? (e) => { e.stopPropagation(); onclick(); } : null });
   if (!mini) { box.append(h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak')); return box; }
   const s = Math.min(w / G.MINI_W, hgt / G.MINI_H);
   box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="none"/>`
     + `<path d="${G.outlinePath(mini.outline, (p) => [p.x * s, p.y * s], mini.axisX ?? NaN)}" fill="none" stroke="#000" stroke-width="0.5"/>`
+    + (mini.band ? `<clipPath id="bl${bladeId}"><rect x="0" y="${(mini.band.y1 * s).toFixed(2)}" width="${w}" height="${((mini.band.y2 - mini.band.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(mini.outline, s)}" fill="#c8a400" clip-path="url(#bl${bladeId++})"/>` : '')
     + mini.inserts.map((p) => `<polygon points="${poly(p, s)}" fill="#c8a400" stroke="#000" stroke-width="0.5"/>`).join('') + '</svg>';
   return box;
 }
@@ -63,6 +65,11 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">`;
   stack.layers.forEach((l, i) => {
     const c = G.TOOL_PALETTE[i % G.TOOL_PALETTE.length];
+    if (l.blade) {   // wiertło rurowe: korpus szary, ostrze (węglik) żółte
+      const id = 'sb' + bladeId++;
+      svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="#bfbfbf" stroke="none"/><clipPath id="${id}"><rect x="0" y="${(oy + l.blade.y1 * s).toFixed(2)}" width="${width}" height="${((l.blade.y2 - l.blade.y1) * s).toFixed(2)}"/></clipPath>`
+        + `<polygon points="${poly(l.outline, s, ox, oy)}" fill="#c8a400" clip-path="url(#${id})"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="#333" stroke-width="1"/>`;
+    } else
     svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
     for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#d50000" fill-opacity="0.2" stroke="#d50000" stroke-width="1.5"/>`;
     if (labels) {
@@ -85,8 +92,11 @@ export function view3d(mesh, inserts = [], opts = {}) {
 export function toolView3d(index, tools) {
   if (!index) return view3d(null);
   const stts = tools.map((t) => index.stackTool(t));
-  const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])));
-  if (mesh) mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
+  const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])), 36, stts.map((s) => !!(s && s.trepan)));
+  if (mesh) {
+    mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
+    mesh.trepan = stts.map((s, i) => (s && s.trepan ? G.trepanBlade(s.diameter, mesh.regions[i], savedInsertZ(index.tool(s.code) || s.code)) : null));   // płytki ostrza wiertła rurowego
+  }
   const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code) })) : [];
   return view3d(mesh, ins);
 }
@@ -102,6 +112,8 @@ function teethFromTool(t) {
   const z = m ? Number(m[1]) : 0;
   return z >= 1 && z <= 60 ? z : 2;
 }
+/** Zapisana w Konturach liczba płytek narzędzia (0 – brak zapisu, wtedy liczba wg Ø – wiertło rurowe). */
+export function savedInsertZ(t) { const z = Number((insStore()[codeOf(t)] || {}).z); return z >= 1 ? Math.min(60, Math.round(z)) : 0; }
 /** { z, draft } płytek narzędzia: zapisane w Konturach albo domyślne (z z opisu narzędzia / 2, pochylenie 7°). */
 export function insertSetup(t) {
   const o = insStore()[codeOf(t)] || {};

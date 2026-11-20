@@ -3,7 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
-import { fullContour } from './contourGen.js';
+import { fullContour, TREPAN } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -96,6 +96,25 @@ export function halfPath(points) {
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
 /**
+ * Czy kontur ma wnękę otwartą do osi (wiertło rurowe – kielich): na pewnym poziomie Z oś leży poza materiałem, a dalej od osi materiał jest.
+ * Sprawdzane na prawej połowie (halfPath) w środkach przedziałów między poziomami wierzchołków.
+ */
+export function hasCavity(points) {
+  const P = halfPath(points);
+  if (P.length < 4) return false;
+  const zs = [...new Set(P.map((p) => p.y))].sort((a, b) => a - b);
+  for (let i = 0; i + 1 < zs.length; i++) {
+    const z = (zs[i] + zs[i + 1]) / 2, xs = [];
+    for (let k = 0; k < P.length; k++) {
+      const a = P[k], b = P[(k + 1) % P.length];
+      if ((a.y - z) * (b.y - z) < 0) xs.push(a.x + ((z - a.y) * (b.x - a.x)) / (b.y - a.y));
+    }
+    xs.sort((a, b) => a - b);
+    if (xs.length >= 2 && xs[0] > 0.5) return true;   // od osi do pierwszej ścianki – pusto (0,05 mm tolerancji)
+  }
+  return false;
+}
+/**
  * Wewnętrzny generator – sama prawa połowa konturu (0,1 mm, od osi do osi, z liniami krawędzi): korpus z PSWT D:N
  * dorysowany do mocowania z karty „kontury” (kształt i położenie w osi Z jak w karcie). [] – brak danych.
  */
@@ -148,9 +167,9 @@ export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
       if (!pts || pts.length < 3) { const hh = generatedHalf(o, mounts); pts = hh.length >= 3 ? expandHalf(hh) : null; }
       if (pts && pts.length >= 3) { m.set(k, str(pts)); m.generated.add(k); }
     }
-    if (!m.regions.has(k) && isMonolithic(o) && workLength(o) > 0) {   // część robocza wg L roboczej (kolor w 3D)
+    if (!m.regions.has(k) && isMonolithic(o) && bladeLength(o) > 0) {   // część robocza (kolor w 3D): trepan – węglik 7 mm, inne wg L roboczej
       const src = m.has(k) ? parseContour(m.get(k)) : null;
-      const s = src && src.length >= 3 ? workSplit(halfPathSvg(src), workLength(o)) : null;
+      const s = src && src.length >= 3 ? workSplit(halfPathSvg(src), bladeLength(o)) : null;
       if (s) m.regions.set(k, s.regions);
     }
   }
@@ -257,7 +276,7 @@ export function edgeLevels(halfPts) {
 export function addEdgeLines(svg) {
   const path = String(svg || '').trim();
   const pts = svgToContour(path);
-  if (pts.length < 3 || !isHalf(pts)) return path;
+  if (pts.length < 3 || !isHalf(pts) || hasCavity(pts)) return path;   // kielich (wiertło rurowe): linia przez wnękę byłaby błędna
   const near = (a, b) => Math.abs(a - b) < 0.02;   // 0,002 mm w jednostkach 0,1 mm
   const has = (lv) => pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, lv.z) && near(q.y, lv.z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) >= lv.r - 0.02; });
   const todo = edgeLevels(pts).filter((lv) => !has(lv));
@@ -281,6 +300,10 @@ export function isMonolithic(p) {
   const d = String((p && p.D) || '').trim().toLowerCase(), e = String((p && p.E) || '').trim().toLowerCase();
   return d === 'tre' || ((d === 'wie' || d === 'fre') && (e === 'hss' || e === 'węg'));
 }
+/** Wiertło rurowe (trepan) – korpus jako kielich, ostrze to węglik na czubku. */
+export const isTrepan = (p) => String((p && p.D) || '').trim().toLowerCase() === 'tre';
+/** Długość ostrza od czubka (mm) do podziału ostrze / oprawka: trepan – węglik (7 mm), inne monolityczne – długość robocza K. */
+export const bladeLength = (p) => (isTrepan(p) ? TREPAN.bladeLen : workLength(p));
 /** Długość robocza (mm) z kolumny K albo 0. */
 export const workLength = (p) => { const k = Number(String((p && p.K) || '').trim().replace(',', '.')); return Number.isFinite(k) && k > 0 ? k : 0; };
 /**
@@ -301,7 +324,7 @@ export function workSplit(svg, k) {
 export function addLineAt(svg, z) {
   const path = String(svg || '').trim(), Z = z * 10;
   const pts = svgToContour(path);
-  if (pts.length < 3 || !isHalf(pts)) return path;
+  if (pts.length < 3 || !isHalf(pts) || hasCavity(pts)) return path;   // kielich: linia podziału przez wnękę byłaby błędna
   const near = (a, b) => Math.abs(a - b) < 0.02;
   if (pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, Z) && near(q.y, Z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) > 0.02; })) return path;
   const cmds = (path.match(/[MLAQZ][^MLAQZ]*/gi) || []).map((c) => c.trim());

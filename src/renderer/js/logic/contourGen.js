@@ -17,6 +17,12 @@ const P = (x, y) => f(x) + '_' + f(y);
 /** Lista punktów z „;” na początku i na końcu (jak ZŁĄCZ.TEKSTY z ";" przed każdym punktem). */
 const pts = (list, { lead = true, tail = true } = {}) => (lead ? ';' : '') + list.map(([x, y]) => P(x, y)).join(';') + (tail ? ';' : '');
 
+/** Wiertło rurowe (trepan): wymiary w mm. bodyDia – o ile korpus jest mniejszy od Ø roboczego (średnica), wall – ścianka korpusu,
+ *  blade – grubość węglika (ostrza), bladeLen – wysokość ostrza od czubka, floor – dno wnęki nad końcem długości roboczej L. */
+export const TREPAN = { bodyDia: 0.5, wall: 3.5, blade: 4, bladeLen: 7, floor: 3 };
+/** Liczba płytek ostrza wg Ø roboczego (mm): liniowo od 4 dla Ø12 do 12 dla Ø130 (poza zakresem – 4 / 12). */
+export const trepanPlates = (dia) => Math.max(4, Math.min(12, Math.round(4 + ((nv(dia) - 12) * 8) / 118)));
+
 /** Najniższe Y lewej części mocowania (głębokość mocowania). */
 export function minY(av) {
   const ys = txt(av).split(';').map((p) => p.split('_')[1]).filter((y) => y != null && y.trim() !== '').map(nv);
@@ -69,9 +75,13 @@ export function bodyContour(p, av = '') {
     return pts([[-m, 0], [-m, (J - K - s) * 10], [(I * 10) / 2, (J - K - s) * 10], [(I * 10) / 2, (J - I / 5 - s) * 10], [(I * 10) / 2 - I, (J - s) * 10],
       [(-I * 10) / 2 + I, (J - s) * 10], [(-I * 10) / 2, (J - I / 5 - s) * 10], [(-I * 10) / 2, (J - K - s) * 10], [m, (J - K - s) * 10], [m, 0]]);
   }
-  if (D === 'tre') {
-    return pts([[-10 * (F / 2 - 2), 0], [-10 * (F / 2 - 2), 10 * (J - K)], [-10 * (F / 2), 10 * (J - K)], [-10 * (F / 2), 10 * J], [10 * (F / 2), 10 * J],
-      [10 * (F / 2), 10 * (J - K)], [10 * (F / 2 - 2), 10 * (J - K)], [10 * (F / 2 - 2), 0]]);
+  if (D === 'tre') { // wiertło rurowe (trepanacyjne) – kielich: ostrze 7 mm × 4 mm, korpus Ø−0,5, ścianka 3,5 mm, wnętrze puste
+    const t = TREPAN, R = F * 5, Rb = Math.max(R - t.bodyDia * 5, 0), Rc = Math.max(R - t.blade * 10, 0), Ri = Math.max(Rb - t.wall * 10, 0);
+    const yt = J * 10, y7 = yt - t.bladeLen * 10, ye = Math.min(Math.max(J - K, 0) * 10, y7), yb = Math.min(ye + t.floor * 10, y7);
+    const rs = M3 === 'WEL' ? 5 * midN(M, 4, 3) : Rb;   // chwyt Weldon (średnica z kodu mocowania) pod częścią roboczą
+    const L = [...(ye > 0 && rs !== Rb ? [[-rs, ye]] : []), [-Rb, ye], [-Rb, y7], [-R, y7], [-R, yt], [-Rc, yt], [-Rc, y7], [-Ri, y7], [-Ri, yb]];
+    const Rr = [[Ri, yb], [Ri, y7], [Rc, y7], [Rc, yt], [R, yt], [R, y7], [Rb, y7], [Rb, ye], ...(ye > 0 && rs !== Rb ? [[rs, ye]] : [])];
+    return pts([...L, ...Rr]);
   }
   const holder = (yK) => { // oprawka z kołnierzem: wspólny kawałek reguł „opr red FRE ABS/MHD” i „opr stż FRE0”
     const i2 = (I * 10) / 2, a9 = (I - L) * 0.9 * 5, a1 = (I - L) * 0.1 * 5;

@@ -67,7 +67,7 @@ export function mountBuilder(el, ctx) {
     return { ...r, svg, regions: sp ? regionsText(sp.regions) : null };
   }
   /** Narzędzie monolityczne bez rejonów w BE: podział istniejącego konturu wg długości roboczej (K) – ostrze od czubka, reszta oprawka. */
-  const monoSplit = (p, svg) => (p && !String(p.BE || '').trim() && E.isMonolithic(p) && E.workLength(p) > 0 ? E.workSplit(svg, E.workLength(p)) : null);
+  const monoSplit = (p, svg) => (p && !String(p.BE || '').trim() && E.isMonolithic(p) && E.bladeLength(p) > 0 ? E.workSplit(svg, E.bladeLength(p)) : null);
   /** Kontury dla podglądów: zatwierdzone (BC), a przy włączonym generatorze – V albo wewnętrzny generator zamiast T. */
   const overrides = () => E.contourOverrides(st.cd.params, st.cd.mounts, { gen: contourGenOn(), v: st.cd.v });
   function autoContour0(t) {
