@@ -14,6 +14,7 @@ import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
 import { mountToolTrack } from './views/tooltrack.js';
 import { mountContours } from './views/contours.js';
+import { mountParts } from './views/parts.js';
 import { mountHarmLive } from './views/harmLive.js';
 import { mountPlan } from './views/plan.js';
 import { mountHelp } from './views/help.js';
@@ -43,6 +44,7 @@ export const MODULES = [
   { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
   { id: 'kontury', title: 'Kontury', style: 'green', inToolRoom: true, mount: mountContours },
+  { id: 'czesci', title: 'Części', style: 'green', inToolRoom: true, mount: mountParts },
   { id: 'zniszczone', title: 'Zniszczone', style: 'green', inToolRoom: true, disabled: true },
   { id: 'pomiarowka', title: 'Pomiarówka', style: 'green', inToolRoom: true, disabled: true },
 ];

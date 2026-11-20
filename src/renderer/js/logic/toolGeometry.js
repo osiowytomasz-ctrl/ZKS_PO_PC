@@ -225,6 +225,18 @@ export function toolIndex(catalog) {
       if (!d) return false;
       return [...(d.partsCutting || []), ...(d.partsAccessories || [])].some((pc) => { const p = tool(pc); return !!p && !isWhite(p.partStatusColor); });
     },
+    /** Kontur płytki (ścieżka SVG) o kodzie [partCode] – z pierwszego narzędzia, które go ma; null, gdy brak. */
+    insertContour(partCode) {
+      const k = normCode(partCode);
+      for (const d of details.values()) for (const ic of d.insertContours || []) if (normCode(ic.code) === k && String(ic.contour || '').trim()) return ic.contour;
+      return null;
+    },
+    /** Wszystkie kody części skrawających (płytek) z narzędzi katalogu. */
+    cuttingParts() {
+      const out = new Map();
+      for (const d of details.values()) for (const p of d.partsCutting || []) { const k = normCode(p); if (k && !out.has(k)) out.set(k, p); }
+      return [...out.values()];
+    },
     usages(partCode) {
       if (!usage) {
         usage = new Map();

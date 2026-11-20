@@ -10,6 +10,7 @@ import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
+import { openContoursFor } from './contours.js';
 
 const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
 
@@ -39,10 +40,11 @@ export function mountBuilder(el, ctx) {
   }
 
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
-  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => miniPreview(t) });
+  // ikonka narzędzia: Kontury z tym narzędziem; karta narzędzia – prawy przycisk myszy na wierszu / kafelku
+  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => { openContoursFor(t.productCode); ctx.go('kontury'); } });
   const row = (t, opts = {}) => (st.view === 'tiles'
-    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), ...opts })
-    : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), ...opts }));
+    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts })
+    : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts }));
 
   function draw() {
     newBtn.style.display = st.selected.length ? '' : 'none';
@@ -175,7 +177,7 @@ export function mountBuilder(el, ctx) {
   }
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms).'), viewBtn, newBtn,
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms). Ikonka narzędzia – Kontury; prawy przycisk – karta narzędzia.'), viewBtn, newBtn,
     h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), filtersBox, status, list);
   load(false);
 }

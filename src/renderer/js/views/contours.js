@@ -7,7 +7,12 @@ import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { statusLine } from './toolViews.js';
+import { statusLine, filterDropdown, lazyFill } from './toolViews.js';
+import * as B from '../logic/builder.js';
+
+let pendingCode = null;
+/** Otwarcie Konturów z wybranym narzędziem (ikonka narzędzia w ToolBuilderze). */
+export function openContoursFor(code) { pendingCode = code; }
 import { fullContour, bodyContour, mounting } from '../logic/contourGen.js';
 
 const PARAMS = [['D', 'Grupa narzędzi'], ['E', 'Rodzaj narzędzia'], ['F', 'Fi_mniejsze'], ['G', 'Pochylenie płytki'], ['H', 'Promień'], ['I', 'Fi_większe'],
@@ -17,7 +22,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 export function mountContours(el, ctx) {
   const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
-  const st = { tools: [], details: new Map(), v: {}, mounts: {}, params: {}, q: '', only: '', tool: null, rows: [], dirty: false, full: null, fullLabel: '' };
+  const st = { filters: B.emptyFilters(), stopFill: null, tools: [], details: new Map(), v: {}, mounts: {}, params: {}, q: '', only: '', tool: null, rows: [], dirty: false, full: null, fullLabel: '' };
   const status = statusLine();
   const listBox = h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0, border: '1px solid #ccc', background: '#fff' } });
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
@@ -48,7 +53,8 @@ export function mountContours(el, ctx) {
       st.details = new Map(Object.entries(cat.detailsMap || {}).map(([k, d]) => [normCode(k), d]));
       try { st.v = (await api('ndContoursV', [])) || {}; } catch (e) { st.v = {}; status.set('Nie wczytano kolumny V (wdrożenie Apps Script: Kontury.gs, ndContoursV): ' + e.message, 'error'); }
       await loadData();
-      drawList();
+      drawFilters(); drawList();
+      if (pendingCode) { const t = st.tools.find((x) => normCode(x.productCode) === normCode(pendingCode)); pendingCode = null; if (t) pick(t); }
     } catch (e) { clear(listBox).append(h('div', { class: 'err', style: { padding: '8px' } }, 'Nie wczytano narzędzi: ' + e.message)); }
   }
   const tOf = (t) => (st.details.get(normCode(t.productCode)) || {}).columnAY || '';
@@ -63,20 +69,28 @@ export function mountContours(el, ctx) {
     return pts.length >= 3 && G.bounds(pts).maxX - G.bounds(pts).minX > 0 ? pts : null;
   };
 
+  // filtry jak w ToolBuilderze (Lokal, Grupa, Rodzaj, Firma, Φ, L, r/α) – nad listą, na całą szerokość
+  const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
+  const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
+  function drawFilters() {
+    clear(filtersBox).append(...FILTERS.map(([f, l]) => filterDropdown(l, st.filters[f], B.options(st.tools, st.filters, f), (v) => { st.filters[f] = v; drawFilters(); drawList(); })));
+    if (Object.values(st.filters).some((v) => String(v).trim())) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
+  }
   function drawList() {
     const q = st.q.toLowerCase();
-    const items = st.tools.filter((t) => (!q || String(t.productCode).toLowerCase().includes(q) || description(t).toLowerCase().includes(q))
+    const items = B.sorted(B.filterTools(st.tools, st.filters)).filter((t) => (!q || String(t.productCode).toLowerCase().includes(q) || description(t).toLowerCase().includes(q))
       && (!st.only || (st.only === 'T' ? tOf(t) : st.only === 'V' ? vOf(t) : st.only === 'G' ? genOf(t) : !tOf(t) && !vOf(t))));
+    if (st.stopFill) st.stopFill();
     clear(listBox);
-    for (const t of items.slice(0, 600)) {
+    listBox.append(h('div', { class: 'muted', style: { padding: '2px 6px', fontSize: '11px' } }, `Narzędzia: ${items.length}`));
+    if (!items.length) listBox.append(h('div', { class: 'muted', style: { padding: '6px' } }, 'Brak narzędzi.'));
+    st.stopFill = lazyFill(listBox, items, (t) => {
       const on = st.tool && st.tool.productCode === t.productCode;
-      listBox.append(h('div', { class: 'click', style: { padding: '3px 6px', borderBottom: '1px solid #eee', background: on ? '#d3e3fd' : '', cursor: 'pointer' }, onclick: () => pick(t) },
+      return h('div', { class: 'click', style: { padding: '3px 6px', borderBottom: '1px solid #eee', background: on ? '#d3e3fd' : '', cursor: 'pointer' }, onclick: () => pick(t) },
         h('b', {}, t.productCode), ' ', tOf(t) ? h('span', { title: 'Jest kontur w kolumnie T', style: { fontSize: '10px', color: '#666' } }, 'T') : null, ' ',
         vOf(t) ? h('span', { title: 'Jest kontur w kolumnie V', style: { fontSize: '10px', color: '#2e7d32', fontWeight: 700 } }, 'V') : null,
-        h('div', { class: 'muted', style: { fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, description(t))));
-    }
-    if (items.length > 600) listBox.append(h('div', { class: 'muted', style: { padding: '6px' } }, `Pokazano 600 z ${items.length} – zawęź wyszukiwanie.`));
-    if (!items.length) listBox.append(h('div', { class: 'muted', style: { padding: '6px' } }, 'Brak narzędzi.'));
+        h('div', { class: 'muted', style: { fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, description(t)));
+    }, 150);
   }
 
   async function pick(t) {
@@ -269,7 +283,7 @@ export function mountContours(el, ctx) {
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kontury narzędzi'), h('span', { class: 'grow muted' }, 'Wpisz połowę konturu – program tworzy cały kontur i zapisuje go w kolumnie V (SVG, mm).'),
     canSave ? h('button', { class: 'btn', title: 'Kontury z danych (PSWT D:N) dla wielu narzędzi naraz', onclick: () => bulk() }, 'Z danych hurtem…') : null,
-    h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), status,
+    h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), filtersBox, status,
   h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
     editBox,
