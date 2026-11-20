@@ -5,17 +5,25 @@ import { h, clear, api, toast, modal, alertBox } from '../ui.js';
 import { toolCatalog } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { toolRow, miniSvg, stackSvg, view3d, partsTable, fullScreen, filterDropdown, statusLine } from './toolViews.js';
+import { toolRow, toolTile, miniSvg, stackSvg, view3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
+import { firebase } from '../fb.js';
+import { stationList } from '../logic/harmModel.js';
+import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
 
 const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
 
 export function mountBuilder(el, ctx) {
-  const st = { all: [], listed: [], index: null, filters: B.emptyFilters(), selected: [], loading: false };
+  const st = { all: [], listed: [], index: null, filters: B.emptyFilters(), selected: [], loading: false, view: 'list', stopFill: null };
+  try { st.view = localStorage.getItem('zks.builder.view') === 'tiles' ? 'tiles' : 'list'; } catch { /* domyślnie lista */ }
   const status = statusLine();
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   const list = h('div', { class: 'tool-list' });
   const newBtn = h('button', { class: 'btn', style: { display: 'none' }, onclick: () => { st.selected = []; status.set(''); draw(); } }, 'Nowe narzędzie');
+  // widok: lista (jak na telefonie) albo kafelki – liczba kafelków w wierszu zależy od szerokości okna
+  const viewBtn = h('button', { class: 'btn', title: 'Zmiana widoku: lista / kafelki', onclick: () => { st.view = st.view === 'tiles' ? 'list' : 'tiles'; try { localStorage.setItem('zks.builder.view', st.view); } catch { /* bez pamięci */ } paintView(); drawList(); } });
+  const paintView = () => { viewBtn.textContent = st.view === 'tiles' ? '☰ Lista' : '▦ Kafelki'; list.className = st.view === 'tiles' ? 'tool-grid' : 'tool-list'; };
+  paintView();
 
   async function load(force) {
     st.loading = true; clear(list).append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie narzędzi…'));
@@ -23,14 +31,18 @@ export function mountBuilder(el, ctx) {
       const cat = await toolCatalog(force);
       st.all = (cat.tools || []).filter((t) => String(t.productCode ?? '').trim());
       st.listed = st.all.filter(B.isListed); st.index = G.toolIndex(cat); st.selected = [];
+      // kolory lokalizacji z kolorów stanowisk (Ustawienia programu – config/main)
+      try { const { sdk, db } = await firebase(); const snap = await sdk.getDoc(sdk.doc(db, 'config', 'main')); setToolStations(stationList(snap.exists() ? snap.data() : null)); } catch { setToolStations(null); }
       draw();
     } catch (e) { clear(list).append(h('div', { class: 'err', style: { padding: '12px' } }, 'Nie wczytano narzędzi: ' + e.message, ' ', h('button', { class: 'btn small', onclick: () => load(true) }, 'Ponów'))); }
     st.loading = false;
   }
 
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
-  const mini = (t) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { onclick: () => miniPreview(t) });
-  const row = (t, opts = {}) => toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), ...opts });
+  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => miniPreview(t) });
+  const row = (t, opts = {}) => (st.view === 'tiles'
+    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), ...opts })
+    : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), ...opts }));
 
   function draw() {
     newBtn.style.display = st.selected.length ? '' : 'none';
@@ -46,6 +58,7 @@ export function mountBuilder(el, ctx) {
 
   function drawList() {
     const items = shown();
+    if (st.stopFill) st.stopFill();
     clear(list);
     if (st.selected.length) {
       list.append(h('div', { class: 'tool-title' }, `Zestaw (${st.selected.length}) · L=${B.totalLength(st.selected)}`));
@@ -64,14 +77,8 @@ export function mountBuilder(el, ctx) {
     }
     list.append(h('div', { class: 'muted', style: { fontSize: '12px' } }, (st.selected.length ? 'Pasujące narzędzia: ' : 'Narzędzia: ') + items.length));
     if (!items.length && st.all.length) list.append(h('div', {}, 'Brak narzędzi spełniających kryteria.'));
-    // przy długiej liście rysujemy porcjami (miniatury są kosztowne)
-    let n = 0;
-    const more = () => {
-      const end = Math.min(items.length, n + 150);
-      for (; n < end; n++) { const t = items[n]; list.append(row(t, { onclick: () => select(t) })); }
-      if (n < items.length) { const b = h('button', { class: 'btn', onclick: () => { b.remove(); more(); } }, `Pokaż kolejne (${items.length - n})`); list.append(b); }
-    };
-    more();
+    // wszystkie narzędzia: dorysowywane porcjami przy przewijaniu (miniatury są kosztowne)
+    st.stopFill = lazyFill(list, items, (t) => row(t, { onclick: () => select(t) }));
   }
 
   function select(t) {
@@ -83,15 +90,32 @@ export function mountBuilder(el, ctx) {
     else status.set('');
   }
 
+  /** Karta narzędzia: kod, lokalizacja i zużycie; duży rysunek 2D, obracany 3D, parametry w kafelkach, części ze stanem; dodanie do zestawu. */
   function miniPreview(t) {
     const d = st.index && st.index.details(t.productCode);
-    const parts = [...((d && d.partsCutting) || []), ...((d && d.partsAccessories) || [])].join(', ');
-    const rows = [['Kod', t.productCode], ['Firma', t.columnP], ['Grupa', t.columnD], ['Rodzaj', t.columnE], ['Opis', [t.name, t.columnO].find((x) => String(x ?? '').trim()) || ''],
-      ['Φ', t.columnF], ['Długość', String(t.columnJ ?? '').trim() ? t.columnJ + ' mm' : ''], ['r / α', [t.columnG, t.columnH].find((x) => String(x ?? '').trim()) || ''], ['Ms', t.columnM], ['Mk', t.columnN], ...(parts ? [['Części', parts]] : [])];
-    const m = modal(t.productCode, h('div', {}, h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px' } },
-      miniSvg(st.index && G.buildMini(t, d), { w: 240, hgt: 280 }),
-      h('table', {}, ...rows.map(([k, v]) => h('tr', {}, h('td', { class: 'muted', style: { paddingRight: '10px', fontSize: '12px' } }, k), h('td', { style: { fontWeight: 700 } }, String(v ?? '').trim() || '—'))))),
-    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+    const lc = locColor(t.location), wear = T.wearPercent(t.wear), band = T.wearBand(wear);
+    const wc = band === 'low' ? '#00c853' : band === 'medium' ? '#ffd600' : '#d50000';
+    const one = st.index && st.index.stackTool(t);
+    const stack = one ? G.buildStack([one], true, false) : null;
+    const mesh = G.buildMesh([G.parseContour(d && d.columnAY)]);
+    const params = [['Firma', t.columnP], ['Grupa', t.columnD], ['Rodzaj', t.columnE], ['Φ', t.columnF], ['Długość', String(t.columnJ ?? '').trim() ? t.columnJ + ' mm' : ''],
+      ['r / α', [t.columnG, t.columnH].find((x) => String(x ?? '').trim()) || ''], ['Ms', t.columnM], ['Mk', t.columnN], ['Stan', t.status], ['Dostępne', t.available]];
+    const opis = [t.name, t.columnO].filter((x) => String(x ?? '').trim()).join(' · ');
+    const canAdd = shown().some((x) => x.productCode === t.productCode) && !st.selected.some((x) => x.productCode === t.productCode);
+    const parts = st.index ? st.index.partRows([t.productCode]) : [];
+    const m = fullScreen('Karta narzędzia', h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
+      h('div', { class: 'tcard-head' },
+        h('span', { class: 'tcard-code' }, t.productCode),
+        t.location ? h('span', { class: 'tcard-chip', style: { background: lc || '#eee', color: lc ? contrast(lc) : '#333' } }, t.location) : null,
+        h('span', { class: 'muted' }, 'zużycie'), h('div', { class: 'tcard-wear', title: `Zużycie ${Math.round(wear)}%` }, h('div', { style: { width: wear + '%', height: '100%', background: wc } })), h('b', {}, Math.round(wear) + '%'),
+        canAdd ? h('button', { class: 'btn primary', onclick: () => { m.close(); select(t); } }, st.selected.length ? '+ Dodaj do zestawu' : 'Wybierz jako pierwsze') : null),
+      opis ? h('div', { style: { marginTop: '4px', fontSize: '14px' } }, opis) : null,
+      h('div', { class: 'tcard-grid' },
+        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Rysunek 2D (płytki na czerwono)'), h('div', { style: { flex: 1, minHeight: 0 } }, stack ? stackSvg(stack, { labels: false, width: 500, height: 600 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu 2D.'))),
+        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Podgląd 3D – przeciągnij, aby obrócić; kółko: przybliżenie'), h('div', { style: { flex: 1, minHeight: 0 } }, view3d(mesh))),
+        h('div', { class: 'tcard-pane', style: { overflow: 'auto' } }, h('div', { class: 'muted' }, 'Parametry'),
+          h('div', { class: 'tcard-params' }, ...params.filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => h('div', { class: 'tcard-param' }, h('span', {}, k), h('b', {}, String(v))))),
+          h('div', { class: 'muted' }, `Części (${parts.length})`), h('div', { style: { padding: '0 6px 6px' } }, partsTable(parts))))));
   }
 
   function openSave() {
@@ -151,7 +175,7 @@ export function mountBuilder(el, ctx) {
   }
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms).'), newBtn,
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolBuilder'), h('span', { class: 'grow muted' }, 'Wybierz narzędzie tnące, potem kolejne pasujące mocowaniem (Mk = Ms).'), viewBtn, newBtn,
     h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), filtersBox, status, list);
   load(false);
 }

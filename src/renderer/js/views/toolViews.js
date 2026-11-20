@@ -6,6 +6,40 @@ import { parseSheetColor } from '../logic/common.js';
 import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
 
+// ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
+let STATIONS = null;
+/** Stanowiska z config/main (stationList) – kolory lokalizacji narzędzi jak w Ustawieniach programu. */
+export function setToolStations(list) { STATIONS = list || null; }
+const LOC_ALIAS = [['schiess', 'si'], ['union', 'un'], ['correa', 'co'], ['narzędziownia', 'narz'], ['narzedziownia', 'narz'], ['ślusar', 'śl'], ['dodatk', 'do']];
+const abbr = (name) => String(name || '').replace(/^\d+/, '').toLowerCase();
+/** Kolor lokalizacji: stanowisko o pasującym skrócie (Union → 2Un, Correa → 3Co, Schiess → 1Si, Narzędziownia → Narz), inaczej dawne kolory. */
+export function locColor(location) {
+  const l = T.norm(location);
+  if (!l) return null;
+  if (STATIONS) {
+    for (const [k, a] of LOC_ALIAS) if (l.includes(k)) { const st = STATIONS.find((x) => abbr(x.name) === a); if (st) return st.bg; }
+    const st = STATIONS.find((x) => { const a = abbr(x.name); return a.length >= 2 && l.startsWith(a); });
+    if (st) return st.bg;
+  }
+  return T.locationColor(location);
+}
+const LS_LOOK = 'zks.tools.look';
+/** Wygląd narzędzi (ten komputer): ramka w kolorze lokalizacji, poświata (glow) i jej kolor („loc” = kolor lokalizacji). */
+export function toolLook() {
+  let v = {};
+  try { v = JSON.parse(localStorage.getItem(LS_LOOK) || '{}') || {}; } catch { v = {}; }
+  return { frame: v.frame !== false, glow: !!v.glow, glowColor: v.glowColor || 'loc' };
+}
+export function setToolLook(patch) { try { localStorage.setItem(LS_LOOK, JSON.stringify({ ...toolLook(), ...patch })); } catch { /* bez pamięci */ } }
+/** Styl ramki i poświaty elementu narzędzia wg lokalizacji. */
+export function frameStyle(location) {
+  const look = toolLook(), lc = locColor(location);
+  const st = {};
+  if (look.frame && lc) st.border = `3px solid ${lc}`;
+  if (look.glow) { const g = look.glowColor === 'loc' ? lc || '#00c853' : look.glowColor; st.boxShadow = `0 0 10px 2px ${g}`; }
+  return st;
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const poly = (pts, sx = 1, ox = 0, oy = 0) => pts.map((p) => `${(ox + p.x * sx).toFixed(2)},${(oy + p.y * sx).toFixed(2)}`).join(' ');
 
@@ -89,7 +123,7 @@ export function fullScreen(title, content) {
 export function wearCodeCell(wear, location, warning, ...children) {
   const p = T.wearPercent(wear), band = T.wearBand(p);
   const c = band === 'low' ? '#00c853' : band === 'medium' ? '#ffd600' : '#d50000', fill = Math.min(80, (p / 100) * 80);
-  const lc = T.locationColor(location);
+  const lc = locColor(location);
   return h('div', { class: 'wear-cell', style: { background: `linear-gradient(90deg, ${c} 0%, ${c} ${fill}%, #fff ${fill}%, #fff 100%)`, outline: warning ? '3px solid #d50000' : '', outlineOffset: '-3px' } },
     h('div', { class: 'wear-text' }, ...children), lc ? h('div', { class: 'wear-loc', style: { background: lc } }) : null);
 }
@@ -102,9 +136,9 @@ export function toolCard(description, params) {
   return h('div', { class: 'tool-card' }, h('div', { class: 'tool-desc' }, description),
     shown.length ? h('div', { class: 'tool-params' }, ...shown.flatMap(([l, v], i) => [i ? '   ' : '', h('span', { class: 'muted' }, l + ' '), h('b', {}, String(v))])) : null);
 }
-/** Wiersz narzędzia jak na Androidzie: kod (92 px), opis i parametry, opcjonalnie miniatura. */
+/** Wiersz narzędzia jak na Androidzie: kod (92 px), opis i parametry, opcjonalnie miniatura; ramka i poświata wg lokalizacji. */
 export function toolRow(t, { warning = false, onclick, mini = null, description = null } = {}) {
-  return h('div', { class: 'tool-row' + (onclick ? ' click' : ''), onclick },
+  return h('div', { class: 'tool-row' + (onclick ? ' click' : ''), onclick, style: frameStyle(t.location) },
     wearCodeCell(t.wear, t.location, warning, h('b', {}, t.productCode)),
     toolCard(description ?? T.description(t), toolParams(t)), mini ? h('div', { class: 'tool-mini-col' }, mini) : null);
 }
@@ -126,3 +160,28 @@ export function statusLine() {
   return el;
 }
 export { clear };
+
+/** Kafelek narzędzia (widok kafelków): kod na pasku zużycia, lokalizacja, duża miniatura, opis i parametry; ramka i poświata wg lokalizacji. */
+export function toolTile(t, { warning = false, onclick, mini = null, description = null } = {}) {
+  const lc = locColor(t.location);
+  return h('div', { class: 'tool-tile' + (onclick ? ' click' : ''), onclick, style: frameStyle(t.location) },
+    h('div', { class: 'tile-head' }, wearCodeCell(t.wear, t.location, warning, h('b', {}, t.productCode)),
+      h('span', { class: 'tile-loc', style: { background: lc || '#eee', color: lc ? contrast(lc) : '#333' } }, t.location || '—')),
+    h('div', { class: 'tile-body' }, mini ? h('div', { class: 'tile-mini' }, mini) : null, toolCard(description ?? T.description(t), toolParams(t))));
+}
+/** Czarny albo biały tekst na tle [bg]. */
+export function contrast(bg) {
+  const c = parseSheetColor(bg, '#ffffff'), r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? '#000' : '#fff';
+}
+/** Dorysowywanie długiej listy porcjami przy przewijaniu (wszystkie elementy, bez przycisku „pokaż kolejne”). */
+export function lazyFill(container, items, make, step = 120) {
+  let n = 0;
+  const sentinel = h('div', { style: { height: '1px', gridColumn: '1 / -1' } });
+  const more = () => { const end = Math.min(items.length, n + step); const frag = document.createDocumentFragment(); for (; n < end; n++) frag.append(make(items[n])); container.insertBefore(frag, sentinel); if (n >= items.length) { io.disconnect(); sentinel.remove(); } };
+  const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) more(); }, { root: container, rootMargin: '600px' });
+  container.append(sentinel);
+  more();
+  if (n < items.length) io.observe(sentinel);
+  return () => io.disconnect();
+}

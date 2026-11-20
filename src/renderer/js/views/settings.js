@@ -4,6 +4,7 @@ import { firebase, resetFirestoreCache } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
 import { holidaysPanel } from './holidays.js';
 import { stationsPanel } from './stationsPanel.js';
+import { toolLook, setToolLook } from './toolViews.js';
 import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
@@ -105,6 +106,7 @@ export async function mountSettings(el, ctx) {
         } }, 'Kody iPhone'))) : null,
     cfg.url && cfg.key ? holidaysPanel() : null,
     cfg.url && cfg.key ? stationsPanel() : null,
+    toolLookPanel(),
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
     cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
       h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),
@@ -113,4 +115,19 @@ export async function mountSettings(el, ctx) {
         try { toast('Przeniesiono kart: ' + (await importKartyFromSheet(ctx.user && ctx.user.email))); } catch (e) { toast('Nie przeniesiono: ' + (e.message || e), true); }
       } }, 'Przenieś karty z arkusza do bazy')) : null,
     h('p', { class: 'muted' }, window.zks ? '' : '')));
+}
+
+/** Narzędziownia – wygląd na tym komputerze: ramka w kolorze lokalizacji (kolory stanowisk wyżej), poświata (glow) i jej kolor. */
+function toolLookPanel() {
+  const look = toolLook();
+  const frame = h('input', { type: 'checkbox', checked: look.frame, onchange: () => setToolLook({ frame: frame.checked }) });
+  const glow = h('input', { type: 'checkbox', checked: look.glow, onchange: () => setToolLook({ glow: glow.checked }) });
+  const locG = h('input', { type: 'checkbox', checked: look.glowColor === 'loc', onchange: () => { color.disabled = locG.checked; setToolLook({ glowColor: locG.checked ? 'loc' : color.value }); } });
+  const color = h('input', { type: 'color', value: look.glowColor === 'loc' ? '#00c853' : look.glowColor, disabled: look.glowColor === 'loc', style: { width: '40px', height: '24px', padding: 0, border: 0 },
+    oninput: () => setToolLook({ glowColor: color.value }) });
+  return h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Narzędziownia – wygląd (ten komputer)'),
+    h('p', { class: 'muted' }, 'Kolor lokalizacji narzędzia bierze się z kolorów stanowisk (Union – 2Un, Correa – 3Co, Schiess – 1Si, Narzędziownia – Narz; pozostałe – kolory domyślne).'),
+    h('label', { class: 'row', style: { gap: '6px' } }, frame, 'Ramka w kolorze lokalizacji (wiersze i kafelki narzędzi)'),
+    h('label', { class: 'row', style: { gap: '6px' } }, glow, 'Poświata (glow) wokół narzędzia'),
+    h('div', { class: 'row', style: { gap: '6px', marginLeft: '22px' } }, h('label', { class: 'row', style: { gap: '4px' } }, locG, 'w kolorze lokalizacji'), h('span', { class: 'muted' }, 'albo kolor:'), color));
 }

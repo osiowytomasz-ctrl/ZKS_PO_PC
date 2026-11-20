@@ -126,3 +126,30 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
 .chip-row .wear-cell { width: auto; border: 0.5px solid #000; }
 .chip-row .wear-text { padding: 4px 20px 4px 6px; }
+/* Narzędziownia – kafelki (ToolBuilder): liczba w wierszu zależna od szerokości okna (1920 px – 4) */
+.tool-grid { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); grid-auto-rows: max-content; gap: 8px; align-content: start; padding: 4px 8px 4px 4px; }
+.tool-grid > .tool-title, .tool-grid > .muted, .tool-grid > .tool-actions, .tool-grid > hr, .tool-grid > div:not(.tool-tile) { grid-column: 1 / -1; }
+.tool-tile { background: #fff; border: 1px solid #000; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; min-height: 150px; }
+.tool-tile.click { cursor: pointer; }
+.tool-tile.click:hover { outline: 2px solid #1a73e8; outline-offset: -2px; }
+.tile-head { display: flex; align-items: stretch; border-bottom: 1px solid #ccc; }
+.tile-head .wear-cell { width: auto; flex: 1; min-height: 30px; }
+.tile-head .wear-text { font-size: 13px; }
+.tile-loc { display: flex; align-items: center; padding: 0 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.tile-body { display: flex; align-items: stretch; min-height: 120px; }
+.tile-mini { width: 104px; flex: none; display: flex; align-items: center; justify-content: center; border-right: 1px solid #eee; }
+.tile-body .tool-card { justify-content: flex-start; }
+.tile-body .tool-desc { -webkit-line-clamp: 3; font-size: 13px; line-height: 16px; }
+.tool-row { border-radius: 4px; }
+/* karta narzędzia */
+.tcard-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tcard-code { font-size: 22px; font-weight: 800; }
+.tcard-chip { padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 13px; }
+.tcard-wear { flex: 1; min-width: 160px; height: 14px; background: #eee; border-radius: 7px; overflow: hidden; position: relative; }
+.tcard-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(300px, 1.1fr); gap: 12px; flex: 1; min-height: 0; margin-top: 10px; }
+.tcard-pane { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 320px; background: #fff; }
+.tcard-pane > .muted { padding: 4px 8px; font-size: 11px; border-bottom: 1px solid #eee; }
+.tcard-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; padding: 8px; }
+.tcard-param { background: #f5f7fb; border-radius: 6px; padding: 5px 8px; }
+.tcard-param span { display: block; font-size: 11px; color: #666; }
+.tcard-param b { font-size: 16px; }
