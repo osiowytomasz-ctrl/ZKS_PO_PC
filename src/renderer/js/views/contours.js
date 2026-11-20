@@ -366,11 +366,13 @@ export function mountContours(el, ctx) {
     for (let g = Math.ceil(xMin / (step * 10)) * step * 10; g <= xMax; g += step * 10) out += `<line x1="${f2(X(g))}" y1="0" x2="${f2(X(g))}" y2="${H}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
     for (let g = Math.ceil(yMin / (step * 10)) * step * 10; g <= yMax; g += step * 10) out += `<line x1="0" y1="${f2(Y(g))}" x2="${W}" y2="${f2(Y(g))}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
     // rejony ostrze / oprawka – pasy Z przycięte do nowego konturu
+    const trePv = !!t && E.isTrepan(st.params[normCode(t.productCode)]);
     const nPts = svg ? E.svgToContour(svg) : [];
     if (nPts.length >= 3) out += `<defs><clipPath id="kclip"><polygon points="${nPts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}"/></clipPath></defs>`;
     for (const r of st.regions || []) {
-      const col = r.role === 'ostrze' ? '#d50000' : '#616161';
-      out += `<rect x="0" y="${f2(Y(r.z2 * 10))}" width="${W}" height="${f2((r.z2 - r.z1) * 10 * sc)}" fill="${col}" fill-opacity="0.35" clip-path="url(#kclip)"/>`
+      if (r.role === 'ostrze' && trePv) continue;   // wiertło rurowe: ostrze to tylko płytki w ściankach (rysowane niżej), nie cały pas
+      const col = r.role === 'ostrze' ? '#c8a400' : '#616161';   // ostrze zawsze w kolorze płytek (złoty)
+      out += `<rect x="0" y="${f2(Y(r.z2 * 10))}" width="${W}" height="${f2((r.z2 - r.z1) * 10 * sc)}" fill="${col}" fill-opacity="${r.role === 'ostrze' ? 0.8 : 0.35}" clip-path="url(#kclip)"/>`
         + `<text x="${W - 6}" y="${f2((Y(r.z1 * 10) + Y(r.z2 * 10)) / 2 + 4)}" font-size="11" text-anchor="end" fill="${col}" font-weight="700">${r.role}</text>`;
     }
     if (pv.sel) out += `<rect x="0" y="${f2(Y(pv.sel.z2 * 10))}" width="${W}" height="${f2((pv.sel.z2 - pv.sel.z1) * 10 * sc)}" fill="none" stroke="#ff9800" stroke-width="2" stroke-dasharray="6 3"/>`;
@@ -383,7 +385,7 @@ export function mountContours(el, ctx) {
     out += triad2d(14, H - 26);
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
-    if (t && svg && E.isTrepan(st.params[normCode(t.productCode)])) {   // wiertło rurowe: płytki w ściankach (żółte), wnęka i środek linii płytki – przerywana 1 px
+    if (trePv && svg) {   // wiertło rurowe: płytki w ściankach (żółte), wnęka i środek linii płytki – przerywana 1 px
       const d = G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg)), pp = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
       if (d) out += d.plates.map((q) => `<polygon points="${pp(q)}" fill="#c8a400" fill-opacity="0.85" stroke="none" pointer-events="none"/>`).join('')
         + d.hidden.map((q) => `<polyline points="${pp(q)}" fill="none" stroke="#1565c0" stroke-width="1" stroke-dasharray="5 4" pointer-events="none"/>`).join('');
@@ -391,8 +393,8 @@ export function mountContours(el, ctx) {
     const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
     ins.forEach((q, j) => {
       const on = pv.insSel === j;
-      out += `<polygon points="${poly(q.left)}" fill="#d50000" fill-opacity="0.15" stroke="#d50000" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
-      out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#d50000" fill-opacity="${on ? 0.45 : 0.3}" stroke="${on ? '#ff6d00' : '#d50000'}" stroke-width="${on ? 2.2 : 1.3}" style="cursor:move"/>`;
+      out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="#8a6d00" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
+      out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#c8a400" fill-opacity="${on ? 0.8 : 0.65}" stroke="${on ? '#ff6d00' : '#8a6d00'}" stroke-width="${on ? 2.2 : 1.3}" style="cursor:move"/>`;
       out += `<circle cx="${f2(X(q.right[0].x))}" cy="${f2(Y(q.right[0].y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
     });
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
@@ -565,7 +567,7 @@ export function mountContours(el, ctx) {
       st.regions = s.regions; st.dirty = true; drawPreview();
     } }, (tre ? `Ostrze – węglik (${String(k).replace('.', ',')} mm)` : `Podziel wg L roboczej (${String(k).replace('.', ',')} mm)`)));
     if (pv.sel) regionBar.append(h('b', {}, `Rejon Z ${String(pv.sel.z1).replace('.', ',')}–${String(pv.sel.z2).replace('.', ',')} mm:`),
-      h('button', { class: 'btn small', style: { background: '#d50000', color: '#fff' }, onclick: () => setRole('ostrze') }, 'Ostrze'),
+      h('button', { class: 'btn small', style: { background: '#c8a400', color: '#fff' }, onclick: () => setRole('ostrze') }, 'Ostrze'),
       h('button', { class: 'btn small', style: { background: '#616161', color: '#fff' }, onclick: () => setRole('oprawka') }, 'Oprawka'),
       h('button', { class: 'btn small', onclick: () => setRole(null) }, 'Brak'));
     else if ((st.regions || []).length) regionBar.append(h('span', { class: 'muted' }, 'Rejony: ' + regionsText(st.regions)));

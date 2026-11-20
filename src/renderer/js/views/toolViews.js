@@ -56,7 +56,7 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   return box;
 }
 
-/** Zestaw narzędzi 2D (SVG, dopasowany do pola): obrysy w kolorach narzędzi, płytki na czerwono; [labels] – kody i poziomy „Y=…”. */
+/** Zestaw narzędzi 2D (SVG, dopasowany do pola): obrysy w kolorach narzędzi, płytki złote; [labels] – kody i poziomy „Y=…”. */
 export function stackSvg(stack, { labels = false, pad = 24, width = 600, height = 600 } = {}) {
   const b = stack.bounds, bw = Math.max(b.maxX - b.minX, 1), bh = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((width - 2 * pad) / bw, (height - 2 * pad) / bh);
@@ -71,7 +71,7 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
         + l.draw.hidden.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="5 4"/>`).join('');
     } else
     svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
-    for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#d50000" fill-opacity="0.2" stroke="#d50000" stroke-width="1.5"/>`;
+    for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#c8a400" fill-opacity="0.85" stroke="#8a6d00" stroke-width="1.5"/>`;
     if (labels) {
       const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
       svg += `<text x="4" y="${(oy + top * s + 12).toFixed(1)}" font-size="11">${esc(l.code)}</text>`;

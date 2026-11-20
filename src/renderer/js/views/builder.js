@@ -261,7 +261,7 @@ export function mountBuilder(el, ctx) {
         canAdd ? h('button', { class: 'btn primary', onclick: () => { m.close(); select(t); } }, st.selected.length ? '+ Dodaj do zestawu' : 'Wybierz jako pierwsze') : null),
       opis ? h('div', { style: { marginTop: '4px', fontSize: '14px' } }, opis) : null,
       h('div', { class: 'tcard-grid' },
-        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Rysunek 2D (płytki na czerwono)'), h('div', { style: { flex: 1, minHeight: 0 } }, stack ? stackSvg(stack, { labels: false, width: 500, height: 600 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu 2D.'))),
+        h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Rysunek 2D (płytki na złoto)'), h('div', { style: { flex: 1, minHeight: 0 } }, stack ? stackSvg(stack, { labels: false, width: 500, height: 600 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu 2D.'))),
         h('div', { class: 'tcard-pane' }, h('div', { class: 'muted' }, 'Podgląd 3D – przeciągnij, aby obrócić; kółko: przybliżenie'), h('div', { style: { flex: 1, minHeight: 0 } }, toolView3d(st.index, [t]))),
         h('div', { class: 'tcard-pane', style: { overflow: 'auto' } }, h('div', { class: 'muted' }, 'Parametry'),
           h('div', { class: 'tcard-params' }, ...params.filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => h('div', { class: 'tcard-param' }, h('span', {}, k), h('b', {}, String(v))))),
