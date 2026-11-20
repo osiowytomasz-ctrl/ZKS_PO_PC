@@ -207,8 +207,9 @@ export function mountContours(el, ctx) {
     const save = async (value) => {
       try {
         // zatwierdzony nowy kontur → PSWT kolumna BC (SVG, mm), rejony ostrze / oprawka → kolumna BE
-        let bc = value ? E.addEdgeLines(svgOut.value) : null;   // + linie krawędzi części obrotowej
-        if (bc) for (const r of (st.regions || []).slice(0, -1)) bc = E.addLineAt(bc, r.z2);   // + linie podziału ostrze / oprawka
+        const tre = E.isTrepan(st.params[normCode(t.productCode)]);   // wiertło rurowe: własne linie w sylwecie
+        let bc = value ? (tre ? svgOut.value : E.addEdgeLines(svgOut.value)) : null;   // + linie krawędzi części obrotowej
+        if (bc && !tre) for (const r of (st.regions || []).slice(0, -1)) bc = E.addLineAt(bc, r.z2);   // + linie podziału ostrze / oprawka
         await api('ndConfirmContour', [t.productCode, value, bc, value ? regionsText(st.regions) : null]);
         st.params[normCode(t.productCode)] = { ...(st.params[normCode(t.productCode)] || {}), BH: value, ...(value ? { BC: bc, BE: regionsText(st.regions) } : {}) };
         ndPatch(t.productCode, st.params[normCode(t.productCode)], st.v[normCode(t.productCode)]); invalidateConfirmed();   // baza Firebase
@@ -328,9 +329,10 @@ export function mountContours(el, ctx) {
       clear(prev3d);
       const f0 = st.xf || { dx: 0, dz: 0, ang: 0 };   // bryła z konturu przed przesunięciem, przesunięcie / obrót całości w scenie
       const tre = !!t && E.isTrepan(st.params[normCode(t.productCode)]);   // wiertło rurowe: kielich i płytki ostrza wg Ø
-      const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [tre]) : null;
+      const trd = tre && svg ? G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // kielich: wnęka z wymiarów
+      const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : null]) : null;
       if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
-      if (mesh) mesh.trepan = [tre ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
+      if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
       const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft })) : [];
       prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
@@ -381,6 +383,11 @@ export function mountContours(el, ctx) {
     out += triad2d(14, H - 26);
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
+    if (t && svg && E.isTrepan(st.params[normCode(t.productCode)])) {   // wiertło rurowe: płytki w ściankach (żółte), wnęka i środek linii płytki – przerywana 1 px
+      const d = G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg)), pp = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
+      if (d) out += d.plates.map((q) => `<polygon points="${pp(q)}" fill="#c8a400" fill-opacity="0.85" stroke="none" pointer-events="none"/>`).join('')
+        + d.hidden.map((q) => `<polyline points="${pp(q)}" fill="none" stroke="#1565c0" stroke-width="1" stroke-dasharray="5 4" pointer-events="none"/>`).join('');
+    }
     const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
     ins.forEach((q, j) => {
       const on = pv.insSel === j;

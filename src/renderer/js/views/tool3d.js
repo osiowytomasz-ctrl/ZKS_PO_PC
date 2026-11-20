@@ -155,20 +155,19 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
       const regs = ((mesh.regions && mesh.regions[i]) || []).filter((r) => r.role === 'ostrze');
       const pr = regs.length ? splitProfile(pr0, regs.flatMap((r) => [r.z1 * 10, r.z2 * 10])) : pr0;
-      const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: ostrze to osobne płytki (wycinki pierścienia), korpus – bryła wydrążona
-      const isWork = tb ? (a, b) => { const z = (a.y + b.y) / 20; return z > tb.z1 + 1e-6 && z <= tb.z2 + 1e-6; }
-        : (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
+      const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: korpus – bryła wydrążona do czubka, ostrze to osobne płytki wlutowane w ściankę
+      const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
       const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide }); mats.push(m);
-      if (tb) {
-        const y1 = tb.z1 + mesh.offsets[i] / 10, y2 = tb.z2 + mesh.offsets[i] / 10, pitch = (2 * Math.PI) / tb.n, gap = Math.min(pitch * 0.3, 1.2 / Math.max(tb.rOut, 1));
-        for (let k = 0; k < tb.n; k++) {   // n płytek co 360°/n, między nimi szczeliny
-          const g = sectorGeometry(T, tb.rIn, tb.rOut, y1, y2, k * pitch + gap / 2, (k + 1) * pitch - gap / 2, Math.max(3, Math.ceil(SEG / tb.n / 2)));
+      if (tb) {   // płytki wlutowane w ściankę: każda ma po obwodzie najwyżej [arc] mm (4), n płytek równo co 360°/n, czubek lekko ponad korpusem
+        const y1 = tb.z1 + mesh.offsets[i] / 10, y2 = tb.z2 + mesh.offsets[i] / 10 + 0.04, pitch = (2 * Math.PI) / tb.n, half = tb.arc / (2 * Math.max(tb.rOut, 1));
+        for (let k = 0; k < tb.n; k++) {
+          const g = sectorGeometry(T, tb.rIn, tb.rOut, y1, y2, k * pitch - half, k * pitch + half, 3);
           group.add(new T.Mesh(g, workMat)); geos.push(g);
           edges(g, 0x3b0000, 0.6);
         }
       }
-      for (const [keep, mat] of tb ? [[(a, b) => !isWork(a, b), m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
+      for (const [keep, mat] of tb ? [[null, m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
         const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;
         group.add(new T.Mesh(g, mat)); geos.push(g);
         edges(g, 0x2a2f36, 0.35);

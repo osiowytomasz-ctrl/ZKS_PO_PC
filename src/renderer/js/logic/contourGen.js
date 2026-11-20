@@ -18,8 +18,29 @@ const P = (x, y) => f(x) + '_' + f(y);
 const pts = (list, { lead = true, tail = true } = {}) => (lead ? ';' : '') + list.map(([x, y]) => P(x, y)).join(';') + (tail ? ';' : '');
 
 /** Wiertło rurowe (trepan): wymiary w mm. bodyDia – o ile korpus jest mniejszy od Ø roboczego (średnica), wall – ścianka korpusu,
- *  blade – grubość węglika (ostrza), bladeLen – wysokość ostrza od czubka, floor – dno wnęki nad końcem długości roboczej L. */
-export const TREPAN = { bodyDia: 0.5, wall: 3.5, blade: 4, bladeLen: 7, floor: 3 };
+ *  blade – grubość węglika (ostrza), bladeLen – wysokość ostrza od czubka, floor – dno wnęki nad dołem narzędzia (poziom 0, początek chwytu),
+ *  neck – o ile szyjka pod długością roboczą jest węższa od Ø roboczego (średnica), plateArc – długość płytki po obwodzie (maks.). */
+export const TREPAN = { bodyDia: 0.5, wall: 3.5, blade: 4, bladeLen: 7, floor: 3, neck: 3, plateArc: 4 };
+/**
+ * Wymiary wiertła rurowego w 0,1 mm (jak kontur): R – promień roboczy (zewnętrzna strona węglika), Rb – korpus, Rn – szyjka, Ri – wnęka,
+ * Rc – wewnętrzna strona węglika; yt – czubek (J), y7 – dół ostrza, ye – koniec długości roboczej (J−K), yb – dno wnęki.
+ */
+export function trepanDims(F, J, K = 0) {
+  const t = TREPAN, R = nv(F) * 5, yt = nv(J) * 10, y7 = yt - t.bladeLen * 10;
+  return { R, Rb: Math.max(R - t.bodyDia * 5, 0), Rn: Math.max(R - t.neck * 5, 0), Rc: Math.max(R - t.blade * 10, 0), Ri: Math.max(R - t.bodyDia * 5 - t.wall * 10, 0),
+    yt, y7, ye: Math.min(Math.max(nv(J) - nv(K), 0) * 10, y7), yb: Math.min(t.floor * 10, y7 - 10) };
+}
+/**
+ * Rysunek wiertła rurowego poza sylwetą (współrzędne konturu, 0,1 mm): płytki ostrza w ściankach (żółte) i linie niewidoczne – wnęka
+ * (ścianki i dno) oraz środkowe odcinki linii płytki – rysowane przerywaną 1 px. null – brak wymiarów.
+ */
+export function trepanDrawing(F, J) {
+  const d = trepanDims(F, J);
+  if (!(d.R > 0) || !(d.yt > 0)) return null;
+  const plate = (s) => [[s * d.Rc, d.y7], [s * d.R, d.y7], [s * d.R, d.yt], [s * d.Rc, d.yt]].map(([x, y]) => ({ x, y }));
+  const line = (a) => a.map(([x, y]) => ({ x, y }));
+  return { plates: [plate(-1), plate(1)], hidden: [line([[-d.Ri, d.yt], [-d.Ri, d.yb], [d.Ri, d.yb], [d.Ri, d.yt]]), line([[-d.Rc, d.y7], [d.Rc, d.y7]])], cavity: { ri: d.Ri, yb: d.yb, rb: d.Rb, y7: d.y7 } };
+}
 /** Liczba płytek ostrza wg Ø roboczego (mm): liniowo od 4 dla Ø12 do 12 dla Ø130 (poza zakresem – 4 / 12). */
 export const trepanPlates = (dia) => Math.max(4, Math.min(12, Math.round(4 + ((nv(dia) - 12) * 8) / 118)));
 
@@ -75,12 +96,12 @@ export function bodyContour(p, av = '') {
     return pts([[-m, 0], [-m, (J - K - s) * 10], [(I * 10) / 2, (J - K - s) * 10], [(I * 10) / 2, (J - I / 5 - s) * 10], [(I * 10) / 2 - I, (J - s) * 10],
       [(-I * 10) / 2 + I, (J - s) * 10], [(-I * 10) / 2, (J - I / 5 - s) * 10], [(-I * 10) / 2, (J - K - s) * 10], [m, (J - K - s) * 10], [m, 0]]);
   }
-  if (D === 'tre') { // wiertło rurowe (trepanacyjne) – kielich: ostrze 7 mm × 4 mm, korpus Ø−0,5, ścianka 3,5 mm, wnętrze puste
-    const t = TREPAN, R = F * 5, Rb = Math.max(R - t.bodyDia * 5, 0), Rc = Math.max(R - t.blade * 10, 0), Ri = Math.max(Rb - t.wall * 10, 0);
-    const yt = J * 10, y7 = yt - t.bladeLen * 10, ye = Math.min(Math.max(J - K, 0) * 10, y7), yb = Math.min(ye + t.floor * 10, y7);
-    const rs = M3 === 'WEL' ? 5 * midN(M, 4, 3) : Rb;   // chwyt Weldon (średnica z kodu mocowania) pod częścią roboczą
-    const L = [...(ye > 0 && rs !== Rb ? [[-rs, ye]] : []), [-Rb, ye], [-Rb, y7], [-R, y7], [-R, yt], [-Rc, yt], [-Rc, y7], [-Ri, y7], [-Ri, yb]];
-    const Rr = [[Ri, yb], [Ri, y7], [Rc, y7], [Rc, yt], [R, yt], [R, y7], [Rb, y7], [Rb, ye], ...(ye > 0 && rs !== Rb ? [[rs, ye]] : [])];
+  if (D === 'tre') { // wiertło rurowe (trepanacyjne) – sylweta z boku: ostrze 7 mm × 4 mm, korpus Ø−0,5, szyjka pod długością roboczą; wnęka tylko w rysunku
+    const d = trepanDims(F, J, K), rs = M3 === 'WEL' ? 5 * midN(M, 4, 3) : 0;   // chwyt Weldon (średnica z kodu mocowania) pod narzędziem
+    const rl = d.ye > 0 ? d.Rn : d.Rb;
+    const L = [...(rs ? [[rs, 0], [-rs, 0]] : []), ...(rs !== rl ? [[-rl, 0]] : []), ...(d.ye > 0 ? [[-rl, d.ye], [-d.Rb, d.ye]] : []),
+      [-d.Rb, d.y7], [-d.R, d.y7], [-d.Rc, d.y7], [-d.Rc, d.yt], [-d.Rc, d.y7], [-d.R, d.y7], [-d.R, d.yt]];   // linie płytki: dół i wewnętrzna krawędź
+    const Rr = [[d.R, d.yt], [d.R, d.y7], [d.Rc, d.y7], [d.Rc, d.yt], [d.Rc, d.y7], [d.R, d.y7], [d.Rb, d.y7], ...(d.ye > 0 ? [[d.Rb, d.ye], [rl, d.ye]] : []), ...(rs !== rl ? [[rl, 0]] : [])];
     return pts([...L, ...Rr]);
   }
   const holder = (yK) => { // oprawka z kołnierzem: wspólny kawałek reguł „opr red FRE ABS/MHD” i „opr stż FRE0”

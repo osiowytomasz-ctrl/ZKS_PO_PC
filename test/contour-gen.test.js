@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
-import { halfFromContour, generatedHalf, hasCavity, contourOverrides, addEdgeLines, bladeLength } from '../src/renderer/js/logic/contourEditor.js';
+import { halfFromContour, generatedHalf, contourOverrides, bladeLength } from '../src/renderer/js/logic/contourEditor.js';
 import { profileOf, trepanBlade } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
@@ -18,13 +18,17 @@ test('liczby z przecinkiem, FRAGMENT.TEKSTU, ostatni i najniższy punkt mocowani
   assert.deepEqual(parseContour('65,8_450;-102,_3'), [{ x: 65.8, y: 450 }, { x: -102, y: 3 }]);
 });
 
-test('wiertło rurowe (tre) – kielich: ostrze 7×4 mm, korpus Ø−0,5, ścianka 3,5, wnęka do 3 mm nad końcem L, chwyt Weldon', () => {
-  const p = { D: 'tre', E: 'TCT', F: '35', J: '90', K: '60', M: 'WEL032' };   // R 17,5; korpus 17,25; wnęka 13,75; węglik 13,5…17,5; koniec L na 30
-  assert.equal(C.bodyContour(p, '0_-600;-160_-600;-160_0'),
-    ';-160_300;-172.5_300;-172.5_830;-175_830;-175_900;-135_900;-135_830;-137.5_830;-137.5_330;137.5_330;137.5_830;135_830;135_900;175_900;175_830;172.5_830;172.5_300;160_300;');
-  assert.equal(C.fullContour(p, {}), '0_-600;-160_-600;-160_0;-160_300;-172.5_300;-172.5_830;-175_830;-175_900;-135_900;-135_830;-137.5_830;-137.5_330;137.5_330;137.5_830;135_830;135_900;175_900;175_830;172.5_830;172.5_300;160_300;160_0;160_-600;0_-600');
-  // chwyt Weldon 19 – węższy; bez długości ponad L (J ≤ K) korpus zaczyna się od zera
-  assert.ok(C.fullContour({ ...p, M: 'WEL019', J: '50', K: '60' }, {}).includes(';-172.5_0;-172.5_430;-175_430;-175_500;'));
+test('wiertło rurowe (tre) – sylweta z boku: ostrze 7×4, korpus Ø−0,5, szyjka Ø−3 pod L, linie płytki i chwytu', () => {
+  const p = { D: 'tre', E: 'TCT', F: '50', J: '70', K: '50', M: 'WEL019' };   // R 25; korpus 24,75; szyjka 23,5 od 0 do 20; ostrze 63…70
+  assert.equal(C.fullContour(p, {}), '0_-490;-95_-490;-95_0;95_0;-95_0;-235_0;-235_200;-247.5_200;-247.5_630;-250_630;-210_630;-210_700;-210_630;-250_630;-250_700;250_700;250_630;210_630;210_700;210_630;250_630;247.5_630;247.5_200;235_200;235_0;95_0;95_-490;0_-490');
+  // bez szyjki (J ≤ K) korpus od zera; bez Weldona – bez linii oddzielającej chwyt
+  const q = C.fullContour({ ...p, J: '50', K: '60', M: 'ABS040' }, {});
+  assert.ok(q.includes(';-247.5_0;-247.5_430;-250_430;') && !q.includes(';-235_'));
+  // wnęka nie jest w konturze – tylko w rysunku (przerywana): ścianki i dno 3 mm nad dołem, płytki w ściankach
+  const d = C.trepanDrawing(50, 70);
+  assert.deepEqual(d.hidden[0].map((q) => [q.x, q.y]), [[-212.5, 700], [-212.5, 30], [212.5, 30], [212.5, 700]]);
+  assert.deepEqual(d.plates[1].map((q) => [q.x, q.y]), [[210, 630], [250, 630], [250, 700], [210, 700]]);
+  assert.deepEqual(d.cavity, { ri: 212.5, yb: 30, rb: 247.5, y7: 630 });
 });
 
 test('wiertło rurowe: liczba płytek ostrza liniowo od 4 (Ø12) do 12 (Ø130)', () => {
@@ -85,12 +89,12 @@ test('Weldon: długość chwytu l wg tabeli wymiarów', () => {
 });
 
 test('generator – sama prawa połowa (od osi do osi, x ≥ 0)', () => {
-  const p = { D: 'tre', E: 'TCT', F: '35', J: '90', K: '60', M: 'WEL032' };
+  const p = { D: 'tre', E: 'TCT', F: '50', J: '70', K: '50', M: 'WEL019' };
   const h = generatedHalf(p, {});
-  assert.deepEqual(h.map((q) => [q.x, q.y]), [[0, 330], [137.5, 330], [137.5, 830], [135, 830], [135, 900], [175, 900], [175, 830], [172.5, 830], [172.5, 300], [160, 300], [160, 0], [160, -600], [0, -600]]);
+  assert.deepEqual(h.map((q) => [q.x, q.y]), [[0, 0], [95, 0], [0, 0], [0, 700], [250, 700], [250, 630], [210, 630], [210, 700], [210, 630], [250, 630], [247.5, 630], [247.5, 200], [235, 200], [235, 0], [95, 0], [95, -490], [0, -490]]);
   assert.ok(h.every((q) => q.x >= 0));
-  assert.equal(hasCavity(parseContour(C.fullContour(p, {}))), true);
-  assert.equal(hasCavity(parseContour(C.fullContour({ D: 'wie', E: 'HSS', F: '10', J: '100', K: '50', M: 'ABS040' }, {}))), false);
+  const q = { D: 'tre', E: 'TCT', F: '35', J: '90', K: '60', M: 'ABS040' };
+  assert.ok(generatedHalf(q, {}).length > 3);
   assert.deepEqual(generatedHalf({ D: 'tok', E: 'nóż', M: 'XX' }, {}), []);
 });
 
@@ -99,18 +103,18 @@ test('frez fazowy (dopisana reguła): walec Ø I, stożek pod kątem G do Ø F',
   assert.equal(b, ';0_0;-395_0;-395_320;-315_400;315_400;395_320;395_0;0_0;');
 });
 
-test('wiertło rurowe: rejon ostrza = węglik 7 mm od czubka (nie K), bez linii przez wnękę, profil 3D wydrążony, płytki wg Ø', () => {
-  const o = { D: 'tre', E: 'TCT', F: '35', J: '90', K: '60', M: 'WEL032' };
+test('wiertło rurowe: rejon ostrza = węglik 7 mm od czubka (nie K), brak linii przez całą szerokość, wnęka w 3D, płytki ≤ 4 mm po obwodzie', () => {
+  const o = { D: 'tre', E: 'TCT', F: '50', J: '70', K: '50', M: 'WEL019' };
   assert.equal(bladeLength(o), 7); assert.equal(bladeLength({ D: 'fre', E: 'hss', K: '40' }), 40);
-  const m = contourOverrides({ tre35: o }, {}, { gen: true });
-  assert.deepEqual(m.regions.get('tre35'), [{ role: 'oprawka', z1: -60, z2: 83 }, { role: 'ostrze', z1: 83, z2: 90 }]);
-  // linie krawędzi (uskoki) nie są dopisywane przez wnękę kielicha
-  const svg = 'M 0 33 L 13.75 33 L 13.75 83 L 13.5 83 L 13.5 90 L 17.5 90 L 17.5 83 L 17.25 83 L 17.25 30 L 16 30 L 16 -60 L 0 -60 Z';
-  assert.equal(addEdgeLines(svg), svg);
-  // 3D: profil z wnęką (ścianki wewnętrzne), a nie sam obrys zewnętrzny
-  const full = parseContour(C.fullContour(o, {}));
-  const cup = profileOf(full, true), solid = profileOf(full, false);
-  assert.ok(cup.some((q) => q.y === 330 && q.x === 137.5)); assert.ok(!solid.some((q) => q.y === 330 && q.x === 137.5));
-  assert.deepEqual(trepanBlade(35, m.regions.get('tre35')), { n: 6, rIn: 13.5, rOut: 17.5, z1: 83, z2: 90 });
-  assert.equal(trepanBlade(35, m.regions.get('tre35'), 8).n, 8); assert.equal(trepanBlade(35, []), null);
+  const m = contourOverrides({ tre50: o }, {}, { gen: true });
+  assert.deepEqual(m.regions.get('tre50'), [{ role: 'oprawka', z1: -49, z2: 63 }, { role: 'ostrze', z1: 63, z2: 70 }]);
+  // 3D: wnęka otwarta od czubka (ścianka wewnętrzna i dno), korpus bez wystawania płytki; bez wnęki – pełna bryła
+  const full = parseContour(C.fullContour(o, {})), cav = C.trepanDrawing(50, 70).cavity;
+  const cup = profileOf(full, cav), solid = profileOf(full, null);
+  assert.ok(cup.some((q) => q.x === 212.5 && q.y === 700)); assert.ok(cup.some((q) => q.x === 212.5 && q.y === 30)); assert.ok(cup.some((q) => q.x === 0 && q.y === 30));
+  assert.ok(cup.filter((q) => q.y >= 630).every((q) => q.x <= 247.5)); assert.ok(solid.some((q) => q.x === 250 && q.y === 700));
+  const b = trepanBlade(50, m.regions.get('tre50'));
+  assert.deepEqual(b, { n: 7, rIn: 21, rOut: 25, z1: 63, z2: 70, arc: 4 });
+  assert.equal(trepanBlade(50, m.regions.get('tre50'), 8).n, 8); assert.equal(trepanBlade(50, []), null);
+  assert.ok(trepanBlade(12, [{ role: 'ostrze', z1: 0, z2: 7 }]).arc <= 4);
 });

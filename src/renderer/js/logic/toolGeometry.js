@@ -2,8 +2,8 @@
 // Kontur trzonu (ND_CACHE kolumna T, w API `columnAY`) to pary `x_y` rozdzielone `;` w jednostkach 0,1 mm; kontury płytek (PL_kontur, kolumna G)
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
-import { halfFromContour, halfPath, hasCavity } from './contourEditor.js';
-import { TREPAN, trepanPlates } from './contourGen.js';
+import { halfFromContour } from './contourEditor.js';
+import { TREPAN, trepanPlates, trepanDrawing } from './contourGen.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -109,13 +109,15 @@ export function rotateAround(p, pivot, angleDeg) {
 
 // ---------- zestaw narzędzi jeden pod drugim (widok 2D) ----------
 
-/** Pas ostrza (rejon „ostrze”, mm) w układzie rysunku: { y1 (góra), y2 (dół) } wg [toY](z mm); null – brak rejonu. */
-export function bladeBand(regions, toY) {
-  const r = (regions || []).find((q) => q.role === 'ostrze');
-  if (!r) return null;
-  const a = toY(r.z1), c = toY(r.z2);
-  return { y1: Math.min(a, c), y2: Math.max(a, c) };
+/** Rysunek wiertła rurowego (płytki i linie niewidoczne, 0,1 mm) dla konturu: czubek z konturu, gdy odbiega od długości J narzędzia. null – brak. */
+export function trepanDrawingFor(diameter, length, contour) {
+  const b = bounds(contour);
+  if (!b) return null;
+  const j = Math.abs(b.maxY - num(length) * 10) > 1 ? b.maxY / 10 : num(length);
+  return trepanDrawing(num(diameter), j);
 }
+/** Rysunek wiertła rurowego przeniesiony do układu rysunku: [map] – punkt konturu → punkt rysunku. */
+export const mapTrepanDrawing = (d, map) => (d ? { plates: d.plates.map((q) => q.map(map)), hidden: d.hidden.map((q) => q.map(map)) } : null);
 
 /**
  * Układa narzędzia jedno pod drugim ([tools] – {code, contour, inserts: [ścieżka SVG], diameter, length, angle, chamfer}).
@@ -137,7 +139,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     });
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, blade: tool.trepan ? bladeBand(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -200,8 +202,8 @@ export function buildMini(tool, details) {
     } else if (isWiePly && (company.includes('iscar') || company.includes('amec'))) polygons.push(polygon(true));
     else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
   }
-  const band = group === 'tre' ? bladeBand(details && details.regions, (z) => offsetY + (b.maxY - z * 10) * scale) : null;   // wiertło rurowe: ostrze żółte, reszta szara
-  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, band };
+  const draw = group === 'tre' ? mapTrepanDrawing(trepanDrawingFor(diameter, length, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // wiertło rurowe: płytki żółte, wnęka przerywana
+  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw };
 }
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
@@ -227,7 +229,7 @@ export function toolIndex(catalog, overrides = null) {
       if (!t) return null;
       const d = det(t.productCode);
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
-      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre, regions: (d && d.regions) || null };
+      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
@@ -378,30 +380,28 @@ export function coordinatesText(tools) {
 
 // ---------- bryła obrotowa 3D (Lathe3D.kt) ----------
 /** Prawa połowa konturu bez powtórzeń, zamknięta do osi na dole i na górze. */
-export function profileOf(contour, hollow = false) {
+export function profileOf(contour, cav = null) {
   if (!contour || contour.length < 3) return null;
-  if (hollow && hasCavity(contour)) return cupProfile(contour);
   // obrys zewnętrzny: dla każdego poziomu Z największa odległość od osi (z obu stron), w kolejności Z – bez linii wewnętrznych
   // (gniazda oprawek, linie rzutu bocznego), które przy obrocie dawały fałszywe stożki i lejki
-  const rows = halfFromContour(contour).map((r) => pt(Number(r.r) * 10, Number(r.z) * 10)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  let rows = halfFromContour(contour).map((r) => pt(Number(r.r) * 10, Number(r.z) * 10)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (rows.length < 2) return null;
   const ys = rows.map((p) => p.y);
+  // wiertło rurowe: wnęka otwarta od czubka; płytki (w ściance) rysuje osobno podgląd – bryła ma tu promień korpusu aż do czubka
+  if (cav) rows = rows.map((p) => (p.y >= cav.y7 - 1e-6 ? pt(Math.min(p.x, cav.rb), p.y) : p));
   const out = [];
-  for (const p of [pt(0, Math.min(...ys)), ...rows, pt(0, Math.max(...ys))]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
+  for (const p of [pt(0, Math.min(...ys)), ...rows, ...(cav ? [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)] : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
   return out.length >= 2 ? out : null;
 }
-/** Profil wydrążonej bryły (kielich wiertła rurowego): sama prawa połowa konturu – ze ściankami wnęki – zamknięta wzdłuż osi. */
-export function cupProfile(contour) {
-  const out = [];
-  for (const p of halfPath(contour)) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
-  if (out.length > 2) out.push(out[0]);
-  return out.length >= 3 ? out : null;
-}
-/** Dane płytek ostrza wiertła rurowego (mm, w układzie konturu): { n – liczba wg Ø, rIn, rOut – węglik, z1, z2 – ostrze od czubka }; null – brak rejonu ostrza. */
+/**
+ * Dane płytek ostrza wiertła rurowego (mm, układ konturu): n – liczba (wg Ø albo zapisana), rIn / rOut – węglik, z1 / z2 – ostrze od czubka,
+ * arc – długość płytki po obwodzie (maks. 4 mm; przy gęstym rozstawie mniejsza). null – brak rejonu ostrza.
+ */
 export function trepanBlade(diameter, regions, n = 0) {
   const r = (regions || []).find((q) => q.role === 'ostrze'), d = num(diameter);
   if (!r || !(d > 0)) return null;
-  return { n: n >= 1 ? Math.min(60, Math.round(n)) : trepanPlates(d), rIn: Math.max(0, d / 2 - TREPAN.blade), rOut: d / 2, z1: r.z1, z2: r.z2 };
+  const cnt = n >= 1 ? Math.min(60, Math.round(n)) : trepanPlates(d);
+  return { n: cnt, rIn: Math.max(0, d / 2 - TREPAN.blade), rOut: d / 2, z1: r.z1, z2: r.z2, arc: Math.min(TREPAN.plateArc, (Math.PI * d) / cnt * 0.9) };
 }
 /**
  * Linie obrysu do rysowania (ścieżka SVG „M … L …”): krawędzie zamkniętego konturu bez odcinków leżących na osi narzędzia
@@ -422,8 +422,8 @@ export function outlinePath(points, map, axis = 0) {
   return d;
 }
 /** Siatka brył obrotowych zestawu (kolejność: pierwsze = tnące). null, gdy brak konturów. */
-export function buildMesh(contours, segments = 36, hollow = []) {
-  const profiles = contours.map((c, i) => profileOf(c, !!hollow[i]));
+export function buildMesh(contours, segments = 36, cavities = []) {
+  const profiles = contours.map((c, i) => profileOf(c, cavities[i] || null));
   const offsets = new Array(contours.length).fill(0);
   let z = 0;
   for (let i = contours.length - 1; i >= 0; i--) { const p = profiles[i]; if (!p) continue; offsets[i] = z; z += Math.max(...p.map((q) => q.y)); }

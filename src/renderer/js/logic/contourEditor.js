@@ -96,25 +96,6 @@ export function halfPath(points) {
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
 /**
- * Czy kontur ma wnękę otwartą do osi (wiertło rurowe – kielich): na pewnym poziomie Z oś leży poza materiałem, a dalej od osi materiał jest.
- * Sprawdzane na prawej połowie (halfPath) w środkach przedziałów między poziomami wierzchołków.
- */
-export function hasCavity(points) {
-  const P = halfPath(points);
-  if (P.length < 4) return false;
-  const zs = [...new Set(P.map((p) => p.y))].sort((a, b) => a - b);
-  for (let i = 0; i + 1 < zs.length; i++) {
-    const z = (zs[i] + zs[i + 1]) / 2, xs = [];
-    for (let k = 0; k < P.length; k++) {
-      const a = P[k], b = P[(k + 1) % P.length];
-      if ((a.y - z) * (b.y - z) < 0) xs.push(a.x + ((z - a.y) * (b.x - a.x)) / (b.y - a.y));
-    }
-    xs.sort((a, b) => a - b);
-    if (xs.length >= 2 && xs[0] > 0.5) return true;   // od osi do pierwszej ścianki – pusto (0,05 mm tolerancji)
-  }
-  return false;
-}
-/**
  * Wewnętrzny generator – sama prawa połowa konturu (0,1 mm, od osi do osi, z liniami krawędzi): korpus z PSWT D:N
  * dorysowany do mocowania z karty „kontury” (kształt i położenie w osi Z jak w karcie). [] – brak danych.
  */
@@ -276,7 +257,7 @@ export function edgeLevels(halfPts) {
 export function addEdgeLines(svg) {
   const path = String(svg || '').trim();
   const pts = svgToContour(path);
-  if (pts.length < 3 || !isHalf(pts) || hasCavity(pts)) return path;   // kielich (wiertło rurowe): linia przez wnękę byłaby błędna
+  if (pts.length < 3 || !isHalf(pts)) return path;
   const near = (a, b) => Math.abs(a - b) < 0.02;   // 0,002 mm w jednostkach 0,1 mm
   const has = (lv) => pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, lv.z) && near(q.y, lv.z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) >= lv.r - 0.02; });
   const todo = edgeLevels(pts).filter((lv) => !has(lv));
@@ -324,7 +305,7 @@ export function workSplit(svg, k) {
 export function addLineAt(svg, z) {
   const path = String(svg || '').trim(), Z = z * 10;
   const pts = svgToContour(path);
-  if (pts.length < 3 || !isHalf(pts) || hasCavity(pts)) return path;   // kielich: linia podziału przez wnękę byłaby błędna
+  if (pts.length < 3 || !isHalf(pts)) return path;
   const near = (a, b) => Math.abs(a - b) < 0.02;
   if (pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return near(p.y, Z) && near(q.y, Z) && (near(p.x, 0) || near(q.x, 0)) && Math.max(p.x, q.x) > 0.02; })) return path;
   const cmds = (path.match(/[MLAQZ][^MLAQZ]*/gi) || []).map((c) => c.trim());

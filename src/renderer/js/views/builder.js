@@ -61,9 +61,10 @@ export function mountBuilder(el, ctx) {
   function autoContour(t) {
     const r = autoContour0(t);
     if (!r) return null;
-    let svg = E.addEdgeLines(r.svg);   // + linie krawędzi części obrotowej
-    const p = st.cd.params[nc(t)], sp = monoSplit(p, svg);
-    if (sp) svg = E.addLineAt(svg, sp.z);
+    const p = st.cd.params[nc(t)], tre = E.isTrepan(p);   // wiertło rurowe ma własne linie w sylwecie – bez linii przez całą szerokość
+    let svg = tre ? r.svg : E.addEdgeLines(r.svg);   // + linie krawędzi części obrotowej
+    const sp = monoSplit(p, svg);
+    if (sp && !tre) svg = E.addLineAt(svg, sp.z);
     return { ...r, svg, regions: sp ? regionsText(sp.regions) : null };
   }
   /** Narzędzie monolityczne bez rejonów w BE: podział istniejącego konturu wg długości roboczej (K) – ostrze od czubka, reszta oprawka. */
@@ -100,9 +101,10 @@ export function mountBuilder(el, ctx) {
         if (E.isHalf(pts)) continue;
         if (E.halfSvg(E.halfFromContour(pts)) === svg) { svg = E.halfPathSvg(pts); break; }
       }
-      svg = E.addEdgeLines(svg);   // brakujące linie krawędzi części obrotowej
+      const tre = E.isTrepan(p);   // wiertło rurowe: własne linie w sylwecie
+      if (!tre) svg = E.addEdgeLines(svg);   // brakujące linie krawędzi części obrotowej
       const sp = monoSplit(p, svg);   // monolityczne bez rejonów – podział wg długości roboczej
-      if (sp) svg = E.addLineAt(svg, sp.z);
+      if (sp && !tre) svg = E.addLineAt(svg, sp.z);
       if (svg !== p.BC.trim() || sp) out.push({ t, p, svg, regions: sp ? regionsText(sp.regions) : null });
     }
     return out;
