@@ -192,7 +192,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     for (const pl of list) {
       const raw = parseInsertPath(pl.path);
       if (raw.length < 2) continue;
-      const polys = pl.central ? [placeCentral(raw, offsetY, pl)] : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl));
+      const polys = pl.central ? [placeCentral(raw, tool.length > 0 ? offsetY + (b.maxY - tool.length * 10) : offsetY, pl)] : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl));
       placed.push(...polys); plates.push({ code: pl.code, central: !!pl.central, phi: pl.phi || 0, z: pl.z || 0, polys });
     }
     offsetY += b.r;
@@ -210,12 +210,13 @@ function adjustPoly(poly, dx, dz, ang) {
   return poly.map((p) => { const r = ang ? rotateAround(p, c, ang) : p; return pt(r.x + dx * 10, r.y - dz * 10); });
 }
 /**
- * Płytka centralna (wiertło płytkowe ISCAR / AMEC): jeden wielokąt na osi narzędzia – środek płytki w x = 0, czubek płytki (największe y ścieżki)
- * na czubku narzędzia, reszta płytki w dół; ścieżka jest odwrócona w pionie jak w miniaturze. Czubek narzędzia = górna krawędź jego konturu [tipY].
+ * Płytka centralna (wiertło płytkowe ISCAR / AMEC): jeden wielokąt na osi narzędzia – środek płytki w x = 0, ścieżka odwrócona w pionie jak w miniaturze
+ * (buildMini). Długość narzędzia J to odległość od wierzchołka płytki do Z = 0, a kontur korpusu jest od niej krótszy (zależnie od oprawki), więc
+ * wierzchołek płytki leży na Z = J, czyli ponad górną krawędzią konturu: [base] = y rysunku punktu Z = J (offsetY + maxY − J·10); bez J – górna krawędź konturu.
  */
-function placeCentral(raw, tipY, pl) {
+function placeCentral(raw, base, pl) {
   const minX = Math.min(...raw.map((p) => p.x)), maxX = Math.max(...raw.map((p) => p.x)), maxY = Math.max(...raw.map((p) => p.y)), cx = (minX + maxX) / 2;
-  return adjustPoly(raw.map((p) => pt(p.x - cx, tipY + (maxY - p.y))), pl ? pl.dx : 0, pl ? pl.dz : 0, pl ? pl.ang : 0);
+  return adjustPoly(raw.map((p) => pt(p.x - cx, base + (maxY - p.y))), pl ? pl.dx : 0, pl ? pl.dz : 0, pl ? pl.ang : 0);
 }
 /** Płytka obwodowa (przy krawędzi): prawa ([mirror]) z korektą położenia płytki [pl], lewa – jej odbicie (dX i obrót z przeciwnym znakiem). */
 function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl) {
@@ -275,8 +276,8 @@ export function buildMini(tool, details) {
     const iMinX = Math.min(...raw.map((p) => p.x)), iMaxX = Math.max(...raw.map((p) => p.x)), iMinY = Math.min(...raw.map((p) => p.y)), iMaxY = Math.max(...raw.map((p) => p.y));
     const polygon = (mirror) => {
       if (isWiePly) {
-        const midX = (iMinX + iMaxX) / 2, toolTipY = offsetY + (b.maxY - length * 10) * scale + iMaxY * scale;
-        return raw.map((p) => { const dx = (p.x - midX) * scale; const my = iMaxY - (p.y - iMinY); return pt(mirror ? centerAxisX + dx : centerAxisX - dx, toolTipY - (iMaxY - my) * scale); });
+        const midX = (iMinX + iMaxX) / 2, apexY = offsetY + (b.maxY - length * 10) * scale;   // wierzchołek płytki (największe y ścieżki) na Z = J; płytka odwrócona w pionie, reszta w dół
+        return raw.map((p) => { const dx = (p.x - midX) * scale; return pt(mirror ? centerAxisX + dx : centerAxisX - dx, apexY + (iMaxY - p.y) * scale); });
       }
       return raw.map((p) => { const dx = (p.x - iMinX) * scale; const my = iMaxY - (p.y - iMinY); return pt(mirror ? rightToolX - dx : leftToolX + dx, insertTopY + (iMaxY - my) * scale); });
     };

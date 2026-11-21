@@ -209,7 +209,6 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         for (let k = 0; k < z; k++) {   // z płytek co 360°/z wokół osi narzędzia (oś Y sceny)
           const holder = new T.Group();
           holder.add(new T.Mesh(g, im), new T.LineSegments(eg, lm));
-          if (it.central) { const ysC = it.poly.map((q) => q.y / 10); holder.position.y = Math.max(0.3, Math.min(1.5, 0.12 * (Math.max(...ysC) - Math.min(...ysC)))); }   // płytka centralna lekko wystaje ponad czoło korpusu (czubek płytki jest widoczny)
           holder.rotation.y = (((it.phi || 0) * Math.PI) / 180) + (k * 2 * Math.PI) / z;   // kąt na obwodzie φ + z kopii co 360° / z
           group.add(holder);
         }
