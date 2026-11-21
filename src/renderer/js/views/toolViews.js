@@ -7,6 +7,7 @@ import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
 import * as B from '../logic/builder.js';
 import { normPlates } from '../logic/plateLayout.js';
+import { normBase } from '../logic/plateEdit.js';
 import { view3dGl } from './tool3d.js';
 
 // ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
@@ -146,6 +147,18 @@ export function saveInsertSetup(t, patch) {
 }
 /** Własny układ płytek narzędzia (rodzaj, wiele płytek, położenie) dla rysunków 2D / 3D w całym programie. */
 G.setPlateSetupProvider((t) => normPlates((insStore()[codeOf(t)] || {}).plates));
+// ---------- punkt bazowy płytki (wspólny dla wszystkich narzędzi z tą płytką; pamięć tego komputera) ----------
+const BASE_KEY = 'zks.plates.base';
+const baseStore = () => { try { return JSON.parse(localStorage.getItem(BASE_KEY) || '{}') || {}; } catch { return {}; } };
+/** Punkt bazowy płytki o kodzie [code]: { x, y } mm we współrzędnych konturu płytki albo null (bez wyboru – pierwszy punkt konturu). */
+export function plateBase(code) { return normBase(baseStore()[String(code ?? '').trim().toLowerCase()]); }
+/** Zapis punktu bazowego płytki; null – usuwa wybór. */
+export function savePlateBase(code, base) {
+  const all = baseStore(), k = String(code ?? '').trim().toLowerCase(), b = normBase(base);
+  if (b) all[k] = b; else delete all[k];
+  try { localStorage.setItem(BASE_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
+}
+G.setPlateBaseProvider((code) => plateBase(code));
 let GL_OK = null;
 function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }
 
