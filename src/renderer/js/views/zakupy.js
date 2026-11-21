@@ -86,7 +86,7 @@ export function mountZakupy(el, ctx) {
       orderFrame(row), purchaseFrameReadOnly(row), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
   }
 
-  const frame = (title, ...c) => h('div', { style: { border: '1px solid #bbb', borderRadius: '6px', padding: '6px 10px', margin: '6px 0' } }, h('b', { class: 'muted' }, title), ...c);
+  const frame = (title, ...c) => h('div', { style: { border: '1px solid #bbb', borderRadius: '0', padding: '6px 10px', margin: '6px 0' } }, h('b', { class: 'muted' }, title), ...c);
   const cell = (label, v, grow = 1) => h('div', { style: { flex: grow, minWidth: 0 } }, h('div', { class: 'muted' }, label), h('div', { style: { minHeight: '18px', whiteSpace: 'pre-wrap' } }, v || '—'));
   const orderFrame = (row) => frame('Zamówienie', h('div', { class: 'row', style: { alignItems: 'flex-start' } }, cell('Opis produktu', row.columnK, 3)),
     h('div', { class: 'row', style: { alignItems: 'flex-start' } }, cell('Data', formatDate(row.columnH)), cell('Ilość', row.columnI, 0.7), cell('ZMW', row.columnG)));

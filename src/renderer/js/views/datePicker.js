@@ -32,7 +32,7 @@ export function datePickerDialog({ title = 'Wybierz datę', value = null, holida
       const hol = holidays.has(iso), isSel = ms === sel, isToday = ms === today;
       const bg = isSel ? '#1a73e8' : hol ? '#800000' : wd === 6 ? '#ffe5e5' : wd === 5 ? '#e5f4fc' : '#fff';
       grid.append(h('button', { type: 'button', title: hol ? 'Święto: ' + (holidays.get(iso) || '') : '', onclick: () => { sel = ms; render(); },
-        style: { height: '32px', border: isToday ? '2px solid #00b050' : '1px solid #ccc', borderRadius: '4px', cursor: 'pointer', background: bg,
+        style: { height: '32px', border: isToday ? '2px solid #00b050' : '1px solid #ccc', borderRadius: '0', cursor: 'pointer', background: bg,
           color: isSel || hol ? '#fff' : wd === 6 ? '#c00000' : wd === 5 ? '#0070c0' : '#000', fontWeight: isSel || hol || isToday ? 700 : 400 } }, String(d)));
     }
     if (syncText && textIn) { textIn.value = fmtSel(); textErr.textContent = ''; }

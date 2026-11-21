@@ -23,7 +23,7 @@ export async function openUsersAdmin() {
     const text = shareText(cfg.url, r.key);
     const m = modal(title, h('div', {},
       h('p', {}, r.email + (r.active === false ? ' – konto nieaktywne (kolumna „aktywny” w arkuszu)' : '')),
-      h('pre', { style: { userSelect: 'all', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f4f4f4', padding: '8px', borderRadius: '6px' } }, text),
+      h('pre', { style: { userSelect: 'all', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f4f4f4', padding: '8px', borderRadius: '0' } }, text),
       h('p', { class: 'muted' }, 'Przekaż adres i klucz użytkownikowi – wpisuje je w Ustawieniach programu PC albo aplikacji na telefonie. Nie wysyłaj klucza publicznie.'),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(text) : navigator.clipboard.writeText(text)); toast('Skopiowano'); } catch (e) { toast('Nie skopiowano: ' + e.message, true); } } }, 'Kopiuj'),

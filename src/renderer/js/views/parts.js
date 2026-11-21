@@ -61,8 +61,8 @@ export function mountParts(el, ctx) {
     const t = p.tool;
     const m = modal(String(p.code).toUpperCase(), h('div', {},
       h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px' } },
-        h('div', { style: { border: '1px solid #ddd', borderRadius: '8px' } }, insertSvg(p.contour, { w: 380, hgt: 300, dims: true })),
-        p.contour && G.parseInsertPath(p.contour).length >= 3 ? h('div', { style: { border: '1px solid #ddd', borderRadius: '8px', width: '380px', height: '300px' } }, view3d(null, [{ poly: G.parseInsertPath(p.contour), z: 1, draft: 7, alone: true }])) : null,
+        h('div', { style: { border: '1px solid #ddd', borderRadius: '0' } }, insertSvg(p.contour, { w: 380, hgt: 300, dims: true })),
+        p.contour && G.parseInsertPath(p.contour).length >= 3 ? h('div', { style: { border: '1px solid #ddd', borderRadius: '0', width: '380px', height: '300px' } }, view3d(null, [{ poly: G.parseInsertPath(p.contour), z: 1, draft: 7, alone: true }])) : null,
         h('div', { style: { minWidth: '220px' } },
           t ? h('div', { style: { fontWeight: 600 } }, [t.columnP, t.name, t.columnO].filter((x) => String(x || '').trim()).join(' | ')) : null,
           h('div', { style: { margin: '6px 0' } }, stockLine(t)),

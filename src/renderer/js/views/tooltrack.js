@@ -2,20 +2,26 @@
 // kodu), lokalizacja „Zapis do”, potwierdzenie i zapis wielu narzędzi naraz do arkusza N. Zestaw z ToolBuildera („→ ToolTrack”) trafia
 // na listę wybranych.
 import { h, clear, api, apiCached, alertBox, modal } from '../ui.js';
-import { toolCatalog } from '../catalog.js';
+import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
+import * as G from '../logic/toolGeometry.js';
 import * as T from '../logic/tooltrack.js';
-import { toolRow, filterDropdown, statusLine } from './toolViews.js';
+import { toolRow, toolTile, miniSvg, lazyFill, filterDropdown, statusLine } from './toolViews.js';
 
 let pendingSelection = null;
 /** Zestaw z ToolBuildera: zastępuje listę wybranych przy najbliższym otwarciu ToolTrack. */
 export function setToolTrackSelection(tools) { pendingSelection = (tools || []).filter((t) => String(t.productCode ?? '').trim()); }
 
 export function mountToolTrack(el, ctx) {
-  const st = { all: [], listed: [], details: {}, byCode: new Map(), warnings: new Set(), filters: T.emptyFilters(), selected: [], locations: T.DEFAULT_LOCATIONS, saveLocation: '', saving: false };
+  const st = { all: [], listed: [], details: {}, byCode: new Map(), warnings: new Set(), filters: T.emptyFilters(), selected: [], locations: T.DEFAULT_LOCATIONS, saveLocation: '', saving: false, index: null, view: 'list', stopFill: null };
+  try { st.view = localStorage.getItem('zks.tooltrack.view') === 'tiles' ? 'tiles' : 'list'; } catch { /* domyślnie lista */ }
   const status = statusLine();
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   const locBox = h('div', { class: 'row' });
   const list = h('div', { class: 'tool-list' });
+  // widok: lista albo kafelki (jak w ToolBuilderze – 5 w wierszu przy 1920 px, miniatura narzędzia, dorysowywanie przy przewijaniu)
+  const viewBtn = h('button', { class: 'btn', title: 'Zmiana widoku: lista / kafelki', onclick: () => { st.view = st.view === 'tiles' ? 'list' : 'tiles'; try { localStorage.setItem('zks.tooltrack.view', st.view); } catch { /* bez pamięci */ } paintView(); drawList(); } });
+  const paintView = () => { viewBtn.textContent = st.view === 'tiles' ? '☰ Lista' : '▦ Kafelki'; list.className = st.view === 'tiles' ? 'tool-grid' : 'tool-list'; };
+  paintView();
   const bottom = h('div', { class: 'row' });
 
   if (pendingSelection) { st.selected = pendingSelection; pendingSelection = null; status.set(`Przekazano narzędzia z ToolBuildera: ${st.selected.length}`); }
@@ -30,6 +36,7 @@ export function mountToolTrack(el, ctx) {
       st.byCode = new Map(st.all.map((t) => [T.normCode(t.productCode), t]));
       st.listed = st.all.filter(T.isListed);
       st.warnings = new Set(st.listed.filter((t) => T.hasPartWarning(t, st.details, st.byCode)).map((t) => t.productCode));
+      try { st.index = G.toolIndex(cat, await confirmedContoursQuick()); } catch { st.index = null; }   // kontury do miniatur kafelków
       if (!st.locations.includes(st.saveLocation)) st.saveLocation = '';
       draw();
     } catch (e) {
@@ -52,24 +59,26 @@ export function mountToolTrack(el, ctx) {
     if (Object.values(st.filters).some((v) => String(v).trim())) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = T.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
   }
 
-  const row = (t, onclick) => toolRow(t, { warning: st.warnings.has(t.productCode), onclick });
+  const mini = (t) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w: 90, hgt: 110 });
+  /** Narzędzie jako wiersz (kliknięcie) albo kafelek (przycisk „+ Dodaj do listy” / „Usuń z listy” zamiast kliknięcia). */
+  const row = (t, onclick, kind) => {
+    if (st.view !== 'tiles') return toolRow(t, { warning: st.warnings.has(t.productCode), onclick });
+    const act = h('button', { class: 'btn small ' + (kind === 'remove' ? 'danger' : 'primary'), title: kind === 'remove' ? 'Usuń z listy wybranych' : 'Dodaj do listy wybranych', onclick: (e) => { e.stopPropagation(); onclick(); } }, kind === 'remove' ? 'Usuń z listy' : '+ Dodaj do listy');
+    return toolTile(t, { warning: st.warnings.has(t.productCode), mini: mini(t), footer: h('div', { class: 'tile-act' }, act) });
+  };
   function drawList() {
     const items = T.filterTools(st.listed, st.filters);
+    if (st.stopFill) st.stopFill();
     clear(list);
     if (st.selected.length) {
-      list.append(h('div', { class: 'tool-title' }, `Wybrane (${st.selected.length}) — kliknij, aby usunąć`),
-        ...st.selected.map((t) => row(t, () => { st.selected = st.selected.filter((x) => x.productCode !== t.productCode); drawList(); })),
+      list.append(h('div', { class: 'tool-title' }, `Wybrane (${st.selected.length}) — ${st.view === 'tiles' ? 'przycisk „Usuń z listy” na kafelku' : 'kliknij, aby usunąć'}`),
+        ...st.selected.map((t) => row(t, () => { st.selected = st.selected.filter((x) => x.productCode !== t.productCode); drawList(); }, 'remove')),
         h('hr', { style: { width: '100%', border: 0, borderTop: '1px solid #ccc', margin: '4px 0' } }));
     }
     list.append(h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Narzędzia: ' + items.length));
     if (!items.length && st.all.length) list.append(h('div', {}, 'Brak narzędzi spełniających kryteria.'));
-    let n = 0;
-    const more = () => {
-      const end = Math.min(items.length, n + 200);
-      for (; n < end; n++) { const t = items[n]; list.append(row(t, () => add(t))); }
-      if (n < items.length) { const b = h('button', { class: 'btn', onclick: () => { b.remove(); more(); } }, `Pokaż kolejne (${items.length - n})`); list.append(b); }
-    };
-    more();
+    // wszystkie narzędzia dorysowywane porcjami przy przewijaniu (miniatury są kosztowne)
+    st.stopFill = lazyFill(list, items, (t) => row(t, () => add(t), 'add'));
     drawBottom();
   }
   function drawBottom() {
@@ -122,7 +131,7 @@ export function mountToolTrack(el, ctx) {
     } });
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolTrack'), scan, h('span', { class: 'grow' }), h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')),
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'ToolTrack'), scan, h('span', { class: 'grow' }), viewBtn, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')),
     locBox, status, filtersBox, list, bottom);
   drawLoc();
   load(false); scan.focus();

@@ -156,7 +156,7 @@ export function mountBuilder(el, ctx) {
     invalidateConfirmed(); st.index = G.toolIndex(st.cat, overrides());
     const tile = box.closest('.tool-tile');
     if (toEnd && tile && st.stopFill && st.stopFill.add) { tile.remove(); st.stopFill.add(t); }   // zatwierdzony – na sam dół, bez przewijania listy
-    else if (tile) tile.replaceWith(row(t, { onclick: () => select(t) }));
+    else if (tile) tile.replaceWith(row(t, tile._rowOpts || { add: true }));
   }
   /** Kafelki: zatwierdzone kontury (PSWT BH) na końcu listy. */
   const okLast = (items) => (st.view === 'tiles' && st.cd ? [...items.filter((t) => !(st.cd.params[nc(t)] || {}).BH), ...items.filter((t) => (st.cd.params[nc(t)] || {}).BH)] : items);
@@ -164,9 +164,28 @@ export function mountBuilder(el, ctx) {
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
   // ikonka narzędzia: Kontury z tym narzędziem; karta narzędzia – prawy przycisk myszy na wierszu / kafelku
   const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => contoursWindow(t) });
-  const row = (t, opts = {}) => (st.view === 'tiles'
-    ? toolTile(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t, 90, 110), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, footer: okButton(t), ...opts })
-    : toolRow(t, { warning: !!st.index && st.index.hasPartWarning(t.productCode), mini: mini(t), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); }, ...opts }));
+  /**
+   * Narzędzie jako kafelek albo wiersz. Zamiast kliknięcia – przycisk: kandydat ma „+ Dodaj do narzędzia” ([add]), narzędzie z zestawu – „Usuń narzędzie” ([remove] =
+   * jego numer w zestawie): usuwa to narzędzie i wszystkie dodane po nim (niższe poziomy).
+   */
+  const row = (t, opts = {}) => {
+    const { add, remove, ...rest } = opts;
+    const act = add ? h('button', { class: 'btn small primary', title: 'Dodaj to narzędzie do zestawu', onclick: (e) => { e.stopPropagation(); select(t); } }, '+ Dodaj do narzędzia')
+      : remove != null ? h('button', { class: 'btn small danger', title: 'Usuń to narzędzie i wszystkie dodane po nim', onclick: (e) => { e.stopPropagation(); removeFrom(remove); } }, 'Usuń narzędzie') : null;
+    const base = { warning: !!st.index && st.index.hasPartWarning(t.productCode), oncontextmenu: (e) => { e.preventDefault(); miniPreview(t); } };
+    const el = st.view === 'tiles'
+      ? toolTile(t, { ...base, mini: mini(t, 90, 110), footer: h('div', {}, act ? h('div', { class: 'tile-act' }, act) : null, okButton(t)), ...rest })
+      : toolRow(t, { ...base, mini: mini(t), actions: act, ...rest });
+    el._rowOpts = opts;   // do przerysowania po zmianie potwierdzenia konturu
+    return el;
+  };
+  /** Usunięcie narzędzia o numerze [i] z zestawu wraz ze wszystkimi dodanymi po nim (np. z 10 narzędzi usunięcie piątego usuwa 5–10, zostają 1–4). */
+  function removeFrom(i) {
+    const n = st.selected.length - i;
+    st.selected = B.removeFrom(st.selected, i);
+    status.set(n > 1 ? `Usunięto ${n} narzędzia z zestawu: to i wszystkie dodane po nim.` : 'Usunięto narzędzie z zestawu.', 'neutral');
+    draw();
+  }
 
   function draw() {
     newBtn.style.display = st.selected.length ? '' : 'none';
@@ -188,23 +207,22 @@ export function mountBuilder(el, ctx) {
     clear(list);
     if (st.selected.length) {
       list.append(h('div', { class: 'tool-title' }, `Zestaw (${st.selected.length}) · L=${B.totalLength(st.selected)}`));
-      for (const t of st.selected) {
+      st.selected.forEach((t, i) => {
         const d = st.index && st.index.details(t.productCode);
         const parts = d ? (d.partsCutting || []).length + (d.partsAccessories || []).length : null;
-        list.append(row(t, { description: B.description(t) + ' | CZĘŚCI: ' + (parts ?? 'brak danych') }));
-      }
+        list.append(row(t, { remove: i, description: B.description(t) + ' | CZĘŚCI: ' + (parts ?? 'brak danych') }));
+      });
       list.append(h('div', { class: 'tool-actions' },
         h('button', { class: 'btn primary', onclick: openSave }, 'Zapisz'),
         h('button', { class: 'btn', onclick: () => fullScreen('Części zamienne · ' + B.codesText(st.selected), partsTable(st.index ? st.index.partRows(st.selected.map((t) => t.productCode)) : [])) }, 'Części'),
         h('button', { class: 'btn', onclick: () => { setToolTrackSelection(st.selected); ctx.go('tooltrack'); } }, '→ ToolTrack'),
-        h('button', { class: 'btn', onclick: dxf }, 'DXF'),
-        h('button', { class: 'btn', onclick: () => { st.selected.pop(); status.set('Usunięto ostatnie narzędzie z zestawu.', 'neutral'); draw(); } }, 'Usuń ostatni')),
+        B.isComposite(st.selected) ? h('button', { class: 'btn', title: 'Eksport DXF – tylko dla narzędzi złożonych (co najmniej dwa elementy)', onclick: dxf }, 'DXF') : null),
       h('hr', { style: { width: '100%', border: 0, borderTop: '1px solid #ccc', margin: '4px 0' } }));
     }
     list.append(h('div', { class: 'muted', style: { fontSize: '12px' } }, (st.selected.length ? 'Pasujące narzędzia: ' : 'Narzędzia: ') + items.length));
     if (!items.length && st.all.length) list.append(h('div', {}, 'Brak narzędzi spełniających kryteria.'));
     // wszystkie narzędzia: dorysowywane porcjami przy przewijaniu (miniatury są kosztowne)
-    st.stopFill = lazyFill(list, items, (t) => row(t, { onclick: () => select(t) }));
+    st.stopFill = lazyFill(list, items, (t) => row(t, { add: true }));
   }
 
   function select(t) {

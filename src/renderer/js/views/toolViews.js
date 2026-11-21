@@ -205,10 +205,11 @@ export function toolCard(description, params) {
     shown.length ? h('div', { class: 'tool-params' }, ...shown.flatMap(([l, v], i) => [i ? '   ' : '', h('span', { class: 'muted' }, l + ' '), h('b', {}, String(v))])) : null);
 }
 /** Wiersz narzędzia jak na Androidzie: kod (92 px), opis i parametry, opcjonalnie miniatura; ramka i poświata wg lokalizacji. */
-export function toolRow(t, { warning = false, onclick, oncontextmenu, mini = null, description = null } = {}) {
+export function toolRow(t, { warning = false, onclick, oncontextmenu, mini = null, description = null, actions = null } = {}) {
   return h('div', { class: 'tool-row' + (onclick ? ' click' : ''), onclick, oncontextmenu, style: frameStyle(t.location) },
     wearCodeCell(t.wear, t.location, warning, h('b', {}, t.productCode)),
-    toolCard(description ?? T.description(t), toolParams(t)), mini ? h('div', { class: 'tool-mini-col' }, mini) : null);
+    toolCard(description ?? T.description(t), toolParams(t)), mini ? h('div', { class: 'tool-mini-col' }, mini) : null,
+    actions ? h('div', { class: 'tool-act-col' }, actions) : null);
 }
 
 /** Lista rozwijana filtra jak przycisk Androida: aktywny filtr wypełniony; pusta wartość = „(wszystkie)”. */

@@ -282,7 +282,7 @@ export function mountPlan(el, ctx) {
     e.preventDefault(); e.stopPropagation();
     const x0 = e.clientX, y0 = e.clientY, base = what === 'col' ? baseColW(id) : baseRowH(id);
     const guide = h('div', { style: { position: 'fixed', zIndex: 9999, background: '#1a73e8', pointerEvents: 'none', ...(what === 'col' ? { top: body.getBoundingClientRect().top + 'px', bottom: 0, width: '2px', left: x0 + 'px' } : { left: body.getBoundingClientRect().left + 'px', right: 0, height: '2px', top: y0 + 'px' }) } });
-    const tip = h('div', { style: { position: 'fixed', zIndex: 9999, background: '#333', color: '#fff', font: '12px sans-serif', padding: '2px 6px', borderRadius: '3px', pointerEvents: 'none' } });
+    const tip = h('div', { style: { position: 'fixed', zIndex: 9999, background: '#333', color: '#fff', font: '12px sans-serif', padding: '2px 6px', borderRadius: '0', pointerEvents: 'none' } });
     document.body.append(guide, tip);
     let v = base;
     const move = (ev) => {

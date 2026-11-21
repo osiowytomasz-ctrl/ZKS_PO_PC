@@ -411,3 +411,14 @@ test('ToolBuilder: filtry z wielokrotnym wyborem wartości (jak autofiltr w Graf
   assert.deepEqual(B.optionCounts(tools, f({ mIn: new Set(['ISO050']) }), 'group'), [{ value: 'fre', count: 0 }, { value: 'opr', count: 2 }, { value: 'wie', count: 0 }]);
   assert.deepEqual(B.optionCounts(tools, f({}), 'diameter').map((o) => o.value), ['10', '12', '20']);   // liczby rosnąco
 });
+
+test('ToolBuilder: usunięcie narzędzia z zestawu usuwa je i wszystkie dodane po nim; DXF tylko dla narzędzi złożonych', async () => {
+  const B = await import('../src/renderer/js/logic/builder.js');
+  const set = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ productCode: 'T' + n }));
+  assert.deepEqual(B.removeFrom(set, 4).map((t) => t.productCode), ['T1', 'T2', 'T3', 'T4']);   // piąte usunięte → 5–10 znikają, 1–4 zostają
+  assert.deepEqual(B.removeFrom(set, 0), []);
+  assert.deepEqual(B.removeFrom(set, 9).length, 9);   // ostatnie – jak dawne „Usuń ostatni”
+  assert.equal(B.removeFrom(set, 10), set); assert.equal(B.removeFrom(set, -1), set);   // poza zakresem – bez zmian
+  assert.equal(set.length, 10, 'zestaw wejściowy nie jest zmieniany');
+  assert.equal(B.isComposite([]), false); assert.equal(B.isComposite(set.slice(0, 1)), false); assert.equal(B.isComposite(set.slice(0, 2)), true);
+});

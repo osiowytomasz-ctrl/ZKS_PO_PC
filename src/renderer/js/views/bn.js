@@ -15,6 +15,12 @@ export function mountBn(el, ctx) {
   const status = statusLine();
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   const list = h('div', { class: 'tool-list' });
+  let view = 'list';
+  try { view = localStorage.getItem('zks.bn.view') === 'tiles' ? 'tiles' : 'list'; } catch { /* domyślnie lista */ }
+  // widok: lista albo kafelki (najwyżej 4 w wierszu)
+  const viewBtn = h('button', { class: 'btn', title: 'Zmiana widoku: lista / kafelki', onclick: () => { view = view === 'tiles' ? 'list' : 'tiles'; try { localStorage.setItem('zks.bn.view', view); } catch { /* bez pamięci */ } paintView(); draw(); } });
+  const paintView = () => { viewBtn.textContent = view === 'tiles' ? '☰ Lista' : '▦ Kafelki'; list.className = view === 'tiles' ? 'tool-grid max4' : 'tool-list'; };
+  paintView();
   const refreshBtn = h('button', { class: 'btn', onclick: () => refresh() }, 'Odśwież BN');
 
   async function refresh() {
@@ -46,7 +52,7 @@ export function mountBn(el, ctx) {
     let n = 0;
     const more = () => {
       const end = Math.min(shown.length, n + 150);
-      for (; n < end; n++) list.append(rowItem(shown[n]));
+      for (; n < end; n++) list.append(view === 'tiles' ? tileItem(shown[n]) : rowItem(shown[n]));
       if (n < shown.length) { const b = h('button', { class: 'btn', onclick: () => { b.remove(); more(); } }, `Pokaż kolejne (${shown.length - n})`); list.append(b); }
     };
     more();
@@ -63,12 +69,30 @@ export function mountBn(el, ctx) {
     fullScreen(title, content);
   }
 
+  /** Zespół jako kafelek: kod na pasku zużycia, miniatura całego zespołu (kliknięcie – widok 2D), opis i parametry, przyciski i elementy zespołu. */
+  function tileItem(row) {
+    const t = row.firstTool || {};
+    const extra = B.bnExtraText(t);
+    const stack = st.index ? G.buildStack(B.bnTeamCodes(row).map((c) => st.index.stackTool(c)).filter(Boolean), true, false) : null;
+    const thumb = h('div', { class: 'tile-mini', style: { cursor: 'pointer' }, onclick: () => open('d2', row) },
+      h('div', { class: 'tool-mini', style: { width: '90px', height: '140px', cursor: 'pointer' } }, stack ? stackSvg(stack, { pad: 4, width: 90, height: 140 }) : h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak')));
+    return h('div', { class: 'tool-tile' },
+      h('div', { class: 'tile-head' }, wearCodeCell(t.wear, t.location, t.warning, h('b', {}, t.code), String(t.teamTotalLength || '').trim() ? h('div', { style: { fontWeight: 700 } }, 'L=' + t.teamTotalLength) : null,
+        extra ? h('div', { style: { fontSize: '10px', lineHeight: '12px' } }, extra) : null)),
+      h('div', { class: 'tile-body' }, thumb,
+        h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } },
+          toolCard([t.columnP, t.name, t.columnO].filter((x) => String(x ?? '').trim()).join(' | '), [['Φ', t.columnF], ['r/α', t.rAlpha], ['L', t.columnJ], ['Ms', t.columnM], ['Mk', t.columnN]]))),
+      h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', padding: '4px' } },
+        h('button', { class: 'btn small', onclick: () => open('parts', row) }, 'Części'), h('button', { class: 'btn small', onclick: () => open('d2', row) }, '2D'), h('button', { class: 'btn small', onclick: () => open('d3', row) }, '3D')),
+      (row.components || []).length ? h('div', { class: 'chip-row' }, ...row.components.map((c) => wearCodeCell(c.wear, c.location, c.warning, h('b', {}, c.code)))) : null);
+  }
+
   function rowItem(row) {
     const t = row.firstTool || {};
     const extra = B.bnExtraText(t);
     const stack = st.index ? G.buildStack(B.bnTeamCodes(row).map((c) => st.index.stackTool(c)).filter(Boolean), true, false) : null;
     const thumb = h('div', { class: 'tool-mini-col', style: { cursor: 'pointer' }, onclick: () => open('d2', row) },
-      stack ? h('div', { style: { width: '60px', height: '100%', minHeight: '70px' } }, stackSvg(stack, { pad: 4, width: 60, height: 90 })) : h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak'));
+      stack ? h('div', { class: 'tool-mini', style: { width: '60px', height: '90px' } }, stackSvg(stack, { pad: 4, width: 60, height: 90 })) : h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak'));
     return h('div', { class: 'tool-row', style: { flexDirection: 'column' } },
       h('div', { style: { display: 'flex', alignItems: 'stretch' } },
         wearCodeCell(t.wear, t.location, t.warning, h('b', {}, t.code), String(t.teamTotalLength || '').trim() ? h('div', { style: { fontWeight: 700 } }, 'L=' + t.teamTotalLength) : null,
@@ -82,7 +106,7 @@ export function mountBn(el, ctx) {
   }
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Assembled Tool Viewer'), h('span', { class: 'grow' }), refreshBtn), status, filtersBox, list);
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Assembled Tool Viewer'), h('span', { class: 'grow' }), viewBtn, refreshBtn), status, filtersBox, list);
   loadIndex();
   refresh();
 }

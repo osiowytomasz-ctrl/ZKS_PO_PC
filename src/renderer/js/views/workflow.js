@@ -48,7 +48,7 @@ export function domToRuns(root) {
 }
 
 function richEditor(initialRuns, { minHeight = 130 } = {}) {
-  const area = h('div', { contenteditable: 'true', spellcheck: 'true', style: { minHeight: minHeight + 'px', border: '1px solid #888', borderRadius: '4px', padding: '6px 8px', background: '#fff', overflow: 'auto', whiteSpace: 'pre-wrap', maxHeight: '45vh' } });
+  const area = h('div', { contenteditable: 'true', spellcheck: 'true', style: { minHeight: minHeight + 'px', border: '1px solid #888', borderRadius: '0', padding: '6px 8px', background: '#fff', overflow: 'auto', whiteSpace: 'pre-wrap', maxHeight: '45vh' } });
   area.append(runsToNodes(initialRuns));
   area.addEventListener('paste', (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData('text/plain'); document.execCommand('insertText', false, t); });
   const cmd = (name, value) => { area.focus(); document.execCommand('styleWithCSS', false, true); document.execCommand(name, false, value); };
@@ -90,7 +90,7 @@ export function createWorkflow(appCtx) {
     fmt('B', 'Pogrubienie (Ctrl+B)', 'bold', { fontWeight: 700 }), fmt('I', 'Kursywa (Ctrl+I)', 'italic', { fontStyle: 'italic' }),
     fmt('U', 'Podkreślenie (Ctrl+U)', 'underline', { textDecoration: 'underline' }), fmt('S', 'Przekreślenie', 'strikeThrough', { textDecoration: 'line-through' }),
     h('span', { class: 'muted' }, 'Kolor:'),
-    ...PALETTE.map((c) => h('button', { title: c === '#000000' ? 'Czarny (domyślny)' : c, style: { width: '20px', height: '20px', border: '1px solid #888', background: c, padding: 0, borderRadius: '3px', cursor: 'pointer' }, onmousedown: (e) => { e.preventDefault(); exec('foreColor', c); } })),
+    ...PALETTE.map((c) => h('button', { title: c === '#000000' ? 'Czarny (domyślny)' : c, style: { width: '20px', height: '20px', border: '1px solid #888', background: c, padding: 0, borderRadius: '0', cursor: 'pointer' }, onmousedown: (e) => { e.preventDefault(); exec('foreColor', c); } })),
     h('button', { class: 'btn small', title: 'Usuń formatowanie z zaznaczenia', onmousedown: (e) => { e.preventDefault(); exec('removeFormat'); exec('foreColor', '#000000'); } }, 'Wyczyść format'),
     h('span', { class: 'muted' }, 'Enter: zapisz w komórce · Alt+Enter: nowa linia · Tab: następna komórka · Esc: anuluj'));
   const bar = h('div', { class: 'row', style: { minHeight: '32px', margin: '4px 0' } }, hint, toolbar);

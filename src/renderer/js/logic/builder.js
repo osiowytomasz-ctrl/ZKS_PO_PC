@@ -47,6 +47,13 @@ export function options(tools, filters, field) {
   const list = [...seen.values()];
   return ['diameter', 'length', 'rAlpha'].includes(field) ? list.sort((a, b) => num(a) - num(b)) : list.sort(naturalCompare);
 }
+/**
+ * Usunięcie narzędzia o numerze [i] (od 0) z zestawu razem ze wszystkimi dodanymi po nim (niższe poziomy): z 10 narzędzi usunięcie piątego (i = 4)
+ * zostawia 1–4. Poza zakresem – zestaw bez zmian.
+ */
+export const removeFrom = (selected, i) => (Number.isInteger(i) && i >= 0 && i < selected.length ? selected.slice(0, i) : selected);
+/** Narzędzie złożone (co najmniej dwa elementy) – tylko takie można wyeksportować do DXF. */
+export const isComposite = (selected) => (selected || []).length > 1;
 export const sorted = (tools) => [...tools].sort((a, b) => naturalCompare(a.productCode, b.productCode));
 
 /** Kolejne narzędzie musi pasować do poprzedniego: jego Mk (N) równa się Ms (M) ostatnio wybranego. */

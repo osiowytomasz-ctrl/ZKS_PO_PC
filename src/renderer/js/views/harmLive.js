@@ -344,7 +344,7 @@ export function mountHarmLive(el, appCtx) {
       if (!d.can.ok) { toast(`Nie można przesunąć ${d.lp}: ${d.can.reason}`); dragStop(); return; }
       d.moved = true; document.body.style.cursor = 'grabbing';
       d.cyc = dragCycles(d.ops);
-      d.tip = h('div', { style: { position: 'fixed', zIndex: 9999, pointerEvents: 'none', padding: '3px 7px', borderRadius: '4px', font: '12px sans-serif', whiteSpace: 'pre', boxShadow: '0 1px 4px rgba(0,0,0,.35)' } });
+      d.tip = h('div', { style: { position: 'fixed', zIndex: 9999, pointerEvents: 'none', padding: '3px 7px', borderRadius: '0', font: '12px sans-serif', whiteSpace: 'pre', boxShadow: '0 1px 4px rgba(0,0,0,.35)' } });
       document.body.append(d.tip);
     }
     d.T = d.startMs + dx / st.geom.HOUR * 3600000;
@@ -386,7 +386,7 @@ export function mountHarmLive(el, appCtx) {
       if (r.komisRow || it.noBar || !isLocked(st.m.opsByLp[r.id])) continue;
       const left = Math.max(0, it.startHours * HOUR - sz - 3);
       g.dyn.append(h('div', { title: 'Ręczny start i ręczny koniec – operacja stoi w miejscu', style: { position: 'absolute', zIndex: 6, pointerEvents: 'none', left: left + 'px', top: i * ROW + (ROW - sz) / 2 + 'px', width: sz + 'px', height: sz + 'px', borderRadius: '50%', background: '#d00000', boxShadow: '0 0 0 1.5px #fff, 0 0 3px rgba(0,0,0,.6)' } },
-        h('div', { style: { position: 'absolute', left: '17%', right: '17%', top: '40%', height: '20%', background: '#fff', borderRadius: '1px' } })));
+        h('div', { style: { position: 'absolute', left: '17%', right: '17%', top: '40%', height: '20%', background: '#fff', borderRadius: '0' } })));
     }
     const ok = d.plan && d.plan.ok, col = ok ? '#1a73e8' : '#d00000';
     if (d.anchor) {   // w pionie: linia wstawienia nad (przed) albo pod (za) wierszem wskazanej operacji i duch paska w tym miejscu
@@ -704,7 +704,7 @@ export function mountHarmLive(el, appCtx) {
     const order = Object.entries((st.days || {})[day.iso] || {}).map(([slot, code]) => ({ slot, code }));   // miejsca w kolejności kolumn graf_norm
     const work = slots.reduce((t, x) => t + x.hours, 0);
     const tasks = dayTasks(st.data.rows, st.data.result, day.start, day.end);
-    const chip = (text, bg, color, extra = {}) => h('span', { style: { display: 'inline-block', padding: '1px 6px', margin: '1px 3px 1px 0', borderRadius: '3px', border: '1px solid rgba(0,0,0,.25)', background: bg || '#fff', color: color || '#000', fontSize: '12px', whiteSpace: 'nowrap', ...extra } }, text);
+    const chip = (text, bg, color, extra = {}) => h('span', { style: { display: 'inline-block', padding: '1px 6px', margin: '1px 3px 1px 0', borderRadius: '0', border: '1px solid rgba(0,0,0,.25)', background: bg || '#fff', color: color || '#000', fontSize: '12px', whiteSpace: 'nowrap', ...extra } }, text);
     const td = (content, style = {}, attrs = {}) => h('td', { ...attrs, style: { border: '1px solid #bbb', padding: '2px 5px', verticalAlign: 'middle', fontSize: '12px', ...style } }, content);
     const th = (t) => h('th', { style: { border: '1px solid #999', padding: '3px 5px', background: '#e4e4e4', fontSize: '12px', textAlign: 'left' } }, t);
     const hhmm = (v) => { const d = new Date(v); return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`; };
@@ -1256,7 +1256,7 @@ export function mountHarmLive(el, appCtx) {
     const close = () => { if (!shiftPopup) return; shiftPopup.remove(); shiftPopup = null; document.removeEventListener('mousedown', outside, true); };
     const outside = (e) => { if (shiftPopup && !shiftPopup.contains(e.target) && e.target !== shiftInput && !e.target.closest('.overlay')) close(); };
     const r = shiftInput.getBoundingClientRect();
-    shiftPopup = h('div', { style: { position: 'fixed', left: Math.max(8, r.left) + 'px', top: r.bottom + 4 + 'px', zIndex: 60, background: '#fff', border: '1px solid #999', boxShadow: '0 4px 14px rgba(0,0,0,.25)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '6px' } },
+    shiftPopup = h('div', { style: { position: 'fixed', left: Math.max(8, r.left) + 'px', top: r.bottom + 4 + 'px', zIndex: 60, background: '#fff', border: '1px solid #999', boxShadow: '0 4px 14px rgba(0,0,0,.25)', padding: '10px', borderRadius: '0', display: 'flex', flexDirection: 'column', gap: '6px' } },
       h('b', {}, 'Przesunięcie harmonogramu'),
       h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, h('span', { style: { fontSize: '12px' } }, '−365'), range, h('span', { style: { fontSize: '12px' } }, '+365')),
       h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, 'Dni: ', days, h('span', { style: { marginLeft: '10px' } }, 'albo data: '), date, calendarButton(date, { title: 'Początek osi – kalendarz', holidays: holidayMap(st.m && st.m.cfg && st.m.cfg.holidays) })),
@@ -1287,7 +1287,7 @@ export function mountHarmLive(el, appCtx) {
   const refreshBtn = iconBtn('refresh', 'Odśwież', () => (st.sim ? simReset() : load()));
   // ---------- symulacja: przesuwanie i przeliczanie na kopii danych z bazy, bez zapisu ----------
   const simBtn = h('button', { class: 'btn small', style: { height: '30px', fontWeight: 700 }, title: 'Symulacja: przesuwaj i zmieniaj operacje na kopii danych z bazy – terminy przeliczają się, nic nie zapisuje się w bazie; wynik można udostępnić', onclick: () => (st.sim ? simStop() : simStart()) }, 'Symulacja');
-  const simBar = h('div', { style: { display: 'none', background: '#fff3cd', border: '2px solid #e6a700', borderRadius: '4px', padding: '4px 8px', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+  const simBar = h('div', { style: { display: 'none', background: '#fff3cd', border: '2px solid #e6a700', borderRadius: '0', padding: '4px 8px', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
   function syncSim() {
     simBtn.style.display = baseAcc().sim ? 'inline-flex' : 'none';
     simBtn.classList.toggle('primary', !!st.sim); simBtn.textContent = st.sim ? 'Zakończ symulację' : 'Symulacja';
@@ -1342,7 +1342,7 @@ export function mountHarmLive(el, appCtx) {
     levelTag.textContent = a.label; levelTag.title = `Twój poziom dostępu do Harmonogramu: ${a.label} – ${LEVEL_INFO[a.level]}. Ustawia go administrator w zakładce Uzytkownicy (kolumna „Harmonogram”).`;
   };
   const LEVEL_INFO = { god: 'przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki, stanowiska, komisy, święta', master: 'przeglądanie, dodawanie, edycja, symulacja', clerik: 'przeglądanie, dodawanie, symulacja (przesuwanie i przeliczanie bez zapisu, udostępnianie)', tourist: 'przeglądanie', none: 'brak dostępu' };
-  const levelTag = h('span', { class: 'muted', style: { fontSize: '11px', fontWeight: 700, padding: '0 4px', border: '1px solid #bbb', borderRadius: '3px', lineHeight: '18px' } });
+  const levelTag = h('span', { class: 'muted', style: { fontSize: '11px', fontWeight: 700, padding: '0 4px', border: '1px solid #bbb', borderRadius: '0', lineHeight: '18px' } });
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '4px';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '4px', alignItems: 'center' } },
     ...levelBtns.values(), komisBtn, shiftInput, intervalSel,

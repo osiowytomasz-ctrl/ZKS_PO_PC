@@ -136,7 +136,7 @@ export function mountContours(el, ctx) {
       return h('div', { class: 'click', style: { padding: '3px 6px', borderBottom: '1px solid #eee', background: on ? '#d3e3fd' : '', cursor: 'pointer' }, onclick: () => pick(t) },
         h('b', {}, t.productCode), ' ', tOf(t) ? h('span', { title: 'Jest kontur w kolumnie T', style: { fontSize: '10px', color: '#666' } }, 'T') : null, ' ',
         vOf(t) ? h('span', { title: 'Jest kontur w kolumnie V', style: { fontSize: '10px', color: '#2e7d32', fontWeight: 700 } }, 'V') : null,
-        okOf(t) ? h('span', { title: 'Kontur potwierdzony (PSWT, kolumna BH): ' + okOf(t), style: { fontSize: '11px', color: '#fff', background: '#2e7d32', borderRadius: '3px', padding: '0 3px', marginLeft: '3px' } }, '✓') : null,
+        okOf(t) ? h('span', { title: 'Kontur potwierdzony (PSWT, kolumna BH): ' + okOf(t), style: { fontSize: '11px', color: '#fff', background: '#2e7d32', borderRadius: '0', padding: '0 3px', marginLeft: '3px' } }, '✓') : null,
         h('div', { class: 'muted', style: { fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, description(t)));
     }, 150);
   }
@@ -207,7 +207,7 @@ export function mountContours(el, ctx) {
   /** Potwierdzenie poprawności konturu: zapis w PSWT, kolumna BH („OK data kto”); MASTER / GOD. */
   function confirmBox2(t) {
     const ok = okOf(t), inPswt = !!st.params[normCode(t.productCode)];
-    const box = h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', padding: '4px 6px', borderRadius: '6px', border: '1px solid ' + (ok ? '#2e7d32' : '#bbb'), background: ok ? '#e8f5e9' : '#fafafa' } },
+    const box = h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', padding: '4px 6px', borderRadius: '0', border: '1px solid ' + (ok ? '#2e7d32' : '#bbb'), background: ok ? '#e8f5e9' : '#fafafa' } },
       h('b', { style: { color: ok ? '#2e7d32' : '#666' } }, ok ? '✓ Kontur potwierdzony' : 'Kontur niepotwierdzony'), ok ? h('span', { class: 'muted', style: { fontSize: '12px' } }, ok) : null);
     const who = (ctx.user && (ctx.user.name || ctx.user.email)) || '';
     const save = async (value) => {
@@ -238,7 +238,7 @@ export function mountContours(el, ctx) {
   /** Parametry D:N z PSWT – do wglądu; zmiana tylko do sprawdzenia konturu (nie zapisuje się w arkuszu). */
   function paramsPanel(t) {
     const base = st.params[normCode(t.productCode)];
-    const box = h('details', { open: true, style: { border: '1px solid #ccc', borderRadius: '6px', padding: '4px 6px', background: '#fafafa' } });
+    const box = h('details', { open: true, style: { border: '1px solid #ccc', borderRadius: '0', padding: '4px 6px', background: '#fafafa' } });
     const sheetInfo = h('div', { style: { fontSize: '11px' } });
     const refresh = () => {
       const p = paramsOf(t) || {};
@@ -304,7 +304,7 @@ export function mountContours(el, ctx) {
       status.set(`Położenie konturu z płytkami: X ${nx.dx} mm, Z ${nx.dz} mm, obrót ${nx.ang}° (względem położenia wyjściowego).`, 'neutral');
       drawEditor();
     };
-    return h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap', fontSize: '12px', background: '#f4f6f8', padding: '4px', borderRadius: '4px' } },
+    return h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap', fontSize: '12px', background: '#f4f6f8', padding: '4px', borderRadius: '0' } },
       h('b', {}, 'Cały kontur z płytkami:'), 'X', ix, 'Z', iz, 'mm · obrót', ia, '°',
       h('button', { class: 'btn small', onclick: () => apply({ dx: n(ix), dz: n(iz), ang: n(ia) }) }, 'Ustaw'),
       h('button', { class: 'btn small', onclick: () => apply({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'));
@@ -539,7 +539,7 @@ export function mountContours(el, ctx) {
     preview.style.position = 'relative';
     const svgEl = preview.querySelector('svg');
     const at = (sel) => { const el = preview.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(), pr = preview.getBoundingClientRect(); return { x: r.left - pr.left + r.width / 2, y: r.top - pr.top + r.height / 2 }; };
-    const box = (x, y, ...kids) => preview.append(h('div', { style: { position: 'absolute', left: Math.min(x + 12, preview.clientWidth - 250) + 'px', top: Math.max(4, y - 10) + 'px', zIndex: 3, background: '#fff', border: '1px solid #1565c0', borderRadius: '6px', boxShadow: '0 2px 8px rgba(0,0,0,.25)', padding: '6px 8px', fontSize: '12px', minWidth: '210px' },
+    const box = (x, y, ...kids) => preview.append(h('div', { style: { position: 'absolute', left: Math.min(x + 12, preview.clientWidth - 250) + 'px', top: Math.max(4, y - 10) + 'px', zIndex: 3, background: '#fff', border: '1px solid #1565c0', borderRadius: '0', boxShadow: '0 2px 8px rgba(0,0,0,.25)', padding: '6px 8px', fontSize: '12px', minWidth: '210px' },
       onpointerdown: (e) => e.stopPropagation() }, ...kids));
     const num = (v, on) => h('input', { type: 'text', value: String(v).replace('.', ','), style: { width: '70px', padding: '1px 4px' }, onchange: (e) => on(Number(String(e.target.value).replace(',', '.'))) });
     const rowI = (label, inp, unit = 'mm') => h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' } }, label), inp, h('span', { class: 'muted' }, unit));
