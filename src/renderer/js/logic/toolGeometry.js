@@ -351,7 +351,9 @@ export function toolIndex(catalog, overrides = null) {
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
       const catalog = tre ? [] : ((d && d.insertContours) || []).filter((i) => String(i.contour ?? '').trim());
       const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || idx.insertContour(code) || '';
-      let plates = resolvePlates(opts.layout === false ? null : plateSetup(t), catalog.map((i) => i.code), isCentralTool(t));
+      // tylko płytki przypisane do narzędzia (kolumna części skrawających) – własny układ nie może dodać cudzych płytek
+      const own = (list) => { const l = Array.isArray(list) ? list.filter((p) => catalog.some((i) => normCode(i.code) === normCode(p.code))) : null; return l && l.length ? l : null; };
+      let plates = resolvePlates(opts.layout === false ? null : own(plateSetup(t)), catalog.map((i) => i.code), isCentralTool(t));
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code) })).filter((p) => p.path);
       const contour = parseContour(d && d.columnAY);

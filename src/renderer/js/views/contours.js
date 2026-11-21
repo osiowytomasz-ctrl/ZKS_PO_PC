@@ -519,9 +519,11 @@ export function mountContours(el, ctx) {
   const round3 = (v) => Math.round(v * 1000) / 1000;
   // układ płytek narzędzia (rodzaj, wiele płytek, położenie) zapisany w ustawieniach płytek narzędzia (toolViews.insertSetup); bez własnego – płytki katalogu
   const plateCodes = () => { const det = (st.tool && st.index && st.index.details(st.tool.productCode)) || {}; return (det.insertContours || []).filter((x) => String(x.contour ?? '').trim()).map((x) => x.code); };
-  const layoutNow = () => resolvePlates(insertSetup(st.tool).plates, plateCodes(), insertSetup(st.tool).central);
+  /** Własny układ płytek ograniczony do płytek przypisanych do narzędzia (spójnie ze stackTool). */
+  const ownPlates = (t) => { const codes = plateCodes().map((c) => String(c).trim().toLowerCase()), l = (insertSetup(t).plates || []).filter((p) => codes.includes(String(p.code).trim().toLowerCase())); return l.length ? l : null; };
+  const layoutNow = () => resolvePlates(ownPlates(st.tool), plateCodes(), insertSetup(st.tool).central);
   const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang } : { dx: 0, dz: 0, ang: 0 }; };
-  const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(insertSetup(st.tool).plates, plateCodes(), j, patch) });
+  const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(ownPlates(st.tool), plateCodes(), j, patch) });
   /** Płytki narzędzia w układzie konturu (0,1 mm): auto – położenie z algorytmu zestawu (bez korekt); right – z korektą (dX, dZ, obrót) i rodzajem płytki; left – odbicie (tylko obwodowe). */
   function insertsOf(t) {
     if (!st.index) return [];
@@ -540,8 +542,8 @@ export function mountContours(el, ctx) {
   /** Okno „Płytki na narzędziu”: rodzaj płytki (centralna / obwodowa), wiele płytek, położenie. */
   function openLayout() {
     const t = st.tool; if (!t || !st.index) return;
-    const set = insertSetup(t), codes = plateCodes(), cur = resolvePlates(set.plates, codes, set.central), auto = resolvePlates(null, codes, set.central);
-    const allCodes = [...new Set([...codes, ...st.index.cuttingParts()])];
+    const set = insertSetup(t), codes = plateCodes(), cur = resolvePlates(ownPlates(t), codes, set.central), auto = resolvePlates(null, codes, set.central);
+    const allCodes = [...new Set(codes)];   // do wyboru tylko płytki przypisane do tego narzędzia
     openPlateLayout({ tool: t.productCode, plates: cur, autoPlates: auto, custom: !!set.plates, allCodes, toolCentral: set.central,
       onApply: (list, isAuto) => { saveInsertSetup(t, { plates: isAuto ? null : list }); pv.insSel = null; drawPreview(); status.set('Zapisano układ płytek narzędzia (na tym komputerze).', 'neutral'); },
       onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); } });

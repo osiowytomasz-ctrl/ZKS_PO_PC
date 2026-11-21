@@ -107,3 +107,14 @@ test('wiertło płytkowe Komet (płytki nie są centralne): wierzchołek płytki
     assert.ok(b.maxY > 0);
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('narzędzie pokazuje tylko płytki do niego przypisane – własny układ z cudzą płytką jest ignorowany', () => {
+  const t = { productCode: 'W2', columnD: 'wie', columnE: 'ply', columnP: 'AMEC', columnF: '10', columnJ: '50', columnG: '' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { W2: { columnAY: '-50_-650;50_-650;50_500;-50_500', partsCutting: ['A'], insertContours: [{ code: 'A', contour: 'M 0 0 L 10 0 L 10 3 Z' }] } } }, null);
+  try {
+    G.setPlateSetupProvider(() => [{ code: 'OBCA', mode: 'edge' }, { code: 'A', mode: 'edge' }]);
+    assert.deepEqual(idx.stackTool(t).plates.map((p) => p.code), ['A'], 'cudza płytka usunięta z układu');
+    G.setPlateSetupProvider(() => [{ code: 'OBCA', mode: 'edge' }]);
+    assert.deepEqual(idx.stackTool(t).plates.map((p) => p.code), ['A'], 'układ tylko z cudzą płytką → płytki katalogu narzędzia');
+  } finally { G.setPlateSetupProvider(null); }
+});
