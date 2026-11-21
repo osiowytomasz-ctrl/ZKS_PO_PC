@@ -128,8 +128,8 @@ function radiusAtY(contour, y) {
 export function fitDrawingFor(M, contour) {
   const L2 = freL2(M), d = freD(M), b = bounds(contour);
   if (!L2 || !d || !b) return null;
-  // układ współrzędnych na czole otworu pod trzpień (dno otworu): otwór od Z = −L2 (dolna płaszczyzna frezu) do Z = 0, kamienie – H nad dolną płaszczyzną
-  const r = d * 5, yb = -L2 * 10, yt = 0, ys = yb + freKeyDepth(M) * 10, rad = radiusAtY(contour, ys) || b.maxX;
+  // wszystko względem dolnej płaszczyzny frezu (konturu): otwór L2 w górę, kamienie H nad nią; kontur w indeksie jest przesunięty tak, że dolna płaszczyzna = −L2, więc dno otworu = Z 0
+  const r = d * 5, yb = b.minY, yt = yb + L2 * 10, ys = yb + freKeyDepth(M) * 10, rad = radiusAtY(contour, ys) || b.maxX;
   return { hidden: [[pt(-r, yb), pt(-r, yt), pt(r, yt), pt(r, yb)], [pt(-rad, ys), pt(rad, ys)]], cavity: { bottom: true, ri: r, yTop: yt } };
 }
 /** Rysunek wiertła rurowego (płytki i linie niewidoczne, 0,1 mm) dla konturu: czubek z konturu, gdy odbiega od długości J narzędzia. null – brak. */
@@ -409,10 +409,26 @@ export function toolIndex(catalog, overrides = null) {
   for (const [k, d] of Object.entries((catalog && catalog.detailsMap) || {})) details.set(normCode(k), d);
   const tool = (code) => tools.get(normCode(code)) || null;
   // zatwierdzony kontur (PSWT BC) zastępuje kontur z kolumny T
-  const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); const rg = overrides && overrides.regions && overrides.regions.get(k); const genC = !!(overrides && overrides.generated && overrides.generated.has(k));
+  const det0 = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); const rg = overrides && overrides.regions && overrides.regions.get(k); const genC = !!(overrides && overrides.generated && overrides.generated.has(k));
     const bl = overrides && overrides.blade && overrides.blade.get(k), rg0 = rg || (bl ? bladeRegions(o || (d && d.columnAY), bl) : null);   // ostrze narzędzia monolitycznego wg długości roboczej (żółty pas w podglądach)
     if (!o) return rg0 && d ? { ...d, regions: rg0 } : d;
     return { ...(d || {}), columnAY: o, confirmedContour: !genC, generatedContour: genC, originalAY: d ? d.columnAY : '', regions: rg0 || null }; };
+  /**
+   * Frez z mocowaniem FRExxx: kontur (z dowolnego źródła – T, V, BC, generator) jest przesunięty w osi Z tak, aby jego najniższy punkt (dolna płaszczyzna) leżał
+   * na Z = −L2; wtedy Z = 0 to dno otworu pod trzpień (czubek trzpienia), a gniazdo, kamienie i osadzenie na oprawce są zgodne. Przesunięcie jest idempotentne.
+   */
+  const detMemo = new Map();
+  const det = (code) => {
+    const r = det0(code), t = tools.get(normCode(code));
+    if (!r || !t || !isFreFit(t) || !String(r.columnAY ?? '').trim()) return r;
+    const l2 = freL2(t.columnM), key = normCode(code), hit = detMemo.get(key);
+    if (hit && hit.src === r.columnAY && hit.l2 === l2 && hit.regions === r.regions) return { ...r, columnAY: hit.ay, regions: hit.rg };
+    const pts = parseContour(r.columnAY), minY = pts.length ? Math.min(...pts.map((p) => p.y)) : 0, dy = -l2 * 10 - minY;
+    const ay = Math.abs(dy) < 1e-6 ? r.columnAY : pts.map((p) => `${Math.round(p.x * 1000) / 1000}_${Math.round((p.y + dy) * 1000) / 1000}`).join(';');
+    const rg = r.regions && Math.abs(dy) >= 1e-6 ? r.regions.map((g) => ({ ...g, z1: Math.round((g.z1 + dy / 10) * 1000) / 1000, z2: Math.round((g.z2 + dy / 10) * 1000) / 1000 })) : r.regions;
+    detMemo.set(key, { src: r.columnAY, l2, regions: r.regions, ay, rg });
+    return { ...r, columnAY: ay, regions: rg };
+  };
   let usage = null;
   const idx = {
     tool, details: det,

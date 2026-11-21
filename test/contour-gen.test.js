@@ -285,9 +285,16 @@ test('frezy FRExxx: wymiary trzpienia poznane z oprawek PSWT (L – średnica, K
     // gniazdo: układ współrzędnych na dnie otworu (Z = 0), otwór od −L2 do 0; kamienie – wysokość H z oprawki
     contourOverrides({ h1: { D: 'opr', E: 'stż', N: 'FRE022', L: '22', K: '19', H: '5' } }, {}, { gen: false });
     const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
-    const flat = [{ x: -300, y: 500 }, { x: 300, y: 500 }, { x: 300, y: 1000 }, { x: -300, y: 1000 }];   // kontur NIE przesunięty o L2 – gniazdo i tak od Z = −L2 do 0
+    const flat = [{ x: -300, y: -190 }, { x: 300, y: -190 }, { x: 300, y: 300 }, { x: -300, y: 300 }];   // dolna płaszczyzna na −L2
     const fit = G2.fitDrawingFor('FRE022', flat);
-    assert.deepEqual(fit.hidden[0].map((p) => p.y), [-190, 0, 0, -190]); assert.equal(fit.hidden[1][0].y, -140, 'kamienie H = 5 mm nad dolną płaszczyzną (Z = −L2 + H)');
+    assert.deepEqual(fit.hidden[0].map((p) => p.y), [-190, 0, 0, -190]); assert.equal(fit.hidden[1][0].y, -140, 'kamienie H = 5 mm nad dolną płaszczyzną');
+    // kontur z dowolnego źródła (T – dolna płaszczyzna na 0, V / BC z innym położeniem) jest w indeksie przesunięty tak, aby dolna płaszczyzna = −L2 (idempotentnie)
+    const tl = { productCode: 'FR1', columnD: 'fre', columnE: 'tar', columnP: 'X', columnF: '80', columnJ: '50', columnM: 'FRE022', columnG: '' };
+    for (const src of ['-300_0;300_0;300_500;-300_500', '-300_-190;300_-190;300_310;-300_310', '-300_-350;300_-350;300_150;-300_150']) {
+      const ix = G2.toolIndex({ tools: [tl], detailsMap: { FR1: { columnAY: src, insertContours: [] } } }, null), pts = G2.parseContour(ix.details('FR1').columnAY);
+      assert.equal(Math.min(...pts.map((p) => p.y)), -190, src);
+      const f2 = G2.fitDrawingFor('FRE022', pts); assert.deepEqual([f2.hidden[0][1].y, f2.hidden[0][0].y], [0, -190], 'dno otworu na Z = 0, dolna płaszczyzna na −L2');
+    }
     contourOverrides({ h1: { D: 'opr', E: 'stż', N: 'FRE022', L: '22', K: '19' }, h2: { D: 'opr', E: 'stż', N: 'FRE027', L: '27', K: '23' } }, {}, { gen: false });
     // fre / glo bez reguły korpusu: nie rysuje się samego mocowania z arkusza (zostaje kolumna T)
     assert.equal(GEN.fullContour({ D: 'fre', E: 'glo', F: '50', J: '48', K: '48', M: 'FRE022' }, { FRE022: { left: '0_-270;-200_-270;-200_0', right: '' } }), null);
@@ -308,7 +315,7 @@ test('frez na trzpieniu FRExxx osadza się dolną płaszczyzną na czole oprawki
   // 3D: to samo w bryle (dolna płaszczyzna frezu = Z czoła oprawki)
   const idx = G2.toolIndex(cat('-300_-300;300_-300;300_200;-300_200'), null), stt = [idx.stackTool(cutter), idx.stackTool(holder)];
   const mesh = G2.buildMesh(stt.map((q) => q.contour), 36, [], stt.map((q) => G2.fitSeat(q)));
-  const zFace = mesh.offsets[1] + 1000, zBottom = mesh.offsets[0] + -300;
+  const zFace = mesh.offsets[1] + 1000, zBottom = mesh.offsets[0] + Math.min(...stt[0].contour.map((p) => p.y));
   assert.ok(Math.abs(zFace - zBottom) < 1e-9);
   assert.equal(G2.fitSeat(idx.stackTool(holder)), 0);
 });
