@@ -113,7 +113,7 @@ export function toolView3d(index, tools) {
   const stts = tools.map((t) => index.stackTool(t));
   const draws = stts.map((s) => (s && s.trepan ? G.trepanDrawingFor(s.diameter, s.length, s.contour) : null));   // wiertła rurowe: wnęka i płytki
   const holes = stts.map((s) => (s && s.holeN ? G.holeDrawingFor(s.holeN, s.contour, s.startM) : s && s.fitM ? G.fitDrawingFor(s.fitM, s.contour) : null));   // oprawki gwintujące: otwór pod chwyt gwintownika
-  const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])), 36, draws.map((d, i) => (d ? d.cavity : holes[i] ? holes[i].cavity : null)));
+  const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])), 36, draws.map((d, i) => (d ? d.cavity : holes[i] ? holes[i].cavity : null)), stts.map((s) => G.fitSeat(s)));
   if (mesh) {
     mesh.nut = stts.map((s) => (s && s.holeN ? G.nutDrawingFor(s.holeN, s.contour) : null));   // nakrętka ER – ciemniejsza część bryły
     mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)

@@ -293,3 +293,22 @@ test('frezy FRExxx: wymiary trzpienia poznane z oprawek PSWT (L – średnica, K
     assert.equal(GEN.fullContour({ D: 'fre', E: 'glo', F: '50', J: '48', K: '48', M: 'FRE022' }, { FRE022: { left: '0_-270;-200_-270;-200_0', right: '' } }), null);
   } finally { contourOverrides({}, {}, { gen: false }); }
 });
+
+test('frez na trzpieniu FRExxx osadza się dolną płaszczyzną na czole oprawki – także gdy kontur frezu sięga głębiej (2D i 3D)', async () => {
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  const cutter = { productCode: 'FR1', columnD: 'fre', columnE: 'tar', columnP: 'Iscar', columnF: '80', columnJ: '50', columnM: 'FRE032', columnG: '' };
+  const holder = { productCode: 'OP1', columnD: 'opr', columnE: 'stż', columnP: 'X', columnF: '50', columnJ: '100', columnM: 'ISO050', columnN: 'FRE032', columnG: '' };
+  // oprawka: czoło (kołnierz) na Z = 1000, trzpień do 1240 (L2 = 24 mm); frez: dolna płaszczyzna na −300 (głębiej niż L2 – np. kontur z arkusza z mocowaniem), góra na 200
+  const cat = (cut) => ({ tools: [cutter, holder], detailsMap: { FR1: { columnAY: cut, insertContours: [] }, OP1: { columnAY: '-300_0;300_0;300_1000;150_1000;150_1240;-150_1240;-150_1000;-300_1000', insertContours: [] } } });
+  const lay = (cut) => { const idx = G2.toolIndex(cat(cut), null); return G2.buildStack([idx.stackTool(cutter), idx.stackTool(holder)], true, false).layers; };
+  for (const cut of ['-300_-300;300_-300;300_200;-300_200', '-300_-240;300_-240;300_200;-300_200', '-300_0;300_0;300_200;-300_200']) {
+    const [c, h] = lay(cut), bottomC = Math.max(...c.outline.map((p) => p.y)), faceH = Math.min(...h.outline.map((p) => p.y)) + 240;   // czoło oprawki = koniec trzpienia + 24 mm w dół
+    assert.ok(Math.abs(bottomC - faceH) < 1e-9, 'dolna płaszczyzna frezu na czole oprawki: ' + cut);
+  }
+  // 3D: to samo w bryle (dolna płaszczyzna frezu = Z czoła oprawki)
+  const idx = G2.toolIndex(cat('-300_-300;300_-300;300_200;-300_200'), null), stt = [idx.stackTool(cutter), idx.stackTool(holder)];
+  const mesh = G2.buildMesh(stt.map((q) => q.contour), 36, [], stt.map((q) => G2.fitSeat(q)));
+  const zFace = mesh.offsets[1] + 1000, zBottom = mesh.offsets[0] + -300;
+  assert.ok(Math.abs(zFace - zBottom) < 1e-9);
+  assert.equal(G2.fitSeat(idx.stackTool(holder)), 0);
+});

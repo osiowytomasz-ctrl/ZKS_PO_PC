@@ -228,7 +228,8 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       const shown = single && cs !== 1 ? polys.map((q) => q.map((p) => pt(p.x * cs, p.y))) : polys;
       placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
     }
-    offsetY += b.r;
+    // frez nasadzany na trzpień FRExxx osadza się dolną płaszczyzną na czole oprawki (trzpień wchodzi w otwór na głębokość L2): kolejne narzędzie (oprawka) leży o L2 wyżej niż koniec trzpienia, niezależnie od tego, jak głęboko sięga kontur frezu
+    offsetY += tool.fitM && index < tools.length - 1 ? (b.maxY - b.minY) - freL2(tool.fitM) * 10 : b.r;
     if (index === tools.length - 1) offsetY += b.m;
     const fitD = tool.fitM ? fitDrawingFor(tool.fitM, tool.contour) : null, fitH = fitD ? fitD.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null;   // gniazdo frezu nasadzanego (FRExxx)
     layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
@@ -632,11 +633,16 @@ export function outlinePath(points, map, axis = 0) {
   return d;
 }
 /** Siatka brył obrotowych zestawu (kolejność: pierwsze = tnące). null, gdy brak konturów. */
-export function buildMesh(contours, segments = 36, cavities = []) {
+/** Głębokość osadzenia frezu na trzpieniu (mm, L2 z mocowania FRExxx) dla narzędzia zestawu; 0 – brak. */
+export const fitSeat = (stt) => (stt && stt.fitM ? freL2(stt.fitM) : 0);
+/**
+ * Siatka bryły obrotowej zestawu. [seats] – dla frezów z mocowaniem FRExxx głębokość osadzenia L2 (mm): dolna płaszczyzna frezu leży na czole oprawki pod nim (trzpień wchodzi w otwór na L2).
+ */
+export function buildMesh(contours, segments = 36, cavities = [], seats = []) {
   const profiles = contours.map((c, i) => profileOf(c, cavities[i] || null));
   const offsets = new Array(contours.length).fill(0);
   let z = 0;
-  for (let i = contours.length - 1; i >= 0; i--) { const p = profiles[i]; if (!p) continue; offsets[i] = z; z += Math.max(...p.map((q) => q.y)); }
+  for (let i = contours.length - 1; i >= 0; i--) { const p = profiles[i]; if (!p) continue; const seat = i < contours.length - 1 ? seats[i] || 0 : 0; offsets[i] = seat ? z - seat * 10 - Math.min(...p.map((q) => q.y)) : z; z = offsets[i] + Math.max(...p.map((q) => q.y)); }
   const vx = [], vy = [], vz = [], quads = [], faceTool = [];
   const sin = [...Array(segments)].map((_, j) => Math.sin((2 * Math.PI * j) / segments)), cos = [...Array(segments)].map((_, j) => Math.cos((2 * Math.PI * j) / segments));
   profiles.forEach((profile, ti) => {
