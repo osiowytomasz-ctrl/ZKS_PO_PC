@@ -6,6 +6,7 @@ import { parseSheetColor } from '../logic/common.js';
 import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
 import * as B from '../logic/builder.js';
+import { normPlates } from '../logic/plateLayout.js';
 import { view3dGl } from './tool3d.js';
 
 // ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
@@ -112,7 +113,7 @@ export function toolView3d(index, tools) {
     mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
     mesh.trepan = stts.map((s, i) => (s && s.trepan ? G.trepanBlade(s.diameter, mesh.regions[i], savedInsertZ(index.tool(s.code) || s.code)) : null));   // płytki ostrza wiertła rurowego
   }
-  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code), central: q.central, alone: q.central })) : [];
+  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => { const set = insertSetup(index.tool(q.code) || q.code); return { poly: q.poly, ...set, central: q.central, alone: q.central, phi: q.phi, z: q.central ? 1 : q.z || set.z }; }) : [];
   return view3d(mesh, ins);
 }
 
@@ -133,15 +134,18 @@ export function savedInsertZ(t) { const z = Number((insStore()[codeOf(t)] || {})
 export function insertSetup(t) {
   const o = insStore()[codeOf(t)] || {}, central = !!t && typeof t === 'object' && G.isCentralTool(t);   // płytka centralna (wiertła ISCAR / AMEC): jedna na osi, opad na obie strony
   const num = (v) => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : null);
-  return { z: central ? 1 : Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), central,
+  return { z: central ? 1 : Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), central, plates: normPlates(o.plates),   // plates – własny układ płytek (null – automatyczny)
     draft: num(o.draft) != null ? Math.max(0, Math.min(30, num(o.draft))) : central ? 5 : 7,   // pochylenie ścian / opad (°)
     thickness: num(o.thickness) > 0 ? Math.min(30, num(o.thickness)) : 0 };   // grubość płytki, mm (0 – automatycznie)
 }
 export function saveInsertSetup(t, patch) {
   const all = insStore(), k = codeOf(t);
   all[k] = { ...insertSetup(t), ...(all[k] || {}), ...patch };
+  if (!all[k].plates) delete all[k].plates;   // brak własnego układu – układ automatyczny
   try { localStorage.setItem(INS_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
 }
+/** Własny układ płytek narzędzia (rodzaj, wiele płytek, położenie) dla rysunków 2D / 3D w całym programie. */
+G.setPlateSetupProvider((t) => normPlates((insStore()[codeOf(t)] || {}).plates));
 let GL_OK = null;
 function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }
 

@@ -4,6 +4,7 @@
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
 import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits } from './contourGen.js';
+import { resolvePlates, normPlates } from './plateLayout.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -184,25 +185,45 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     if (!b) return;
     const offsetY0 = offsetY;
     const outline = tool.contour.map((p) => pt(p.x, offsetY + (b.maxY - p.y)));
-    const paths = allInserts ? tool.inserts : tool.inserts.slice(0, 1);
-    const placed = paths.flatMap((path) => {
-      const raw = parseInsertPath(path);
-      return raw.length < 2 ? [] : (tool.central ? [false] : [false, true]).map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer));
-    });
+    // płytki: własny układ narzędzia (rodzaj, wiele płytek, położenie) albo płytki katalogu; centralna – jeden wielokąt na osi, obwodowa – para lewa / prawa
+    const list = tool.plates ? (allInserts ? tool.plates : tool.plates.slice(0, 1))
+      : (allInserts ? tool.inserts : tool.inserts.slice(0, 1)).map((path) => ({ path, code: '', central: !!tool.central, dx: 0, dz: 0, ang: 0, phi: 0, z: 0 }));
+    const placed = [], plates = [];
+    for (const pl of list) {
+      const raw = parseInsertPath(pl.path);
+      if (raw.length < 2) continue;
+      const polys = pl.central ? [placeCentral(raw, offsetY, pl)] : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl));
+      placed.push(...polys); plates.push({ code: pl.code, central: !!pl.central, phi: pl.phi || 0, z: pl.z || 0, polys });
+    }
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
 }
 
-function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer) {
+/** Korekta położenia płytki: obrót o [ang]° wokół jej środka, potem przesunięcie o [dx] mm (w prawo) i [dz] mm (wzdłuż osi, w górę); rysunek ma y w dół. */
+function adjustPoly(poly, dx, dz, ang) {
+  if (!dx && !dz && !ang) return poly;
+  const c = pt(poly.reduce((s2, p) => s2 + p.x, 0) / poly.length, poly.reduce((s2, p) => s2 + p.y, 0) / poly.length);
+  return poly.map((p) => { const r = ang ? rotateAround(p, c, ang) : p; return pt(r.x + dx * 10, r.y - dz * 10); });
+}
+/**
+ * Płytka centralna (wiertło płytkowe ISCAR / AMEC): jeden wielokąt na osi narzędzia – środek płytki w x = 0, czubek płytki (największe y ścieżki)
+ * na czubku narzędzia, reszta płytki w dół; ścieżka jest odwrócona w pionie jak w miniaturze. Czubek narzędzia = górna krawędź jego konturu [tipY].
+ */
+function placeCentral(raw, tipY, pl) {
+  const minX = Math.min(...raw.map((p) => p.x)), maxX = Math.max(...raw.map((p) => p.x)), maxY = Math.max(...raw.map((p) => p.y)), cx = (minX + maxX) / 2;
+  return adjustPoly(raw.map((p) => pt(p.x - cx, tipY + (maxY - p.y))), pl ? pl.dx : 0, pl ? pl.dz : 0, pl ? pl.ang : 0);
+}
+/** Płytka obwodowa (przy krawędzi): prawa ([mirror]) z korektą położenia płytki [pl], lewa – jej odbicie (dX i obrót z przeciwnym znakiem). */
+function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl) {
+  const out = placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer);
+  return pl ? adjustPoly(out, mirror ? pl.dx : -pl.dx, pl.dz, mirror ? pl.ang : -pl.ang) : out;
+}
+function placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer) {
   const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));
-  if (tool.central) {   // płytka centralna: środek płytki na osi narzędzia, czubek płytki na czubku narzędzia
-    const cx = (minX + Math.max(...raw.map((p) => p.x))) / 2, topC = offsetY - (tool.length * 10 - (b.maxY - b.minY));
-    return raw.map((p) => pt(p.x - cx, topC + (p.y - minY)));
-  }
   const leftX = -(tool.diameter * 10) / 2, rightX = (tool.diameter * 10) / 2;
   const topY = offsetY - (tool.length * 10 - (b.maxY - b.minY));
   const plain = raw.map((p) => { const dx = p.x - minX; return pt(mirror ? rightX - dx : leftX + dx, topY + (p.y - minY)); });
@@ -273,6 +294,11 @@ export function buildMini(tool, details) {
   return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut, slits };
 }
 
+// ---------- układ płytek na narzędziu: własny układ (rodzaj, wiele płytek, położenie) dostarcza program (zapis na tym komputerze) ----------
+let plateSetup = () => null;
+/** Dostawca własnego układu płytek narzędzia: (narzędzie) → lista płytek (logic/plateLayout.js) albo null. Ustawia warstwa widoków. */
+export const setPlateSetupProvider = (fn) => { plateSetup = typeof fn === 'function' ? fn : () => null; };
+
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
 export const NO_DATA = 'Brak danych';
 const isWhite = (c) => { const x = String(c ?? '').trim().toLowerCase().replace(/ /g, ''); return !x || x === '#ffffff' || x === '#fff' || x === 'white' || x === 'rgb(255,255,255)'; };
@@ -291,12 +317,22 @@ export function toolIndex(catalog, overrides = null) {
   let usage = null;
   const idx = {
     tool, details: det,
-    stackTool(t) {
+    /**
+     * Narzędzie do rysunku zestawu / 3D. [opts.layout] false – bez własnego układu płytek (tylko płytki katalogu), [opts.adj] false – bez korekt położenia
+     * (dX, dZ, obrót) – układ „z algorytmu”. Płytki: [{ code, path, central, dx, dz, ang, phi, z, custom }].
+     */
+    stackTool(t, opts = {}) {
       if (typeof t === 'string') t = tool(t);
       if (!t) return null;
       const d = det(t.productCode);
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
-      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
+      const catalog = tre ? [] : ((d && d.insertContours) || []).filter((i) => String(i.contour ?? '').trim());
+      const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || idx.insertContour(code) || '';
+      let plates = resolvePlates(opts.layout === false ? null : plateSetup(t), catalog.map((i) => i.code), isCentralTool(t));
+      if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
+      plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code) })).filter((p) => p.path);
+      const contour = parseContour(d && d.columnAY);
+      return { code: t.productCode, contour, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
@@ -531,9 +567,12 @@ export function insertsForMesh(stackTools, offsets) {
   const out = [];
   stackTools.forEach((stt, i) => {
     if (!stt || !stt.inserts || !stt.inserts.length || !stt.contour || stt.contour.length < 3) return;
-    const s = buildStack([stt], true, false); if (!s) return;
+    const st2 = buildStack([stt], true, false); if (!st2) return;
     const b = bounds(stt.contour), off = (offsets && offsets[i]) || 0;
-    s.layers[0].inserts.forEach((poly, j) => { if (stt.central || j % 2) out.push({ code: stt.code, central: !!stt.central, poly: poly.map((p) => pt(p.x, b.maxY - p.y + off)) }); });
+    for (const pm of st2.layers[0].plates) {   // centralna – jeden wielokąt, obwodowa – prawa płytka pary (kopie na obwodzie robi podgląd 3D)
+      const poly = pm.central ? pm.polys[0] : pm.polys[pm.polys.length - 1];
+      if (poly) out.push({ code: stt.code, plate: pm.code, central: pm.central, phi: pm.phi, z: pm.z, poly: poly.map((p) => pt(p.x, b.maxY - p.y + off)) });
+    }
   });
   return out;
 }

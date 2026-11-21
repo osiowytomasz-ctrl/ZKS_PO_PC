@@ -12,13 +12,15 @@ const comma = (v) => String(Math.round(v * 1000) / 1000).replace('.', ',');
 const num = (t) => Number(String(t).replace(',', '.'));
 
 /**
- * o: { code, path (SVG mm), tool (kod narzędzia – opis), setup: { z, draft, thickness, central }, adj: { dx, dz, ang } | null, canSave,
- *      save: async (code, path) => void | null, onApply: ({ path, setup, adj }) => void }.
+ * o: { code, path (SVG mm), tool (kod narzędzia – opis), setup: { z, draft, thickness }, plate: { mode: auto|central|edge, dx, dz, ang, phi, z } | null,
+ *      autoCentral (czy tryb „automatycznie” daje płytkę centralną), canSave, save: async (code, path) => void | null,
+ *      onApply: ({ path, setup, plate }) => void }.
  */
 export function openPlateEditor(o) {
   const orig = P.parsePlate(o.path);
   const st = { pts: orig.pts.length >= 3 ? orig.pts : DEFAULT_PLATE.map((p) => ({ ...p })), sel: 0, step: 0.1, hist: [], zoom: 1, pan: { x: 0, y: 0 }, view: null, drag: null,
-    setup: { z: 2, draft: 7, thickness: 0, central: false, ...(o.setup || {}) }, adj: o.adj ? { dx: 0, dz: 0, ang: 0, ...o.adj } : null, busy: false };
+    setup: { z: 2, draft: 7, thickness: 0, ...(o.setup || {}) }, plate: o.plate ? { mode: 'auto', dx: 0, dz: 0, ang: 0, phi: 0, z: 0, ...o.plate } : null, busy: false };
+  const isCentral = () => (st.plate ? (st.plate.mode === 'central' ? true : st.plate.mode === 'edge' ? false : !!o.autoCentral) : !!o.autoCentral);
   const status = h('div', { class: 'status-line', style: { minHeight: '18px' } });
   const say = (t, kind) => { status.textContent = t || ''; status.style.color = kind === 'error' ? '#c62828' : kind === 'neutral' ? '#666' : '#1b5e20'; };
 
@@ -118,14 +120,22 @@ export function openPlateEditor(o) {
 
   // ---------- parametry 3D i położenie ----------
   const field = (label, value, onSet, unit = '', w = '64px') => { const inp = h('input', { type: 'text', value: comma(value), style: { width: w, padding: '1px 4px' }, onchange: () => { const v = num(inp.value); if (Number.isFinite(v)) { onSet(v); schedule3d(); } else inp.value = comma(value); } }); return h('label', { class: 'row', style: { gap: '4px', margin: '2px 0', alignItems: 'center' } }, h('span', { style: { width: '110px' } }, label), inp, h('span', { class: 'muted' }, unit)); };
-  const params = h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } },
-    h('b', {}, 'Płytka w narzędziu (3D)'),
-    h('div', { class: 'muted', style: { fontSize: '12px' } }, st.setup.central ? 'Płytka centralna (wiertło ISCAR / AMEC): jedna na osi narzędzia, opad na obie strony.' : 'Płytka obwodowa (frez): z płytek co 360° / z, przyłożenie z tyłu.'),
-    st.setup.central ? null : field('Liczba płytek z', st.setup.z, (v) => { st.setup.z = Math.max(1, Math.min(60, Math.round(v))); }, 'szt.'),
-    field(st.setup.central ? 'Opad na obie strony' : 'Pochylenie ścian', st.setup.draft, (v) => { st.setup.draft = Math.max(0, Math.min(30, v)); }, '°'),
-    field('Grubość płytki', st.setup.thickness, (v) => { st.setup.thickness = Math.max(0, Math.min(30, v)); }, 'mm (0 – auto)'));
-  const place = st.adj ? h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } }, h('b', {}, 'Położenie w narzędziu' + (o.tool ? ` (${o.tool})` : '')),
-    field('Korekta ΔX', st.adj.dx, (v) => { st.adj.dx = v; }, 'mm'), field('Korekta ΔZ', st.adj.dz, (v) => { st.adj.dz = v; }, 'mm'), field('Obrót', st.adj.ang, (v) => { st.adj.ang = v; }, '°')) : null;
+  const kindNote = h('div', { class: 'muted', style: { fontSize: '12px' } });
+  const paintNote = () => { kindNote.textContent = isCentral() ? 'Płytka centralna (wiertło ISCAR / AMEC): jedna na osi narzędzia, opad na obie strony.' : 'Płytka obwodowa (frez): z kopii co 360° / z, przyłożenie z tyłu.'; };
+  const modeSel = st.plate ? h('select', { onchange: () => { st.plate.mode = modeSel.value; paintNote(); paintParams(); schedule3d(); } }, ...[['auto', 'automatycznie'], ['central', 'centralna (na osi narzędzia)'], ['edge', 'obwodowa (przy krawędzi)']].map(([v, l]) => h('option', { value: v, selected: st.plate.mode === v }, l))) : null;
+  const params = h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } });
+  function paintParams() {
+    clear(params);
+    params.append(h('b', {}, 'Płytka w narzędziu (3D)'),
+      modeSel ? h('label', { class: 'row', style: { gap: '4px', margin: '2px 0', alignItems: 'center' } }, h('span', { style: { width: '110px' } }, 'Rodzaj płytki'), modeSel) : null, kindNote,
+      isCentral() ? null : field('Liczba płytek z', st.plate && st.plate.z ? st.plate.z : st.setup.z, (v) => { const z = Math.max(1, Math.min(60, Math.round(v))); if (st.plate) st.plate.z = z; else st.setup.z = z; }, 'szt. (na obwodzie)'),
+      field(isCentral() ? 'Opad na obie strony' : 'Pochylenie ścian', st.setup.draft, (v) => { st.setup.draft = Math.max(0, Math.min(30, v)); }, '°'),
+      field('Grubość płytki', st.setup.thickness, (v) => { st.setup.thickness = Math.max(0, Math.min(30, v)); }, 'mm (0 – auto)'));
+  }
+  const place = st.plate ? h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } }, h('b', {}, 'Położenie w narzędziu' + (o.tool ? ` (${o.tool})` : '')),
+    field('Korekta ΔX', st.plate.dx, (v) => { st.plate.dx = v; }, 'mm'), field('Korekta ΔZ', st.plate.dz, (v) => { st.plate.dz = v; }, 'mm (wzdłuż osi, w górę)'), field('Obrót płytki', st.plate.ang, (v) => { st.plate.ang = v; }, '°'),
+    field('Kąt na obwodzie φ', st.plate.phi, (v) => { st.plate.phi = v; }, '° (obrót wokół osi narzędzia, 3D)')) : null;
+  paintNote(); paintParams();
 
   // ---------- podgląd 3D samej płytki ----------
   const view3 = h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #bbb', background: '#fafafa' } });
@@ -133,12 +143,12 @@ export function openPlateEditor(o) {
   function render3d() {
     clear(view3);
     const poly = P.previewPoly(st.pts);
-    view3.append(view3d(null, [{ poly, z: 1, draft: st.setup.draft, thickness: st.setup.thickness, central: st.setup.central, alone: true }]));
+    view3.append(view3d(null, [{ poly, z: 1, draft: st.setup.draft, thickness: st.setup.thickness, central: isCentral(), alone: true }]));
   }
   function schedule3d() { clearTimeout(t3); t3 = setTimeout(render3d, 300); check(); }
 
   // ---------- zapis ----------
-  const result = () => ({ path: P.plateToPath(st.pts), setup: { z: st.setup.z, draft: st.setup.draft, thickness: st.setup.thickness }, adj: st.adj ? { ...st.adj } : null });
+  const result = () => ({ path: P.plateToPath(st.pts), setup: { z: st.setup.z, draft: st.setup.draft, thickness: st.setup.thickness }, plate: st.plate ? { ...st.plate } : null });
   const copy = async () => { try { const t = P.plateToPath(st.pts); await (window.zks && window.zks.copyText ? window.zks.copyText(t) : navigator.clipboard.writeText(t)); toast('Skopiowano kontur płytki (SVG)'); } catch (e) { toast(e.message, true); } };
   const apply = () => { o.onApply(result()); m.close(); };
   const saveBtn = o.save ? h('button', { class: 'btn primary', disabled: !o.canSave, title: o.canSave ? 'Zapisuje kontur do arkusza PL_kontur (kolumna G) – dla wszystkich użytkowników' : 'Zapis do arkusza – poziom MASTER lub GOD', onclick: async () => {

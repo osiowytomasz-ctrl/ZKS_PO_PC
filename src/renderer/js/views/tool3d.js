@@ -182,6 +182,8 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
     scene.add(new T.HemisphereLight(0xffffff, 0x8899aa, 0.6));
     const sun = new T.DirectionalLight(0xffffff, 1.4); sun.position.set(1, 2, 1.5); scene.add(sun);
 
+    renderer.localClippingEnabled = true;   // gniazdo pod płytkę centralną: wycięcie w korpusie narzędzia
+    let slot = null;
     const group = new T.Group(), geos = [], mats = [], meridians = [];
     const lineMat = new T.LineBasicMaterial({ color: 0x1b1f24, transparent: true, opacity: 0.9 }); mats.push(lineMat);
     const edges = (g, color, op) => { const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color, transparent: true, opacity: op }); group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em); };
@@ -192,6 +194,14 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       for (const it0 of inserts) {
         const it = Array.isArray(it0) ? { poly: it0, z: 1, draft: 7, alone: true } : it0;
         const g = insertGeometry(T, it.poly, it.draft, it.thickness || 0, !!it.central);
+        if (g && it.central && !slot) {   // pierwsza płytka centralna: w korpusie wycięte gniazdo (płyta grubości płytki, od jej dołu do czubka) – płytka widoczna w gnieździe
+          const ys = it.poly.map((q) => q.y / 10), xs = it.poly.map((q) => q.x / 10), size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+          const depth = it.thickness > 0 ? it.thickness : Math.min(6, Math.max(1, size * 0.3)), ph = ((it.phi || 0) * Math.PI) / 180, nrm = new T.Vector3(Math.sin(ph), 0, Math.cos(ph)), half = (depth + 0.4) / 2;
+          const uu = new T.Vector3(Math.cos(ph), 0, -Math.sin(ph)), x0 = Math.min(...xs) - 0.2, x1 = Math.max(...xs) + 0.2;   // oś płytki w jej płaszczyźnie – gniazdo nie dłuższe niż płytka
+          slot = [{ normal: nrm.clone(), constant: -half }, { normal: nrm.clone().negate(), constant: -half }, { normal: new T.Vector3(0, -1, 0), constant: Math.min(...ys) },
+            { normal: uu.clone().negate(), constant: x0 }, { normal: uu.clone(), constant: -x1 }];   // płaszczyzny jako obiekty { normal, constant } (paczka three.js nie eksportuje Plane)   // wycinane tylko tam, gdzie spełnione są wszystkie trzy
+          lineMat.clippingPlanes = slot; lineMat.clipIntersection = true;
+        }
         if (!g) continue;
         geos.push(g);
         const eg = new T.EdgesGeometry(g, 20); geos.push(eg);
@@ -199,12 +209,14 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         for (let k = 0; k < z; k++) {   // z płytek co 360°/z wokół osi narzędzia (oś Y sceny)
           const holder = new T.Group();
           holder.add(new T.Mesh(g, im), new T.LineSegments(eg, lm));
-          holder.rotation.y = (k * 2 * Math.PI) / z;
+          if (it.central) { const ysC = it.poly.map((q) => q.y / 10); holder.position.y = Math.max(0.3, Math.min(1.5, 0.12 * (Math.max(...ysC) - Math.min(...ysC)))); }   // płytka centralna lekko wystaje ponad czoło korpusu (czubek płytki jest widoczny)
+          holder.rotation.y = (((it.phi || 0) * Math.PI) / 180) + (k * 2 * Math.PI) / z;   // kąt na obwodzie φ + z kopii co 360° / z
           group.add(holder);
         }
       }
     }
-    const workMat = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.55, roughness: 0.3, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); mats.push(workMat);
+    const clip = (mat) => { if (slot) { mat.clippingPlanes = slot; mat.clipIntersection = true; } return mat; };
+    const workMat = clip(new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.55, roughness: 0.3, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })); mats.push(workMat);
     (mesh ? mesh.profiles : []).forEach((pr0, i) => {
       if (!pr0) return;
       // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
@@ -214,7 +226,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: korpus – bryła wydrążona do czubka, ostrze to osobne płytki wlutowane w ściankę
       const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
-      const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); mats.push(m);
+      const m = clip(new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })); mats.push(m);
       if (tb) {   // płytki wlutowane w ściankę: każda ma po obwodzie najwyżej [arc] mm (4), n płytek równo co 360°/n, czubek lekko ponad korpusem
         const y1 = tb.z1 + mesh.offsets[i] / 10, y2 = tb.z2 + mesh.offsets[i] / 10 + 0.04, pitch = (2 * Math.PI) / tb.n, half = tb.arc / (2 * Math.max(tb.rOut, 1));
         for (let k = 0; k < tb.n; k++) {
@@ -224,7 +236,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         }
       }
       const nt = mesh.nut && mesh.nut[i];   // nakrętka ER: część bryły od jej podstawy w ciemniejszym kolorze
-      const nutMat = nt ? new T.MeshStandardMaterial({ color: new T.Color(col).multiplyScalar(0.45), metalness: 0.7, roughness: 0.4, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }) : null; if (nutMat) mats.push(nutMat);
+      const nutMat = nt ? clip(new T.MeshStandardMaterial({ color: new T.Color(col).multiplyScalar(0.45), metalness: 0.7, roughness: 0.4, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })) : null; if (nutMat) mats.push(nutMat);
       const isNut = nt ? (a, b) => (a.y + b.y) / 20 >= nt.z1 / 10 - 1e-6 : null;
       for (const [keep, mat] of nt ? [[(a, b) => !isNut(a, b), m], [isNut, nutMat]] : tb ? [[null, m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
         const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;

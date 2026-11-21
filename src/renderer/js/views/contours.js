@@ -9,6 +9,8 @@ import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPlateEditor } from './plateEditor.js';
+import { openPlateLayout } from './plateLayout.js';
+import { resolvePlates, patchPlate } from '../logic/plateLayout.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ } from './toolViews.js';
 import * as B from '../logic/builder.js';
 
@@ -63,7 +65,7 @@ export function mountContours(el, ctx) {
   const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel, customStep, fitBtn,
-    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), h('button', { class: 'btn small', title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu', onclick: () => openLayout() }, 'Płytki…'), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję. Kółko myszy – powiększenie, przeciągnięcie tła – przesuwanie widoku.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
@@ -144,7 +146,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.insSel = null; pv.ptEdit = null; st.insAdj = {}; st.xf = { dx: 0, dz: 0, ang: 0 };
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.insSel = null; pv.ptEdit = null; st.xf = { dx: 0, dz: 0, ang: 0 };
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     // narzędzie monolityczne bez zapisanych rejonów: ostrze wg długości roboczej (K) – ustawiane po narysowaniu konturu
     { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.bladeLength(p) > 0; }
@@ -344,7 +346,7 @@ export function mountContours(el, ctx) {
       if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
       if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
-      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft, thickness: set.thickness, central: q.central, alone: q.central })) : [];
+      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: q.central ? 1 : q.z || set.z, draft: set.draft, thickness: set.thickness, central: q.central, alone: q.central, phi: q.phi })) : [];
       prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
     }
     const layers = [];
@@ -487,7 +489,7 @@ export function mountContours(el, ctx) {
     const w = world(e); if (!w) return;
     if (d.ins != null) {   // przesuwanie płytki w całości (bez deformacji); lewa płytka – odbicie
       const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
-      st.insAdj[d.ins] = { ...d.orig, dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) };
+      setPlate(d.ins, { dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) });
       d.moved = true; pv.insSel = d.ins; drawPreview(); return;
     }
     let dx = w.x - d.start.x, dy = w.y - d.start.y;
@@ -515,37 +517,46 @@ export function mountContours(el, ctx) {
   });
   // ---------- płytki: rozmieszczenie z algorytmu i korekta ----------
   const round3 = (v) => Math.round(v * 1000) / 1000;
-  const adjOf = (j) => (st.insAdj && st.insAdj[j]) || { dx: 0, dz: 0, ang: 0 };
-  /** Płytki narzędzia w układzie konturu (0,1 mm): auto – jak w zestawie ToolBuildera; right – po korekcie (dX, dZ, kąt wokół środka), left – odbicie. */
+  // układ płytek narzędzia (rodzaj, wiele płytek, położenie) zapisany w ustawieniach płytek narzędzia (toolViews.insertSetup); bez własnego – płytki katalogu
+  const plateCodes = () => { const det = (st.tool && st.index && st.index.details(st.tool.productCode)) || {}; return (det.insertContours || []).filter((x) => String(x.contour ?? '').trim()).map((x) => x.code); };
+  const layoutNow = () => resolvePlates(insertSetup(st.tool).plates, plateCodes(), insertSetup(st.tool).central);
+  const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang } : { dx: 0, dz: 0, ang: 0 }; };
+  const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(insertSetup(st.tool).plates, plateCodes(), j, patch) });
+  /** Płytki narzędzia w układzie konturu (0,1 mm): auto – położenie z algorytmu zestawu (bez korekt); right – z korektą (dX, dZ, obrót) i rodzajem płytki; left – odbicie (tylko obwodowe). */
   function insertsOf(t) {
     if (!st.index) return [];
-    const stt = st.index.stackTool(t);
-    if (!stt || !stt.inserts.length || stt.contour.length < 3) return [];
-    const stack = G.buildStack([stt], true, false);
-    if (!stack) return [];
+    const stt = st.index.stackTool(t), st0 = st.index.stackTool(t, { adj: false });
+    if (!stt || !stt.plates.length || stt.contour.length < 3) return [];
+    const stack = G.buildStack([stt], true, false), stack0 = G.buildStack([st0], true, false);
+    if (!stack || !stack0) return [];
     const bT = G.bounds(stt.contour), conv = (pts) => pts.map((p) => ({ x: p.x, y: bT.maxY - p.y }));
-    const det = st.index.details(t.productCode) || {}, codes = (det.insertContours || []).filter((x) => G.parseInsertPath(x.contour).length >= 2).map((x) => String(x.code || '').toUpperCase());
-    const out = [], raw = stack.layers[0].inserts;
-    const stride = stt.central ? 1 : 2;   // płytka centralna – jedna na oś; płytki frezu – para lewa / prawa
-    for (let j = 0; (j + 1) * stride <= raw.length; j++) {
-      const auto = conv(raw[j * stride + stride - 1]), a = adjOf(j);
-      const cx = auto.reduce((s2, p) => s2 + p.x, 0) / auto.length, cy = auto.reduce((s2, p) => s2 + p.y, 0) / auto.length;
-      const right = auto.map((p) => { const r = G.rotateAround(p, { x: cx, y: cy }, -a.ang); return { x: r.x + a.dx * 10, y: r.y + a.dz * 10 }; });
-      const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
-      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: stt.central ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: !!stt.central });
-    }
-    return out;
+    const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
+    const pick = (pm) => (pm.central ? pm.polys[0] : pm.polys[pm.polys.length - 1]);
+    return stack.layers[0].plates.map((pm, j) => {
+      const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
+      return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.central ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: pm.central, phi: pm.phi, z: pm.z };
+    });
+  }
+  /** Okno „Płytki na narzędziu”: rodzaj płytki (centralna / obwodowa), wiele płytek, położenie. */
+  function openLayout() {
+    const t = st.tool; if (!t || !st.index) return;
+    const set = insertSetup(t), codes = plateCodes(), cur = resolvePlates(set.plates, codes, set.central), auto = resolvePlates(null, codes, set.central);
+    const allCodes = [...new Set([...codes, ...st.index.cuttingParts()])];
+    openPlateLayout({ tool: t.productCode, plates: cur, autoPlates: auto, custom: !!set.plates, allCodes, toolCentral: set.central,
+      onApply: (list, isAuto) => { saveInsertSetup(t, { plates: isAuto ? null : list }); pv.insSel = null; drawPreview(); status.set('Zapisano układ płytek narzędzia (na tym komputerze).', 'neutral'); },
+      onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); } });
   }
   /** Pełny edytor płytki: kontur (PL_kontur), parametry 3D, położenie w tym narzędziu. */
   function openPlateFor(j) {
     const q = (preview._ins || [])[j], t = st.tool;
     if (!q || !t || !st.index) return;
     const path = st.index.insertContour(q.code) || '';
-    openPlateEditor({ code: q.code, path, tool: t.productCode, setup: insertSetup(t), adj: { ...adjOf(j) }, canSave: canSave,
+    const cur = layoutNow()[j] || {}, set0 = insertSetup(t);
+    openPlateEditor({ code: q.code, path, tool: t.productCode, setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
-      onApply: ({ path: np, setup, adj }) => {
+      onApply: ({ path: np, setup, plate }) => {
         saveInsertSetup(t, setup);
-        st.insAdj[j] = { ...adj };
+        if (plate) setPlate(j, plate);
         if (np && np !== path) st.index.setInsertContour(q.code, np);
         pv.insSel = null; drawPreview();
         status.set(`Płytka ${q.code}: zastosowano zmiany w podglądzie${np !== path ? ' (kontur płytki – do odświeżenia katalogu)' : ''}.`, 'neutral');
@@ -578,7 +589,7 @@ export function mountContours(el, ctx) {
     const ins = preview._ins || [];
     if (pv.insSel != null && ins[pv.insSel]) {
       const j = pv.insSel, q = ins[j], a = adjOf(j), pos = at(`[data-ins="${j}"]`) || { x: 20, y: 20 };
-      const set = (patch) => { st.insAdj[j] = { ...adjOf(j), ...patch }; drawPreview(); };
+      const set = (patch) => { setPlate(j, patch); drawPreview(); };
       const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.auto[0])} → po korekcie ${mm(q.right[0])} (mm)`;
       box(pos.x, pos.y, closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
