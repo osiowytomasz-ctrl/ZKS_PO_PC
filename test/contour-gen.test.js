@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
 import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines, withNut, filletFirstStep } from '../src/renderer/js/logic/contourEditor.js';
-import { profileOf, trepanBlade, holeDrawingFor, nutDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
+import { profileOf, trepanBlade, holeDrawingFor, nutDrawingFor, colletDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
   ABS040: { left: '0_-200;100_-200;100_0;-200_0', right: '200_0;-100_0;-100_-200;0_-200' },
@@ -66,7 +66,8 @@ test('mocowania wg wzorów karty „kontury” (Z jak w karcie); kody spoza wzor
   const w12 = C.formulaMount('WEL012'); assert.equal(w12.left, '0_-450;-60_-450;-60_0'); assert.equal(w12.synthetic, false);   // l = 45 mm z tabeli
   const w19 = C.formulaMount('WEL019'); assert.equal(w19.left, '0_-490;-95_-490;-95_0'); assert.equal(w19.synthetic, true);   // spoza tabeli: 48 + (50−48)/2 = 49
   assert.equal(C.mirrorLeft('0_-260;-80_-260;-80_0'), '80_0;80_-260;0_-260');
-  assert.equal(C.formulaMount('ER_008').left, '0_-135;-32.25_-27;32.5_-27;32.5_-15;-32.25_-15;-17.25_0');
+  assert.equal(C.formulaMount('ER_008').left, '0_-135;-17.07_-135;-32.25_-27;32.5_-27;32.5_-15;-32.25_-15;-17.25_0');   // dno płaskie ze stożka 8° (karta: puste)
+  assert.equal(C.formulaMount('ER_016').left, '0_-275;-55.77_-275;-85_-67;69_-67;69_-40;-85_-40;-45_0');
   assert.equal(C.formulaMount('MK_001').left, '0_-585;26_-585;26_-415;-47_-415;-60_35');
   assert.equal(C.formulaMount('D06,0□04,0_024').left, '0_-240;20_-240;20_-200;-30_-200;-30_0');
   assert.equal(C.formulaMount('FZS_031').left, '0_-350;155_-350;155_0;-250_0;-250_309;125_309;125_340');
@@ -221,4 +222,26 @@ test('zaokrąglenie R1 przy kołnierzu oprawki z nakrętką ER (wklęsły róg p
   const P = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 5 }, { x: 20, y: 5 }, { x: 20, y: 40 }, { x: 0, y: 40 }];
   assert.equal(filletFirstStep(P, 10).length, P.length + 8); assert.deepEqual(filletFirstStep(P, 40), P);
   assert.deepEqual(generatedHalf({ D: 'opr', E: 'stż', F: '63', I: '63', J: '150', K: '130', M: 'ISO050', N: '' }, {}).filter((q) => q.y > 191 && q.y < 201 && q.x > 315 && q.x < 325), []);   // bez nakrętki – bez łuku
+});
+
+test('tulejki ER: szczeliny wzdłużne, otwór przelotowy od czoła do końca, ER-50 jak ER-40', () => {
+  const sl = C.colletSlits('ER_032');
+  assert.ok(sl.length >= 7 && sl.length <= 9, 'ok. połowa z 16 szczelin zwrócona do patrzącego');
+  assert.ok(sl.every((l) => l.length === 11 && l[0][1] !== l[10][1]));
+  // przemiennie od czoła (do z = 0) i od tyłu (do dna), ok. 85% długości; leżą na stożku (promień rośnie ku czołu)
+  assert.equal(sl[0][10][1] === 0 || sl[0][0][1] === -400, true);
+  assert.ok(Math.abs(sl.find((l) => l[10][1] === 0)[10][1] - 0) < 1e-9 && sl.find((l) => l[0][1] === -400));
+  assert.equal(C.colletSlits('ABS040'), null);
+  const m = C.nutFor('ER_050'), k = C.nutFor('ER_040');
+  assert.equal(m.R, 39); assert.ok(Math.abs(m.L / k.L - 39 / 31.5) < 1e-9, 'ER-50: nakrętka ER-40 przeskalowana'); assert.equal(m.slot.n, 6);
+  assert.deepEqual(C.colletSlits('ER_050').length, C.colletSlits('ER_040').length);
+  // otwór przelotowy tulejki (M = ER_nnn, N = „D06,0□04,0_024”): dwie linie od czoła do końca konturu, bez dna; 3D: ścianka otworu na całej długości
+  const pts = parseContour(C.fullContour({ D: 'opr', E: 'tul', M: 'ER_025', N: 'D10,0□08,0_010' }, {}));
+  const top = Math.max(...pts.map((q) => q.y)), bot = Math.min(...pts.map((q) => q.y));
+  const h = holeDrawingFor('D10,0□08,0_010', pts, 'ER_025');
+  assert.deepEqual(h.hidden.map((l) => l.map((q) => [q.x, q.y])), [[[-50, top], [-50, bot]], [[50, top], [50, bot]]]);
+  assert.equal(h.cavity.through, true);
+  const cup = profileOf(pts, h.cavity); assert.ok(cup[0].x === 50 && cup[0].y === bot && cup.at(-1).x === 50 && cup.at(-1).y === bot);
+  // głębokość z N obowiązuje tylko poza tulejkami (oprawka gwintująca): otwór nie wychodzi poza kontur
+  assert.equal(holeDrawingFor('D10,0□08,0_010', pts, 'ISO050').hidden.length, 1);
 });

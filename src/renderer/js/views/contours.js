@@ -45,9 +45,15 @@ export function mountContours(el, ctx) {
   const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc', touchAction: 'none', userSelect: 'none' } });
   // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
   let saveVBtn = null;
-  const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null };
+  const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null, zoom: 1, pan: { x: 0, y: 0 } };
   const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
-  const stepSel = h('select', { onchange: () => { pv.step = Number(stepSel.value); drawPreview(); } }, ...[['0', 'siatka: auto'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm']].map(([v, l]) => h('option', { value: v }, l)));
+  // krok siatki / przyciągania: auto, standardowe oraz drobniejsze (do 0,01 mm) i dowolny wpisany
+  const customStep = h('input', { type: 'number', min: 0.001, step: 'any', value: 0.03, title: 'Własny krok siatki i przyciągania, mm', style: { width: '64px', display: 'none' }, oninput: () => { const v = Number(customStep.value); if (v > 0) { pv.step = v; drawPreview(); } } });
+  const stepSel = h('select', { title: 'Krok siatki i przyciągania', onchange: () => {
+    const custom = stepSel.value === 'custom'; customStep.style.display = custom ? '' : 'none';
+    pv.step = custom ? (Number(customStep.value) > 0 ? Number(customStep.value) : 0) : Number(stepSel.value); drawPreview(); } },
+    ...[['0', 'siatka: auto'], ['0.01', '0,01 mm'], ['0.02', '0,02 mm'], ['0.05', '0,05 mm'], ['0.1', '0,1 mm'], ['0.2', '0,2 mm'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm'], ['custom', 'własny…']].map(([v, l]) => h('option', { value: v }, l)));
+  const fitBtn = h('button', { class: 'btn small', title: 'Dopasuj widok do konturu (wyzeruj przesunięcie i powiększenie)', onclick: () => { pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.view = null; drawPreview(); } }, '⌖ Dopasuj');
   const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
   const prev3d = h('div', { style: { flex: 1, minHeight: '320px', border: '1px solid #ccc', display: 'none' } });
   const mode3d = h('button', { class: 'btn small', title: 'Podgląd 3D nowego konturu z płytkami', onclick: () => { pv.d3 = !pv.d3; mode3d.classList.toggle('primary', pv.d3); mode3d.textContent = pv.d3 ? '2D' : '3D'; drawPreview(); } }, '3D');
@@ -55,9 +61,9 @@ export function mountContours(el, ctx) {
   const zI = h('input', { type: 'number', min: 1, max: 60, style: { width: '46px' }, title: 'Liczba płytek (zębów) na obwodzie – widok 3D', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { z: Number(zI.value) }); drawPreview(); } } });
   const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
-  const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel,
+  const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel, customStep, fitBtn,
     h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
-    h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję.'), regionBar);
+    h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję. Kółko myszy – powiększenie, przeciągnięcie tła – przesuwanie widoku.'), regionBar);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
   const errBox = h('div', { class: 'err', style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
@@ -137,7 +143,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.insSel = null; pv.ptEdit = null; st.insAdj = {}; st.xf = { dx: 0, dz: 0, ang: 0 };
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.insSel = null; pv.ptEdit = null; st.insAdj = {}; st.xf = { dx: 0, dz: 0, ang: 0 };
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     // narzędzie monolityczne bez zapisanych rejonów: ostrze wg długości roboczej (K) – ustawiane po narysowaniu konturu
     { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.bladeLength(p) > 0; }
@@ -331,7 +337,7 @@ export function mountContours(el, ctx) {
       const tre = !!t && E.isTrepan(st.params[normCode(t.productCode)]);   // wiertło rurowe: kielich i płytki ostrza wg Ø
       const trd = tre && svg ? G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // kielich: wnęka z wymiarów
       const hlN = t && !tre && String((st.params[normCode(t.productCode)] || {}).D || '').trim().toLowerCase() === 'opr' ? (st.params[normCode(t.productCode)] || {}).N : '';
-      const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // oprawka gwintująca: otwór
+      const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)), (st.params[normCode(t.productCode)] || {}).M) : null;   // oprawka gwintująca: otwór
       const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : hld ? hld.cavity : null]) : null;
       if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
       if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
@@ -355,19 +361,20 @@ export function mountContours(el, ctx) {
     if (!pv.drag || !pv.view) {
       const b = G.bounds(all);
       const sc = Math.min((W - 2 * pad) / Math.max(b.maxX - b.minX, 1), (H - 2 * pad) / Math.max(b.maxY - b.minY, 1));
-      pv.view = { b, s: sc, W, H, pad };
+      pv.view = { b, s: sc * pv.zoom, fit: sc, W, H, pad };   // dopasowanie do konturu × powiększenie użytkownika
     }
-    const { b, s: sc } = pv.view;
-    const X = (x) => (W / 2 + x * sc), Y = (y) => (pad + (b.maxY - y) * sc);
+    const { b, s: sc } = pv.view, PX = pv.pan.x, PY = pv.pan.y;
+    const X = (x) => (W / 2 + PX + x * sc), Y = (y) => (pad + PY + (b.maxY - y) * sc);
     const f2 = (v) => v.toFixed(2);
     // siatka (krok w mm; auto – ok. 15 linii na rysunek)
-    const span = Math.max(b.maxX - b.minX, b.maxY - b.minY) / 10;
-    const step = pv.step || [0.5, 1, 2, 5, 10, 20, 50, 100].find((q) => span / q <= 18) || 100;
+    const span = Math.max(W, H) / sc / 10;   // widoczny fragment, mm
+    const step = pv.step || [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100].find((q) => span / q <= 18) || 100;
     pv.gridStep = step;
-    const xMin = (0 - W / 2) / sc, xMax = (W - W / 2) / sc, yMax = b.maxY + pad / sc, yMin = b.maxY - (H - pad) / sc;
+    const xMin = (0 - W / 2 - PX) / sc, xMax = (W - W / 2 - PX) / sc, yMax = b.maxY + (pad + PY) / sc, yMin = b.maxY - (H - pad - PY) / sc;
+    const gridOn = (xMax - xMin) / (step * 10) < 400 && (yMax - yMin) / (step * 10) < 400;   // przy drobnym kroku na całym widoku – bez linii (przyciąganie działa)
     let out = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`;
-    for (let g = Math.ceil(xMin / (step * 10)) * step * 10; g <= xMax; g += step * 10) out += `<line x1="${f2(X(g))}" y1="0" x2="${f2(X(g))}" y2="${H}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
-    for (let g = Math.ceil(yMin / (step * 10)) * step * 10; g <= yMax; g += step * 10) out += `<line x1="0" y1="${f2(Y(g))}" x2="${W}" y2="${f2(Y(g))}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
+    if (gridOn) for (let g = Math.ceil(xMin / (step * 10)) * step * 10; g <= xMax; g += step * 10) out += `<line x1="${f2(X(g))}" y1="0" x2="${f2(X(g))}" y2="${H}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
+    if (gridOn) for (let g = Math.ceil(yMin / (step * 10)) * step * 10; g <= yMax; g += step * 10) out += `<line x1="0" y1="${f2(Y(g))}" x2="${W}" y2="${f2(Y(g))}" stroke="#e6e6e6" stroke-width="${Math.abs(g % (step * 50)) < 1e-6 ? 1 : 0.5}"/>`;
     // rejony ostrze / oprawka – pasy Z przycięte do nowego konturu
     const trePv = !!t && E.isTrepan(st.params[normCode(t.productCode)]);
     const nPts = svg ? E.svgToContour(svg) : [];
@@ -389,7 +396,9 @@ export function mountContours(el, ctx) {
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
     { const pr = (t && st.params[normCode(t.productCode)]) || {};   // oprawka gwintująca: otwór pod chwyt gwintownika – przerywana linia 1 px
-      const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg)) : null;
+      const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg), pr.M) : null;
+      const cs = svg && !trePv ? G.colletDrawingFor(pr.M) : null;   // szczeliny wzdłużne tulejki ER
+      if (cs) out += cs.map((q) => `<polyline points="${q.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="none" stroke="#333" stroke-width="0.9" pointer-events="none"/>`).join('');
       const nd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.nutDrawingFor(pr.N, E.svgToContour(svg)) : null;   // nakrętka ER: ciemniejszy pas + wcięcia pod klucz
       if (nd) { const nc = E.svgToContour(svg), pp2 = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
         out += `<clipPath id="nutclip"><rect x="0" y="${f2(Y(nd.z2))}" width="${W}" height="${f2((nd.z2 - nd.z1) * sc)}"/></clipPath><polygon points="${pp2(nc)}" fill="#000" fill-opacity="0.35" clip-path="url(#nutclip)" pointer-events="none"/>`
@@ -435,7 +444,7 @@ export function mountContours(el, ctx) {
     const svgEl = preview.querySelector('svg'); if (!svgEl || !pv.view) return null;
     const pt = svgEl.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
     const q = pt.matrixTransform(svgEl.getScreenCTM().inverse());
-    return { x: (q.x - pv.view.W / 2) / pv.view.s, y: pv.view.b.maxY - (q.y - pv.view.pad) / pv.view.s };   // 0,1 mm
+    return { x: (q.x - pv.view.W / 2 - pv.pan.x) / pv.view.s, y: pv.view.b.maxY - (q.y - pv.view.pad - pv.pan.y) / pv.view.s };   // 0,1 mm
   };
   const snapV = (v) => { if (!pv.snap) return v; const g = (pv.gridStep || 1) * 10; return Math.round(v / g) * g; };
   const fmtMm = (v) => String(Math.round(v * 100) / 1000);
@@ -459,10 +468,21 @@ export function mountContours(el, ctx) {
       const idx = ptEl ? [k] : [k, (k + 1) % n];
       pv.drag = { idx, start: w, orig: idx.map(getPoint), moved: false };
       preview.setPointerCapture(e.pointerId); e.preventDefault();
-    } else pv.drag = { click: w, moved: false };
+    } else {
+      const svgEl = preview.querySelector('svg'), k = svgEl ? svgEl.getScreenCTM().a : 1;   // piksele ekranu na jednostkę rysunku
+      pv.drag = { click: w, moved: false, pan0: { x: pv.pan.x, y: pv.pan.y }, from: { x: e.clientX, y: e.clientY }, k, panning: false };
+      preview.setPointerCapture(e.pointerId);
+      if (e.button === 1 || e.button === 2) { pv.drag.panning = true; e.preventDefault(); }   // środkowy / prawy przycisk – od razu przesuwanie
+    }
   });
   preview.addEventListener('pointermove', (e) => {
-    const d = pv.drag; if (!d || d.click) return;
+    const d = pv.drag; if (!d) return;
+    if (d.click) {   // tło: przeciągnięcie przesuwa widok (krótkie kliknięcie – wybór rejonu)
+      const dx = e.clientX - d.from.x, dy = e.clientY - d.from.y;
+      if (!d.panning && Math.hypot(dx, dy) > 4) d.panning = true;
+      if (d.panning) { pv.pan = { x: d.pan0.x + dx / d.k, y: d.pan0.y + dy / d.k }; drawPreview(); }
+      return;
+    }
     const w = world(e); if (!w) return;
     if (d.ins != null) {   // przesuwanie płytki w całości (bez deformacji); lewa płytka – odbicie
       const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
@@ -474,10 +494,20 @@ export function mountContours(el, ctx) {
     else { dx = pv.snap ? snapV(dx) : dx; dy = pv.snap ? snapV(dy) : dy; d.idx.forEach((k, j) => setPoint(k, d.orig[j].x + dx, d.orig[j].y + dy)); }
     d.moved = true; st.dirty = true; drawPreview();
   });
+  preview.addEventListener('wheel', (e) => {   // powiększenie kółkiem myszy wokół kursora
+    if (!pv.view || pv.d3) return;
+    e.preventDefault();
+    const v = pv.view, w = world(e), svgEl = preview.querySelector('svg'); if (!w || !svgEl) return;
+    const z = Math.max(0.2, Math.min(80, pv.zoom * Math.pow(1.0018, -e.deltaY))), sc2 = v.fit * z;
+    const q = svgEl.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; const c = q.matrixTransform(svgEl.getScreenCTM().inverse());
+    pv.zoom = z; pv.pan = { x: c.x - v.W / 2 - w.x * sc2, y: c.y - v.pad - (v.b.maxY - w.y) * sc2 };
+    pv.view = null; drawPreview();
+  }, { passive: false });
+  preview.addEventListener('contextmenu', (e) => { if (pv.drag && pv.drag.panning) e.preventDefault(); });
   preview.addEventListener('pointerup', (e) => {
     const d = pv.drag; pv.drag = null;
     if (!d) return;
-    if (d.click) { pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
+    if (d.click) { if (d.panning) return; pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
     if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); return; }
     if (d.moved) { drawTable(); drawPreview(); return; }
     if (d.idx && d.idx.length === 1) { pv.ptEdit = d.idx[0]; pv.insSel = null; drawPreview(); }   // kliknięcie w punkt – okienko z parametrami

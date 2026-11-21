@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits } from './contourGen.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -120,9 +120,12 @@ export function trepanDrawingFor(diameter, length, contour) {
  * Otwór pod chwyt gwintownika (oprawka gwintująca, kolumna N „D12,0□09,0_042”) dla konturu: linia niewidoczna (przerywana) i wnęka do 3D,
  * od czubka konturu na głębokość z kolumny N. null – inna oprawka.
  */
-export function holeDrawingFor(N, contour) {
+export function holeDrawingFor(N, contour, M = '') {
   const h = tapHole(N), b = bounds(contour);
   if (!b) return null;
+  if (h && /^ER_\d{3}$/i.test(String(M ?? '').trim())) {   // tulejka ER (mocowanie początkowe ER_): otwór przelotowy – od czoła do końca tulei, bez dna
+    return { hidden: [[pt(-h.r, b.maxY), pt(-h.r, b.minY)], [pt(h.r, b.maxY), pt(h.r, b.minY)]], cavity: { ri: h.r, yb: b.minY, rb: 0, y7: Infinity, through: true } };
+  }
   if (!h) {   // gniazdo żeńskie o kształcie męskiego zakończenia N (ABS, Weldon, Capto, MHD, KAR, MK): linia niewidoczna i wnęka 3D
     const sk = socketProfile(N);
     if (!sk) return null;
@@ -154,6 +157,11 @@ export function nutDrawingFor(N, contour) {
   });
   return { z1: base, z2: b.maxY, slots };
 }
+/** Szczeliny wzdłużne tulejki ER (mocowanie początkowe M = ER_nnn) – linie widoczne w rzucie 2D, współrzędne konturu (0,1 mm); null – nie tulejka. */
+export function colletDrawingFor(M) {
+  const s = colletSlits(M);
+  return s ? s.map((l) => l.map(([x, y]) => pt(x, y))) : null;
+}
 /** Pas nakrętki i wcięcia przeniesione do układu rysunku: [map] – punkt konturu → punkt rysunku. */
 export function mapNut(n, map) {
   if (!n) return null;
@@ -183,7 +191,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     });
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -247,9 +255,10 @@ export function buildMini(tool, details) {
     else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
   }
   const draw = group === 'tre' ? mapTrepanDrawing(trepanDrawingFor(diameter, length, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // wiertło rurowe: płytki żółte, wnęka przerywana
-  const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points)) : null;   // oprawka gwintująca: otwór przerywaną linią
+  const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points, tool.columnM)) : null;
+  const slits = ((d) => (d ? d.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(colletDrawingFor(tool.columnM));   // szczeliny tulejki ER   // oprawka gwintująca: otwór przerywaną linią
   const nut = group === 'opr' ? mapNut(nutDrawingFor(tool.columnN, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // nakrętka ER: ciemniejszy pas i wcięcia
-  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut };
+  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut, slits };
 }
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
@@ -275,7 +284,7 @@ export function toolIndex(catalog, overrides = null) {
       if (!t) return null;
       const d = det(t.productCode);
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
-      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '' };
+      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
@@ -436,7 +445,7 @@ export function profileOf(contour, cav = null) {
   // wiertło rurowe: wnęka otwarta od czubka; płytki (w ściance) rysuje osobno podgląd – bryła ma tu promień korpusu aż do czubka
   if (cav) rows = rows.map((p) => (p.y >= cav.y7 - 1e-6 ? pt(Math.min(p.x, cav.rb), p.y) : p));
   const out = [];
-  for (const p of [pt(0, Math.min(...ys)), ...rows, ...(cav ? (cav.prof ? [...cav.prof].reverse() : [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)]) : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
+  for (const p of [pt(cav && cav.through ? cav.ri : 0, Math.min(...ys)), ...rows, ...(cav ? (cav.prof ? [...cav.prof].reverse() : cav.through ? [pt(cav.ri, Math.max(...ys)), pt(cav.ri, Math.min(...ys))] : [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)]) : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
   return out.length >= 2 ? out : null;
 }
 /**

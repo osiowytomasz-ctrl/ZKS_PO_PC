@@ -83,10 +83,36 @@ export function nutFor(code) {
   const m = /^ER_(\d{3})$/.exec(txt(code).toUpperCase());
   if (!m) return null;
   const n = Number(m[1]), known = NUTS[n];
-  const base = known || (() => { const R = NUT_R[n]; if (!R) return null; const ref = NUTS[25], k = R / ref.R; return { R, L: ref.L * k, prof: ref.prof.map(([r, t]) => [r * k, t * k]), slotBottom: ref.slotBottom }; })();
+  const base = known || (() => {   // rozmiar bez pliku: wzór najbliższy pod względem średnicy (ER-50 → ER-40, ER-16 / 11 / 8 → ER-20), skalowany
+    const R = NUT_R[n]; if (!R) return null;
+    const ref = NUTS[[20, 25, 32, 40].reduce((best, k) => (Math.abs(NUTS[k].R - R) < Math.abs(NUTS[best].R - R) ? k : best))], k = R / ref.R;
+    return { R, L: ref.L * k, prof: ref.prof.map(([r, t]) => [r * k, t * k]), slotBottom: ref.slotBottom };
+  })();
   if (!base) return null;
   const top = base.prof.filter(([r]) => r >= base.R - 1e-6).reduce((mx, [, t]) => Math.max(mx, t), 0);   // koniec walca zewnętrznego
   return { R: base.R, L: base.L, prof: base.prof, slot: { n: NUT_SLOTS, half: base.R * NUT_SLOT_HALF, from: base.L * base.slotBottom, to: top } };
+}
+/** Liczba szczelin tulejki ER (na obwodzie, przemiennie od czoła i od tyłu) wg zdjęcia tulejek; ER-50 jak ER-40. */
+const COLLET_SLITS = { 8: 6, 11: 8, 16: 8, 20: 12, 25: 14, 32: 16, 40: 18, 50: 18 };
+/**
+ * Szczeliny wzdłużne tulejki ER (widok z boku, jak na zdjęciu): linie prawie na całej długości, co druga od czoła, co druga od tyłu; leżą na stożku
+ * tulejki. Wynik: lista linii łamanych [[x, y]…] w układzie konturu (0,1 mm, czoło tulejki y = 0) albo null (kod spoza ER).
+ */
+export function colletSlits(code) {
+  const c = txt(code).toUpperCase(), m = /^ER_(\d{3})$/.exec(c), sk = m && socketProfile(c);
+  if (!sk) return null;
+  const n = COLLET_SLITS[Number(m[1])] || 12;
+  const zTop = Math.max(...sk.map((q) => q[1])), zBot = Math.min(...sk.map((q) => q[1])), len = zTop - zBot;
+  const radius = (z) => { let r = 0; for (let i = 0; i + 1 < sk.length; i++) { const a = sk[i], b = sk[i + 1]; if (z < Math.min(a[1], b[1]) - 1e-6 || z > Math.max(a[1], b[1]) + 1e-6) continue; r = Math.max(r, a[1] === b[1] ? Math.max(a[0], b[0]) : a[0] + ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1])); } return r; };
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const th = (2 * Math.PI * (k + 0.5)) / n, cs = Math.cos(th);
+    if (Math.sin(th) <= 1e-6) continue;   // tylko szczeliny zwrócone do patrzącego
+    const from = k % 2 ? zBot : zTop - 0.85 * len, to = k % 2 ? zBot + 0.85 * len : zTop, line = [];
+    for (let i = 0; i <= 10; i++) { const z = from + ((to - from) * i) / 10; line.push([Math.round(radius(z) * cs * 1000) / 1000, Math.round(z * 1000) / 1000]); }
+    out.push(line);
+  }
+  return out;
 }
 /** Najniższe Y lewej części mocowania (głębokość mocowania). */
 export function minY(av) {
@@ -272,7 +298,9 @@ export function formulaMountPoints(code) {
   }
   if ((m = /^ER_(\d{3})$/.exec(c)) && ER[Number(m[1])]) {
     const [x2, y2, dq, r2, t2, u] = ER[Number(m[1])], t = -t2 / 2, q = u - dq;
-    return { pts: [[0, y2], ...(x2 == null ? [] : [[x2, y2]]), [t, q], [r2 / 2, q], [r2 / 2, u], [t, u], [t - u, 0]] };
+    // małe tulejki (ER-8 … 16) mają w karcie pusty promień dna – dno płaskie wynika ze stożka 8° (jak w tulejkach od ER-20): r = |t| − dł. · tg 8°
+    const bottom = x2 == null ? Math.round((t + (q - y2) * Math.tan((8 * Math.PI) / 180)) * 100) / 100 : x2;
+    return { pts: [[0, y2], [bottom, y2], [t, q], [r2 / 2, q], [r2 / 2, u], [t, u], [t - u, 0]] };
   }
   if (FZS_KS[c]) {
     const [a, b, cc, e] = FZS_KS[c], y1 = -10 * e + 10 * cc, y5 = 10 * cc - b;

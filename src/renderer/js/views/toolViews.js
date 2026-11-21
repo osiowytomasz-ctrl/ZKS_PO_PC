@@ -54,6 +54,7 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="none"/>`
     + `<path d="${G.outlinePath(mini.outline, (p) => [p.x * s, p.y * s], mini.axisX ?? NaN)}" fill="none" stroke="#000" stroke-width="0.5"/>`
     + (mini.nut ? `<clipPath id="nt${nutId}"><rect x="0" y="${(mini.nut.y1 * s).toFixed(2)}" width="${w}" height="${((mini.nut.y2 - mini.nut.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(mini.outline, s)}" fill="#5f636a" clip-path="url(#nt${nutId++})"/>` + mini.nut.slots.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4"/>`).join('') : '')
+    + (mini.slits ? mini.slits.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.3"/>`).join('') : '')
     + (mini.hole ? mini.hole.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4" stroke-dasharray="1.5 1.2"/>`).join('') : '')
     + (mini.draw ? mini.draw.plates.map((q) => `<polygon points="${poly(q, s)}" fill="#c8a400" stroke="#000" stroke-width="0.4"/>`).join('') + mini.draw.hidden.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4" stroke-dasharray="1.5 1.2"/>`).join('') : '')
     + mini.inserts.map((p) => `<polygon points="${poly(p, s)}" fill="#c8a400" stroke="#000" stroke-width="0.5"/>`).join('') + '</svg>';
@@ -81,6 +82,7 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
       svg += `<clipPath id="${id}"><rect x="0" y="${(oy + l.nut.y1 * s).toFixed(2)}" width="${width}" height="${((l.nut.y2 - l.nut.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(l.outline, s, ox, oy)}" fill="#000" fill-opacity="0.38" clip-path="url(#${id})"/>`
         + l.nut.slots.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1"/>`).join('');
     }
+    if (l.slits) svg += l.slits.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="0.8"/>`).join('');   // szczeliny wzdłużne tulejki ER
     if (l.hole) svg += l.hole.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="5 4"/>`).join('');   // otwór pod gwintownik – niewidoczny
     if (labels) {
       const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
@@ -103,7 +105,7 @@ export function toolView3d(index, tools) {
   if (!index) return view3d(null);
   const stts = tools.map((t) => index.stackTool(t));
   const draws = stts.map((s) => (s && s.trepan ? G.trepanDrawingFor(s.diameter, s.length, s.contour) : null));   // wiertła rurowe: wnęka i płytki
-  const holes = stts.map((s) => (s && s.holeN ? G.holeDrawingFor(s.holeN, s.contour) : null));   // oprawki gwintujące: otwór pod chwyt gwintownika
+  const holes = stts.map((s) => (s && s.holeN ? G.holeDrawingFor(s.holeN, s.contour, s.startM) : null));   // oprawki gwintujące: otwór pod chwyt gwintownika
   const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])), 36, draws.map((d, i) => (d ? d.cavity : holes[i] ? holes[i].cavity : null)));
   if (mesh) {
     mesh.nut = stts.map((s) => (s && s.holeN ? G.nutDrawingFor(s.holeN, s.contour) : null));   // nakrętka ER – ciemniejsza część bryły
