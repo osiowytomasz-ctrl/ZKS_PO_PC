@@ -3,7 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
-import { fullContour, TREPAN, nutFor, NUT_UNDERCUT } from './contourGen.js';
+import { fullContour, TREPAN, nutFor, NUT_UNDERCUT, NUT_FILLET } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -96,6 +96,22 @@ export function halfPath(points) {
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
 /**
+ * Zaokrągla pierwszy wklęsły róg obrysu (prawa połowa, od dołu): płaszczyzna idąca do osi, potem korpus pionowo w górę – jak górna płaszczyzna
+ * kołnierza i korpus oprawki. Promień [r] w 0,1 mm, łuk jako odcinki (co ~11°); róg o krótszych bokach niż [r] – bez zmian.
+ */
+export function filletFirstStep(pts, r) {
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    if (a.y === b.y && b.x < a.x && b.x === c.x && c.y > b.y) {   // pozioma do osi, potem pionowo w górę
+      if (a.x - b.x < r - 1e-6 || c.y - b.y < r - 1e-6) return pts;
+      const cx = b.x + r, cy = b.y + r, arc = [];
+      for (let k = 0; k <= 8; k++) { const th = (3 * Math.PI) / 2 - ((Math.PI / 2) * k) / 8; arc.push({ x: Math.round((cx + r * Math.cos(th)) * 1000) / 1000, y: Math.round((cy + r * Math.sin(th)) * 1000) / 1000 }); }
+      return [...pts.slice(0, i), ...arc, ...pts.slice(i + 1)];
+    }
+  }
+  return pts;
+}
+/**
  * Dokłada nakrętkę ER (kolumna N oprawki) na czubku prawej połowy konturu [half] (0,1 mm): górne [L] mm zastępuje zewnętrzny kształt nakrętki
  * (walec z fazą i stożkiem czoła z plików STEP / IGES) z podcięciem pod nią (szyjka + stożek do korpusu). Przy braku nakrętki albo zbyt krótkim korpusie – bez zmian.
  */
@@ -118,7 +134,8 @@ export function withNut(half, N) {
   else out.push({ x: Math.max(body, 0), y: cut });
   for (const [r, t] of nut.prof) out.push({ x: Math.round(r * 100) / 10, y: Math.round((cut + t * 10) * 1000) / 1000 });
   out.push({ x: 0, y: top });
-  return out.filter((q, i, a) => !i || Math.abs(q.x - a[i - 1].x) > 1e-6 || Math.abs(q.y - a[i - 1].y) > 1e-6);
+  const clean = out.filter((q, i, a) => !i || Math.abs(q.x - a[i - 1].x) > 1e-6 || Math.abs(q.y - a[i - 1].y) > 1e-6);
+  return filletFirstStep(clean, NUT_FILLET * 10);   // R1 przy kołnierzu
 }
 /**
  * Linie krawędzi średnic w połowie konturu (0,1 mm): na każdym uskoku i załamaniu obrysu (> 15°) linia przez całą szerokość – w połowie odcinek

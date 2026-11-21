@@ -1,10 +1,11 @@
 // Wspólne elementy Narzędziowni na PC – wygląd jak w aplikacji na Androida (ui/common/ToolRows.kt, ui/tools/ToolViews.kt):
 // wiersz narzędzia (kod na pasku zużycia z kolorem lokalizacji, opis i parametry, miniatura), rysunek zestawu 2D, podgląd 3D,
 // tabela części, okno na cały ekran i lista rozwijana filtra.
-import { h, clear, modal } from '../ui.js';
+import { h, clear, modal, columnFilterDialog } from '../ui.js';
 import { parseSheetColor } from '../logic/common.js';
 import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
+import * as B from '../logic/builder.js';
 import { view3dGl } from './tool3d.js';
 
 // ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
@@ -215,6 +216,18 @@ export function filterDropdown(label, value, options, onSelect, { allLabel = '(w
     ...options.map((o) => h('option', { value: o, selected: String(value ?? '').toLowerCase() === String(o).toLowerCase() }, o)));
   if (allLabel === null) sel.firstChild.disabled = true;
   return sel;
+}
+
+/**
+ * Filtr pola z wielokrotnym wyborem wartości (ToolBuilder, Kontury): przycisk otwiera okno jak autofiltr w Grafiku i Harmonogramie
+ * (zaznaczanie, szukanie, liczniki wg filtrów innych pól). [filters] – stan filtrów (pole → zbiór wartości albo ''), [onChange] – po zmianie.
+ */
+export function multiFilter([field, label], filters, tools, onChange) {
+  const sel = filters[field] instanceof Set ? filters[field] : null;
+  const text = sel ? (sel.size === 1 ? [...sel][0] : `${label} (${sel.size})`) : label;
+  return h('button', { class: 'filter-dd' + (sel ? ' on' : ''), title: sel ? `${label}: ${[...sel].join(', ')}` : label,
+    onclick: () => columnFilterDialog({ title: label, noSort: true, options: B.optionCounts(tools, filters, field), activeFilter: sel || undefined,
+      onApply: (set) => { filters[field] = set && set.size ? set : ''; onChange(); } }) }, text + ' ▾');
 }
 
 /** Linia komunikatu (czerwony – błąd, szary – informacja, zielony – potwierdzenie). */

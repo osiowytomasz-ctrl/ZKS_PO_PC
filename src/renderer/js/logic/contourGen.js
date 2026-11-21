@@ -72,6 +72,8 @@ const NUT_SLOTS = 6, NUT_SLOT_HALF = 0.13;
  * Podcięcie pod nakrętką ER (oprawka CAT50 + ER32 z pliku STEP, nakrętka R = 25 mm): wprost pod nakrętką walec szyjki (promień 19,939, długość 2,0),
  * niżej stożek (Δr 4,064 na 5,13 mm) rozszerzający się do korpusu (promień 24,0). Wymiary względem promienia nakrętki; kąt stożka stały.
  */
+/** Zaokrąglenie wklęsłe (mm) między górną płaszczyzną kołnierza a korpusem oprawki z nakrętką ER (R1). */
+export const NUT_FILLET = 1;
 export const NUT_UNDERCUT = { neckR: 19.939 / 25, neckLen: 2.0 / 25, tan: 4.064 / 5.13 };
 /**
  * Nakrętka ER dla kodu ER_nnn: { R, L, prof: [[r, t]…] (mm, t od otwartego końca), slot: { n, half (mm), from, to (t, mm) } } albo null.

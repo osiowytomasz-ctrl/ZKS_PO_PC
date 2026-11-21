@@ -1,7 +1,7 @@
 // ToolBuilder – jak w aplikacji na Androida (BuilderScreen.kt): składanie zestawu narzędzi. Pierwsze narzędzie z listy z filtrami,
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
-import { h, clear, api, toast, modal, alertBox, confirmBox, columnFilterDialog } from '../ui.js';
+import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
 import { toolCatalog, confirmedContoursQuick, invalidateConfirmed, contourGenOn } from '../catalog.js';
 import { ndLoad, ndPatch } from '../ndStore.js';
 import * as E from '../logic/contourEditor.js';
@@ -9,7 +9,7 @@ import { fullContour } from '../logic/contourGen.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
+import { multiFilter, toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
 import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
@@ -175,12 +175,7 @@ export function mountBuilder(el, ctx) {
     else {
       const code = h('input', { type: 'search', class: 'filter-in', placeholder: 'Kod', value: st.filters.code, style: { width: '110px' }, oninput: () => { st.filters.code = code.value; drawList(); } });
       // filtry z wielokrotnym wyborem wartości – okno jak autofiltr w Grafiku i Harmonogramie (zaznaczanie, szukanie, liczniki)
-      const multi = ([f, l]) => {
-        const sel = st.filters[f] instanceof Set ? st.filters[f] : null;
-        const text = sel ? (sel.size === 1 ? [...sel][0] : `${l} (${sel.size})`) : l;
-        return h('button', { class: 'filter-dd' + (sel ? ' on' : ''), title: sel ? `${l}: ${[...sel].join(', ')}` : l, onclick: () => columnFilterDialog({ title: l, noSort: true, options: B.optionCounts(st.listed, st.filters, f), activeFilter: sel || undefined,
-          onApply: (set) => { st.filters[f] = set && set.size ? set : ''; draw(); } }) }, text + ' ▾');
-      };
+      const multi = (fl) => multiFilter(fl, st.filters, st.listed, draw);
       filtersBox.append(code, ...FILTERS.map(multi));
       if (B.hasFilters(st.filters)) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); draw(); } }, 'Wyczyść'));
     }

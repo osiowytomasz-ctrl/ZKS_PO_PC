@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
-import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines, withNut } from '../src/renderer/js/logic/contourEditor.js';
+import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines, withNut, filletFirstStep } from '../src/renderer/js/logic/contourEditor.js';
 import { profileOf, trepanBlade, holeDrawingFor, nutDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
@@ -210,4 +210,15 @@ test('podcięcie pod nakrętką ER wg oprawki CAT50 + ER32 (STEP): szyjka i sto�
   // korpus węższy od szyjki – bez podcięcia (nakrętka od razu na korpusie)
   const n = generatedHalf({ ...o, F: '30', I: '30' }, {});
   assert.ok(!n.some((q) => Math.abs(q.x - 199.39) < 0.05));
+});
+
+test('zaokrąglenie R1 przy kołnierzu oprawki z nakrętką ER (wklęsły róg płaszczyzna kołnierza – korpus)', () => {
+  const h = generatedHalf({ D: 'opr', E: 'stż', F: '63', I: '63', J: '150', K: '130', M: 'ISO050', N: 'ER_040' }, {});
+  const i = h.findIndex((q, k) => q.y === 191 && q.x === 325 && h[k + 1] && h[k + 1].x > 315 && h[k + 1].x < 325);   // początek łuku na płaszczyźnie kołnierza (R = 31,5 + 1 mm)
+  assert.ok(i > 0 && h[i + 8].x === 315 && h[i + 8].y === 201, 'koniec łuku na korpusie 1 mm nad kołnierzem');
+  const mid = h[i + 5]; assert.ok(Math.abs(Math.hypot(mid.x - 325, mid.y - 201) - 10) < 1e-2, 'punkty łuku na okręgu R1');
+  // sam róg: płaszczyzna do osi, potem pionowo w górę → łuk; krótsze boki niż R lub brak rogu – bez zmian
+  const P = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 5 }, { x: 20, y: 5 }, { x: 20, y: 40 }, { x: 0, y: 40 }];
+  assert.equal(filletFirstStep(P, 10).length, P.length + 8); assert.deepEqual(filletFirstStep(P, 40), P);
+  assert.deepEqual(generatedHalf({ D: 'opr', E: 'stż', F: '63', I: '63', J: '150', K: '130', M: 'ISO050', N: '' }, {}).filter((q) => q.y > 191 && q.y < 201 && q.x > 315 && q.x < 325), []);   // bez nakrętki – bez łuku
 });

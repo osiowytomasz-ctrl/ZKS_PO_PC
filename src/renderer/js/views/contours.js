@@ -8,7 +8,7 @@ import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { statusLine, filterDropdown, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ } from './toolViews.js';
+import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ } from './toolViews.js';
 import * as B from '../logic/builder.js';
 
 let pendingCode = null;
@@ -111,11 +111,11 @@ export function mountContours(el, ctx) {
   };
 
   // filtry jak w ToolBuilderze (Lokal, Grupa, Rodzaj, Firma, Φ, L, r/α) – nad listą, na całą szerokość
-  const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α']];
+  const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α'], ['mIn', 'Ms (wejście)'], ['mOut', 'Mk (wyjście)']];
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   function drawFilters() {
-    clear(filtersBox).append(...FILTERS.map(([f, l]) => filterDropdown(l, st.filters[f], B.options(st.tools, st.filters, f), (v) => { st.filters[f] = v; drawFilters(); drawList(); })));
-    if (Object.values(st.filters).some((v) => String(v).trim())) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
+    clear(filtersBox).append(...FILTERS.map((fl) => multiFilter(fl, st.filters, st.tools, () => { drawFilters(); drawList(); })));   // wielokrotny wybór jak w ToolBuilderze
+    if (B.hasFilters(st.filters)) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
   }
   function drawList() {
     const q = st.q.toLowerCase();
