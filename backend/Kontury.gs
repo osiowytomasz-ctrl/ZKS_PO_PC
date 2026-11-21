@@ -151,3 +151,33 @@ function nd_saveContoursV_(items, ctx) {
   range.setValues(v);
   return { saved: saved, missing: Object.keys(want).filter(function (c) { return !found[c]; }) };
 }
+
+
+// ---------- edytor płytki skrawającej (Narzędziownia → Kontury → kliknięcie w płytkę; Części) ----------
+//   plSaveContour: { write: true, run: function (a, ctx) { return pl_saveContour_(a[0], a[1], ctx); } },   (wpis w Api.gs, API_FUNCS)
+
+/**
+ * Zapis konturu płytki [path] (ścieżka SVG w mm; pusty – usunięcie) do kolumny G arkusza PL_kontur, w wierszu płytki o kodzie [code] (kolumna A).
+ * Zapis: poziom MASTER lub GOD w kolumnie „Grafik dostęp”. Układ arkusza PL_kontur bez zmian (A – kod, G – kontur).
+ */
+function pl_saveContour_(code, path, ctx) {
+  api_requireGrafikLevel_(ctx, 'master');
+  var want = nd_norm_(code);
+  if (!want) throw new Error('Brak kodu płytki.');
+  path = String(path || '').trim();
+  if (path && !/^M[\s\d\-.,MLAQZ]+$/i.test(path)) throw new Error('Kontur nie jest ścieżką SVG (M, L, A, Q, Z).');
+  if (path.length > 45000) throw new Error('Kontur jest za długi (' + path.length + ' znaków).');
+  var sheet = SpreadsheetApp.getActive().getSheetByName('PL_kontur');
+  if (!sheet) throw new Error('Arkusz PL_kontur nie istnieje!');
+  var last = sheet.getLastRow();
+  if (last < 2) throw new Error('Arkusz PL_kontur jest pusty.');
+  var codes = sheet.getRange(2, 1, last - 1, 1).getDisplayValues();
+  for (var i = 0; i < codes.length; i++) {
+    if (nd_norm_(codes[i][0]) !== want) continue;
+    var row = i + 2;
+    if (nd_norm_(sheet.getRange(row, 1).getDisplayValue()) !== want) throw new Error('Kod w wierszu ' + row + ' się nie zgadza – spróbuj ponownie.');
+    sheet.getRange(row, 7).setValue(path);   // G
+    return { row: row, code: String(codes[i][0]).trim(), length: path.length };
+  }
+  throw new Error('Nie ma płytki ' + code + ' w kolumnie A arkusza PL_kontur.');
+}

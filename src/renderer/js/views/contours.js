@@ -8,6 +8,7 @@ import * as G from '../logic/toolGeometry.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { openPlateEditor } from './plateEditor.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ } from './toolViews.js';
 import * as B from '../logic/builder.js';
 
@@ -343,7 +344,7 @@ export function mountContours(el, ctx) {
       if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
       if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
-      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft })) : [];
+      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft, thickness: set.thickness, central: q.central, alone: q.central })) : [];
       prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
     }
     const layers = [];
@@ -354,7 +355,7 @@ export function mountContours(el, ctx) {
     if (svg) layers.push({ pts: E.svgToContour(svg), stroke: '#1565c0', fill: 'rgba(21,101,192,.18)', dash: '', label: 'nowy kontur' });
     // płytki skrawające: rozmieszczenie jak w zestawie (algorytm ToolBuildera) + korekta prawej płytki (lewa – odbicie lustrzane)
     const ins = t && pv.showIns ? insertsOf(t) : [];
-    const all = [...layers.flatMap((l) => l.pts), ...ins.flatMap((q) => [...q.right, ...q.left])];
+    const all = [...layers.flatMap((l) => l.pts), ...ins.flatMap((q) => [...q.right, ...(q.left || [])])];
     if (!all.length) { preview.innerHTML = '<p class="muted" style="padding:10px">Brak konturu do pokazania.</p>'; info.textContent = ''; drawRegionBar(); return; }
     const W = 600, H = 600, pad = 30;
     // widok zamrożony w czasie przeciągania (żeby rysunek nie „uciekał” spod kursora)
@@ -412,7 +413,7 @@ export function mountContours(el, ctx) {
     const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
     ins.forEach((q, j) => {
       const on = pv.insSel === j;
-      out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="#8a6d00" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
+      if (q.left) out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="#8a6d00" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
       out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#c8a400" fill-opacity="${on ? 0.8 : 0.65}" stroke="${on ? '#ff6d00' : '#8a6d00'}" stroke-width="${on ? 2.2 : 1.3}" style="cursor:move"/>`;
       out += `<circle cx="${f2(X(q.right[0].x))}" cy="${f2(Y(q.right[0].y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
     });
@@ -508,7 +509,7 @@ export function mountContours(el, ctx) {
     const d = pv.drag; pv.drag = null;
     if (!d) return;
     if (d.click) { if (d.panning) return; pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
-    if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); return; }
+    if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); if (!d.moved) openPlateFor(d.ins); return; }   // kliknięcie w płytkę – pełny edytor płytki
     if (d.moved) { drawTable(); drawPreview(); return; }
     if (d.idx && d.idx.length === 1) { pv.ptEdit = d.idx[0]; pv.insSel = null; drawPreview(); }   // kliknięcie w punkt – okienko z parametrami
   });
@@ -525,14 +526,30 @@ export function mountContours(el, ctx) {
     const bT = G.bounds(stt.contour), conv = (pts) => pts.map((p) => ({ x: p.x, y: bT.maxY - p.y }));
     const det = st.index.details(t.productCode) || {}, codes = (det.insertContours || []).filter((x) => G.parseInsertPath(x.contour).length >= 2).map((x) => String(x.code || '').toUpperCase());
     const out = [], raw = stack.layers[0].inserts;
-    for (let j = 0; j * 2 + 1 < raw.length; j++) {
-      const auto = conv(raw[j * 2 + 1]), a = adjOf(j);
+    const stride = stt.central ? 1 : 2;   // płytka centralna – jedna na oś; płytki frezu – para lewa / prawa
+    for (let j = 0; (j + 1) * stride <= raw.length; j++) {
+      const auto = conv(raw[j * stride + stride - 1]), a = adjOf(j);
       const cx = auto.reduce((s2, p) => s2 + p.x, 0) / auto.length, cy = auto.reduce((s2, p) => s2 + p.y, 0) / auto.length;
       const right = auto.map((p) => { const r = G.rotateAround(p, { x: cx, y: cy }, -a.ang); return { x: r.x + a.dx * 10, y: r.y + a.dz * 10 }; });
       const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
-      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right });
+      out.push({ code: codes[j] || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: stt.central ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: !!stt.central });
     }
     return out;
+  }
+  /** Pełny edytor płytki: kontur (PL_kontur), parametry 3D, położenie w tym narzędziu. */
+  function openPlateFor(j) {
+    const q = (preview._ins || [])[j], t = st.tool;
+    if (!q || !t || !st.index) return;
+    const path = st.index.insertContour(q.code) || '';
+    openPlateEditor({ code: q.code, path, tool: t.productCode, setup: insertSetup(t), adj: { ...adjOf(j) }, canSave: canSave,
+      save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
+      onApply: ({ path: np, setup, adj }) => {
+        saveInsertSetup(t, setup);
+        st.insAdj[j] = { ...adj };
+        if (np && np !== path) st.index.setInsertContour(q.code, np);
+        pv.insSel = null; drawPreview();
+        status.set(`Płytka ${q.code}: zastosowano zmiany w podglądzie${np !== path ? ' (kontur płytki – do odświeżenia katalogu)' : ''}.`, 'neutral');
+      } });
   }
   /** Okienka przy rysunku: parametry klikniętego punktu albo korekta wybranej płytki. */
   function drawOverlays() {
@@ -568,7 +585,7 @@ export function mountContours(el, ctx) {
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
         rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, 'Punkt bazowy (●): z algorytmu ', h('b', {}, mm(q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.right[0]))),
-        h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'),
+        h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small primary', onclick: () => openPlateFor(j) }, 'Edytor płytki…'), h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'),
           h('button', { class: 'btn small primary', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(report) : navigator.clipboard.writeText(report)); toast('Skopiowano opis korekty'); } catch (e2) { toast(e2.message, true); } } }, 'Kopiuj opis korekty')));
     }
   }

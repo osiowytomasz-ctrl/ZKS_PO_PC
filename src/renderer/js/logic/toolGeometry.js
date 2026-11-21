@@ -187,7 +187,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     const paths = allInserts ? tool.inserts : tool.inserts.slice(0, 1);
     const placed = paths.flatMap((path) => {
       const raw = parseInsertPath(path);
-      return raw.length < 2 ? [] : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer));
+      return raw.length < 2 ? [] : (tool.central ? [false] : [false, true]).map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer));
     });
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
@@ -199,6 +199,10 @@ export function buildStack(tools, allInserts, rotateChamfer) {
 
 function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer) {
   const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));
+  if (tool.central) {   // płytka centralna: środek płytki na osi narzędzia, czubek płytki na czubku narzędzia
+    const cx = (minX + Math.max(...raw.map((p) => p.x))) / 2, topC = offsetY - (tool.length * 10 - (b.maxY - b.minY));
+    return raw.map((p) => pt(p.x - cx, topC + (p.y - minY)));
+  }
   const leftX = -(tool.diameter * 10) / 2, rightX = (tool.diameter * 10) / 2;
   const topY = offsetY - (tool.length * 10 - (b.maxY - b.minY));
   const plain = raw.map((p) => { const dx = p.x - minX; return pt(mirror ? rightX - dx : leftX + dx, topY + (p.y - minY)); });
@@ -213,6 +217,14 @@ function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer) {
 // ---------- miniatura (pole 60 × 70) ----------
 export const MINI_W = 60, MINI_H = 70;
 
+/**
+ * Płytki wiertarskie ISCAR i AMEC (grupa „wie”, rodzaj „ply”) są płytkami centralnymi: jedna płytka na osi narzędzia (środek płytki = oś, czubek = czubek
+ * narzędzia), z opadem na obie strony – inaczej niż płytki frezów mocowane przy obwodzie (para lewa i prawa).
+ */
+export const isCentralTool = (t) => {
+  const grp = String((t && t.columnD) ?? '').trim().toLowerCase(), typ = String((t && t.columnE) ?? '').trim().toLowerCase(), co = String((t && t.columnP) ?? '').toLowerCase();
+  return grp === 'wie' && typ === 'ply' && (co.includes('iscar') || co.includes('amec'));
+};
 export const isChamfer = (t) => { const g = String(t.columnD ?? '').trim().toLowerCase(), y = String(t.columnE ?? '').trim().toLowerCase(); return g === 'faz' || y === 'faz'; };
 export const isChamferForPreview = (code, type, name) => String(code ?? '').toUpperCase().includes('POGF') || String(type ?? '').toLowerCase().includes('faz') || String(name ?? '').toLowerCase().includes('faz');
 
@@ -284,7 +296,7 @@ export function toolIndex(catalog, overrides = null) {
       if (!t) return null;
       const d = det(t.productCode);
       const tre = String(t.columnD ?? '').trim().toLowerCase() === 'tre';   // wiertło rurowe: kielich, ostrze = węglik (płytki rysuje podgląd 3D z liczby wg Ø)
-      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
+      return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: tre ? [] : ((d && d.insertContours) || []).map((i) => i.contour), diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
@@ -309,6 +321,12 @@ export function toolIndex(catalog, overrides = null) {
       const k = normCode(partCode);
       for (const d of details.values()) for (const ic of d.insertContours || []) if (normCode(ic.code) === k && String(ic.contour || '').trim()) return ic.contour;
       return null;
+    },
+    /** Podmiana konturu płytki o kodzie [partCode] we wszystkich narzędziach (po edycji w edytorze płytki, w pamięci programu). Zwraca liczbę zmienionych wpisów. */
+    setInsertContour(partCode, path) {
+      const k = normCode(partCode); let n = 0;
+      for (const d of details.values()) for (const ic of d.insertContours || []) if (normCode(ic.code) === k) { ic.contour = path; n++; }
+      return n;
     },
     /** Wszystkie kody części skrawających (płytek) z narzędzi katalogu. */
     cuttingParts() {
@@ -515,7 +533,7 @@ export function insertsForMesh(stackTools, offsets) {
     if (!stt || !stt.inserts || !stt.inserts.length || !stt.contour || stt.contour.length < 3) return;
     const s = buildStack([stt], true, false); if (!s) return;
     const b = bounds(stt.contour), off = (offsets && offsets[i]) || 0;
-    s.layers[0].inserts.forEach((poly, j) => { if (j % 2) out.push({ code: stt.code, poly: poly.map((p) => pt(p.x, b.maxY - p.y + off)) }); });
+    s.layers[0].inserts.forEach((poly, j) => { if (stt.central || j % 2) out.push({ code: stt.code, central: !!stt.central, poly: poly.map((p) => pt(p.x, b.maxY - p.y + off)) }); });
   });
   return out;
 }

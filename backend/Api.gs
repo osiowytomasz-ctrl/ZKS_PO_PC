@@ -271,6 +271,11 @@ var API_FUNCS = {
     write: true,
     run: function (a, ctx) { return nd_confirmContour_(a[0], a[1], ctx, a[2], a[3]); }
   },
+  // Edytor płytki (Kontury.gs): zapis konturu płytki do arkusza PL_kontur (kolumna G), MASTER / GOD
+  plSaveContour: {
+    write: true,
+    run: function (a, ctx) { return pl_saveContour_(a[0], a[1], ctx); }
+  },
   ndContourData: {
     run: function () { return nd_contourData_(); }
   },

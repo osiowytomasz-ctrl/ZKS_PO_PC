@@ -112,7 +112,7 @@ export function toolView3d(index, tools) {
     mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
     mesh.trepan = stts.map((s, i) => (s && s.trepan ? G.trepanBlade(s.diameter, mesh.regions[i], savedInsertZ(index.tool(s.code) || s.code)) : null));   // płytki ostrza wiertła rurowego
   }
-  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code) })) : [];
+  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => ({ poly: q.poly, ...insertSetup(index.tool(q.code) || q.code), central: q.central, alone: q.central })) : [];
   return view3d(mesh, ins);
 }
 
@@ -131,8 +131,11 @@ function teethFromTool(t) {
 export function savedInsertZ(t) { const z = Number((insStore()[codeOf(t)] || {}).z); return z >= 1 ? Math.min(60, Math.round(z)) : 0; }
 /** { z, draft } płytek narzędzia: zapisane w Konturach albo domyślne (z z opisu narzędzia / 2, pochylenie 7°). */
 export function insertSetup(t) {
-  const o = insStore()[codeOf(t)] || {};
-  return { z: Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), draft: Number.isFinite(Number(o.draft)) && o.draft !== '' && o.draft != null ? Math.max(0, Math.min(30, Number(o.draft))) : 7 };
+  const o = insStore()[codeOf(t)] || {}, central = !!t && typeof t === 'object' && G.isCentralTool(t);   // płytka centralna (wiertła ISCAR / AMEC): jedna na osi, opad na obie strony
+  const num = (v) => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : null);
+  return { z: central ? 1 : Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), central,
+    draft: num(o.draft) != null ? Math.max(0, Math.min(30, num(o.draft))) : central ? 5 : 7,   // pochylenie ścian / opad (°)
+    thickness: num(o.thickness) > 0 ? Math.min(30, num(o.thickness)) : 0 };   // grubość płytki, mm (0 – automatycznie)
 }
 export function saveInsertSetup(t, patch) {
   const all = insStore(), k = codeOf(t);

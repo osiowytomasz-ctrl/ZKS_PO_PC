@@ -48,6 +48,48 @@ function latheGeometry(T, profile, z0, keep = null) {
 }
 
 /**
+ * Linie konturów bryły obrotowej (bez siatki trójkątów): okręgi krawędzi na każdym załamaniu profilu (> 4°; drobne łuki – zaokrąglenia – bez okręgów)
+ * oraz na poziomach granic rejonów [force] (0,1 mm). Wynik: pary punktów dla LineSegments albo null.
+ */
+function ringLines(T, profile, z0, keep, force = []) {
+  const pos = [], n = profile.length, SEG_L = 96;
+  const vis = (k) => (k > 0 && (!keep || keep(profile[k - 1], profile[k]))) || (k < n - 1 && (!keep || keep(profile[k], profile[k + 1])));
+  const seen = new Set();
+  for (let k = 0; k < n; k++) {
+    const p = profile[k];
+    if (!(p.x > 0.5) || !vis(k)) continue;
+    let draw = k === 0 || k === n - 1 || force.some((z) => Math.abs(z - p.y) < 0.5);
+    if (!draw) {
+      const a = profile[k - 1], b = profile[k + 1], d1 = [p.x - a.x, p.y - a.y], d2 = [b.x - p.x, b.y - p.y], l1 = Math.hypot(...d1), l2 = Math.hypot(...d2);
+      if (l1 > 1e-6 && l2 > 1e-6) {
+        const ang = (Math.acos(Math.max(-1, Math.min(1, (d1[0] * d2[0] + d1[1] * d2[1]) / (l1 * l2)))) * 180) / Math.PI;
+        draw = ang > 4 && !(l1 < 12 && l2 < 12 && ang < 20);   // łuk z drobnych odcinków (< 1,2 mm) – bez okręgów
+      }
+    }
+    const key = Math.round(p.x * 100) + ':' + Math.round(p.y * 100);
+    if (!draw || seen.has(key)) continue;
+    seen.add(key);
+    const r = p.x / 10, y = (p.y + z0) / 10;
+    for (let j = 0; j < SEG_L; j++) { const a1 = (2 * Math.PI * j) / SEG_L, a2 = (2 * Math.PI * (j + 1)) / SEG_L; pos.push(r * Math.cos(a1), y, r * Math.sin(a1), r * Math.cos(a2), y, r * Math.sin(a2)); }
+  }
+  if (!pos.length) return null;
+  const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+  return g;
+}
+/** Profil jako linie w płaszczyźnie południka (x = promień, y = wysokość) – obrys bryły widziany z boku; obracany do płaszczyzn prostopadłych do kierunku patrzenia. */
+function meridianLines(T, profile, z0, keep) {
+  const pos = [];
+  for (let k = 0; k < profile.length - 1; k++) {
+    const a = profile[k], b = profile[k + 1];
+    if ((keep && !keep(a, b)) || (a.x <= 0 && b.x <= 0)) continue;
+    pos.push(a.x / 10, (a.y + z0) / 10, 0, b.x / 10, (b.y + z0) / 10, 0);
+  }
+  if (!pos.length) return null;
+  const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+  return g;
+}
+
+/**
  * Płytka ostrza wiertła rurowego: wycinek pierścienia węglika (promień [rIn, rOut], wysokość [y1, y2], kąt [a0, a1] wokół osi Y sceny), mm.
  * Powierzchnie walcowe gładkie, płaszczyzny (góra, dół, boki) płaskie.
  */
@@ -75,15 +117,15 @@ function sectorGeometry(T, rIn, rOut, y1, y2, a0, a1, steps) {
  * Płytka 3D: kontur płytki (0,1 mm, prawa płytka – x > 0) leży powierzchnią natarcia w płaszczyźnie osi narzędzia (z = 0),
  * grubość idzie do tyłu (−z), a ściany są pochylone o [draft]° (przyłożenie – tylny przekrój mniejszy, płytka nie trze tyłem).
  */
-function insertGeometry(T, poly, draft) {
+function insertGeometry(T, poly, draft, thickness = 0, central = false) {
   let P = (poly || []).map((p) => new T.Vector2(p.x / 10, p.y / 10));
   if (P.length > 2 && P[0].distanceTo(P[P.length - 1]) < 1e-6) P.pop();
   if (P.length < 3) return null;
   if (T.ShapeUtils.isClockWise(P)) P = P.reverse();   // przeciwnie do wskazówek zegara → normalne na zewnątrz
   const xs = P.map((p) => p.x), ys = P.map((p) => p.y);
   const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-  const depth = Math.min(6, Math.max(1, size * 0.3));
-  const off = Math.min(size * 0.2, depth * Math.tan((Math.max(0, draft || 0) * Math.PI) / 180));
+  const depth = thickness > 0 ? thickness : Math.min(6, Math.max(1, size * 0.3));
+  const off = Math.min(size * 0.2, (central ? depth / 2 : depth) * Math.tan((Math.max(0, draft || 0) * Math.PI) / 180));
   // tylny przekrój: kontur odsunięty do środka o [off] (przecięcie przesuniętych krawędzi, ograniczone przy ostrych narożach)
   const n = P.length, inN = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1; return new T.Vector2(-dy / l, dx / l); };
   const B = P.map((p, i) => {
@@ -95,12 +137,24 @@ function insertGeometry(T, poly, draft) {
   const tris = T.ShapeUtils.triangulateShape(P, []);
   const pos = [];
   const v = (q, z) => pos.push(q.x, q.y, z);
-  for (const [a, b, c] of tris) { v(P[a], 0); v(P[b], 0); v(P[c], 0); }               // przód (natarcie) – w płaszczyźnie osi
-  for (const [a, b, c] of tris) { v(B[a], -depth); v(B[c], -depth); v(B[b], -depth); } // tył – mniejszy
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    v(P[i], 0); v(B[i], -depth); v(P[j], 0);
-    v(P[j], 0); v(B[i], -depth); v(B[j], -depth);
+  if (central) {
+    // płytka centralna: płaszczyzna środkowa (pełny kontur) w osi narzędzia, ściany opadają na obie strony – przód i tył mniejsze o opad
+    const h2 = depth / 2;
+    for (const [a, b, c] of tris) { v(B[a], h2); v(B[b], h2); v(B[c], h2); }
+    for (const [a, b, c] of tris) { v(B[a], -h2); v(B[c], -h2); v(B[b], -h2); }
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      v(P[i], 0); v(P[j], 0); v(B[i], h2);   v(P[j], 0); v(B[j], h2); v(B[i], h2);      // przód: ściana opadająca od płaszczyzny środkowej do przedniego przekroju
+      v(P[i], 0); v(B[i], -h2); v(P[j], 0);  v(P[j], 0); v(B[i], -h2); v(B[j], -h2);    // tył – lustrzanie
+    }
+  } else {
+    for (const [a, b, c] of tris) { v(P[a], 0); v(P[b], 0); v(P[c], 0); }               // przód (natarcie) – w płaszczyźnie osi
+    for (const [a, b, c] of tris) { v(B[a], -depth); v(B[c], -depth); v(B[b], -depth); } // tył – mniejszy
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      v(P[i], 0); v(B[i], -depth); v(P[j], 0);
+      v(P[j], 0); v(B[i], -depth); v(B[j], -depth);
+    }
   }
   const g = new T.BufferGeometry();
   g.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
@@ -128,15 +182,16 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
     scene.add(new T.HemisphereLight(0xffffff, 0x8899aa, 0.6));
     const sun = new T.DirectionalLight(0xffffff, 1.4); sun.position.set(1, 2, 1.5); scene.add(sun);
 
-    const group = new T.Group(), geos = [], mats = [];
+    const group = new T.Group(), geos = [], mats = [], meridians = [];
+    const lineMat = new T.LineBasicMaterial({ color: 0x1b1f24, transparent: true, opacity: 0.9 }); mats.push(lineMat);
     const edges = (g, color, op) => { const eg = new T.EdgesGeometry(g, 25), em = new T.LineBasicMaterial({ color, transparent: true, opacity: op }); group.add(new T.LineSegments(eg, em)); geos.push(eg); mats.push(em); };
     // płytki skrawające: wielokąty z rysunku 2D wyciągnięte na grubość (w płaszczyźnie osi narzędzia)
     if (inserts && inserts.length) {
-      const im = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.45, roughness: 0.35, flatShading: true }); mats.push(im);
+      const im = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.45, roughness: 0.35, flatShading: true, side: T.DoubleSide }); mats.push(im);
       const lm = new T.LineBasicMaterial({ color: 0x3b0000, transparent: true, opacity: 0.6 }); mats.push(lm);
       for (const it0 of inserts) {
         const it = Array.isArray(it0) ? { poly: it0, z: 1, draft: 7, alone: true } : it0;
-        const g = insertGeometry(T, it.poly, it.draft);
+        const g = insertGeometry(T, it.poly, it.draft, it.thickness || 0, !!it.central);
         if (!g) continue;
         geos.push(g);
         const eg = new T.EdgesGeometry(g, 20); geos.push(eg);
@@ -149,7 +204,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         }
       }
     }
-    const workMat = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.55, roughness: 0.3, side: T.DoubleSide }); mats.push(workMat);
+    const workMat = new T.MeshStandardMaterial({ color: WORK_COLOR, metalness: 0.55, roughness: 0.3, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); mats.push(workMat);
     (mesh ? mesh.profiles : []).forEach((pr0, i) => {
       if (!pr0) return;
       // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
@@ -159,7 +214,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: korpus – bryła wydrążona do czubka, ostrze to osobne płytki wlutowane w ściankę
       const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
-      const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide }); mats.push(m);
+      const m = new T.MeshStandardMaterial({ color: col, metalness: 0.75, roughness: 0.32, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }); mats.push(m);
       if (tb) {   // płytki wlutowane w ściankę: każda ma po obwodzie najwyżej [arc] mm (4), n płytek równo co 360°/n, czubek lekko ponad korpusem
         const y1 = tb.z1 + mesh.offsets[i] / 10, y2 = tb.z2 + mesh.offsets[i] / 10 + 0.04, pitch = (2 * Math.PI) / tb.n, half = tb.arc / (2 * Math.max(tb.rOut, 1));
         for (let k = 0; k < tb.n; k++) {
@@ -169,12 +224,17 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
         }
       }
       const nt = mesh.nut && mesh.nut[i];   // nakrętka ER: część bryły od jej podstawy w ciemniejszym kolorze
-      const nutMat = nt ? new T.MeshStandardMaterial({ color: new T.Color(col).multiplyScalar(0.45), metalness: 0.7, roughness: 0.4, side: T.DoubleSide }) : null; if (nutMat) mats.push(nutMat);
+      const nutMat = nt ? new T.MeshStandardMaterial({ color: new T.Color(col).multiplyScalar(0.45), metalness: 0.7, roughness: 0.4, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }) : null; if (nutMat) mats.push(nutMat);
       const isNut = nt ? (a, b) => (a.y + b.y) / 20 >= nt.z1 / 10 - 1e-6 : null;
       for (const [keep, mat] of nt ? [[(a, b) => !isNut(a, b), m], [isNut, nutMat]] : tb ? [[null, m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
         const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;
         group.add(new T.Mesh(g, mat)); geos.push(g);
-        edges(g, 0x2a2f36, 0.35);
+        // linie konturów (bez trójkątów): okręgi krawędzi + obrys z boku (południki) – ułatwiają odczyt narzędzia
+        const force = [...regs.flatMap((r) => [r.z1 * 10, r.z2 * 10]), ...(nt ? [nt.z1] : [])];
+        const rg = ringLines(T, pr, mesh.offsets[i], keep, force);
+        if (rg) { group.add(new T.LineSegments(rg, lineMat)); geos.push(rg); }
+        const mg = meridianLines(T, pr, mesh.offsets[i], keep);
+        if (mg && !(opts.xf && opts.xf.ang)) { const l1 = new T.LineSegments(mg, lineMat), l2 = new T.LineSegments(mg, lineMat); group.add(l1, l2); meridians.push([l1, l2]); geos.push(mg); }
       }
     });
     if (opts.xf) {   // przesunięcie / obrót całego narzędzia z płytkami (moduł Kontury)
@@ -192,7 +252,7 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
     const views = {
       'Izometria': [1.3, 0.8, 1.8], 'Z boku': [0, 0, 1], 'Z góry': [0, 1, 0.0001], 'Od dołu': [0, -1, 0.0001],
     };
-    const setView = (k) => { const d = new T.Vector3(...views[k]).normalize(); const dist = R / (2 * Math.tan((cam.fov * Math.PI) / 360)) * 1.35; cam.position.copy(center).addScaledVector(d, dist); ctl.target.copy(center); ctl.update(); kick(); };
+    const setView = (k) => { const d = new T.Vector3(...views[k]).normalize(); const dist = R / (2 * Math.tan((cam.fov * Math.PI) / 360) * Math.min(1, cam.aspect || 1)) * 1.35; /* w wąskim oknie liczy się szerokość widoku */ cam.position.copy(center).addScaledVector(d, dist); ctl.target.copy(center); ctl.update(); kick(); };
     let spin = false;
     for (const k of Object.keys(views)) bar.append(h('button', { class: 'btn small', onclick: () => setView(k) }, k));
     const spinBtn = h('button', { class: 'btn small', title: 'Obrót automatyczny', onclick: () => { spin = !spin; ctl.autoRotate = spin; spinBtn.classList.toggle('primary', spin); kick(); } }, '⟳');
@@ -217,12 +277,19 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
 
     // rysowanie tylko gdy coś się zmienia (oszczędza procesor/kartę)
     let raf = 0, alive = true;
-    const frame = () => { raf = 0; if (!alive) return; const moving = ctl.update(); renderer.render(scene, cam); drawTriad(); if (moving || spin) kick(); };
+    const frame = () => {
+      raf = 0; if (!alive) return; const moving = ctl.update();
+      if (meridians.length) {   // obrys z boku: południki prostopadłe do kierunku patrzenia (azymut kamery wokół osi narzędzia)
+        const az = Math.atan2(cam.position.x - ctl.target.x, cam.position.z - ctl.target.z);
+        for (const [a, b] of meridians) { a.rotation.y = -(az + Math.PI / 2); b.rotation.y = -(az - Math.PI / 2); }
+      }
+      renderer.render(scene, cam); drawTriad(); if (moving || spin) kick();
+    };
     const kick = () => { if (!raf && alive) raf = requestAnimationFrame(frame); };
     ctl.addEventListener('change', kick);
     const resize = () => { const w = wrap.clientWidth, hh = wrap.clientHeight; if (!w || !hh) return; renderer.setSize(w, hh, false); cam.aspect = w / hh; cam.updateProjectionMatrix(); kick(); };
     const ro = new ResizeObserver(resize); ro.observe(wrap);
-    setView('Izometria'); resize();
+    resize(); setView('Izometria');
 
     // zwolnienie kontekstu WebGL po zamknięciu okna (przeglądarka ma limit kontekstów)
     const dispose = () => { alive = false; ro.disconnect(); mo.disconnect(); ctl.dispose(); geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); envTex.dispose(); pmrem.dispose(); renderer.dispose(); renderer.forceContextLoss(); };
