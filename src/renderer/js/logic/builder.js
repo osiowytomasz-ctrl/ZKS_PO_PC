@@ -28,7 +28,7 @@ function matches(t, f, wanted) {
 export function filterTools(tools, filters, exclude = null) {
   return tools.filter((t) => FIELDS.every((f) => f === exclude || !isActive(filters[f]) || matches(t, f, filters[f])));
 }
-/** Wartości pola do okna filtra z wielokrotnym wyborem: [{ value, count }] – wszystkie wartości, licznik = narzędzia przechodzące filtry INNYCH pól. */
+/** Wartości pola do okna filtra z wielokrotnym wyborem: [{ value, count }] – tylko wartości pasujące do filtrów INNYCH pól (licznik = ile narzędzi), plus już wybrane. */
 export function optionCounts(tools, filters, field) {
   const passing = new Set(filterTools(tools, filters, field)), counts = new Map(), label = new Map();
   for (const t of tools) {
@@ -38,7 +38,9 @@ export function optionCounts(tools, filters, field) {
     if (!label.has(k)) label.set(k, v);
     counts.set(k, (counts.get(k) || 0) + (passing.has(t) ? 1 : 0));
   }
-  const list = [...counts].map(([k, count]) => ({ value: label.get(k), count }));
+  // filtry wzajemnie się ograniczają: tylko wartości, które pasują do wyborów w innych kolumnach (licznik > 0); już wybrane zostają (można je odznaczyć)
+  const chosen = filters[field] instanceof Set ? new Set([...filters[field]].map((x) => String(x).toLowerCase())) : new Set();
+  const list = [...counts].filter(([k, count]) => count > 0 || chosen.has(k)).map(([k, count]) => ({ value: label.get(k), count }));
   return ['diameter', 'length', 'rAlpha'].includes(field) ? list.sort((a, b) => num(a.value) - num(b.value)) : list.sort((a, b) => naturalCompare(a.value, b.value));
 }
 export function options(tools, filters, field) {

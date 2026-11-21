@@ -406,9 +406,10 @@ test('ToolBuilder: filtry z wielokrotnym wyborem wartości (jak autofiltr w Graf
   assert.deepEqual(codes(B.filterTools(tools, f({ diameter: new Set(['10', '12']) }))), ['B', 'D']);
   assert.deepEqual(codes(B.filterTools(tools, f({ group: new Set() }))), ['A', 'B', 'C', 'D']);   // pusty zbiór = bez filtra
   assert.equal(B.hasFilters(f({})), false); assert.equal(B.hasFilters(f({ group: new Set(['opr']) })), true); assert.equal(B.hasFilters(f({ code: 'x' })), true);
-  // liczniki: wszystkie wartości pola, licznik – narzędzia przechodzące filtry innych pól
-  assert.deepEqual(B.optionCounts(tools, f({ group: new Set(['opr']) }), 'mIn'), [{ value: 'ABS040', count: 0 }, { value: 'ISO050', count: 2 }, { value: 'WEL016', count: 0 }]);
-  assert.deepEqual(B.optionCounts(tools, f({ mIn: new Set(['ISO050']) }), 'group'), [{ value: 'fre', count: 0 }, { value: 'opr', count: 2 }, { value: 'wie', count: 0 }]);
+  // filtry wzajemnie się ograniczają: tylko wartości pasujące do wyborów w innych kolumnach (licznik – narzędzia przechodzące filtry innych pól), wybrane zostają
+  assert.deepEqual(B.optionCounts(tools, f({ group: new Set(['opr']) }), 'mIn'), [{ value: 'ISO050', count: 2 }]);
+  assert.deepEqual(B.optionCounts(tools, f({ mIn: new Set(['ISO050']) }), 'group'), [{ value: 'opr', count: 2 }]);
+  assert.deepEqual(B.optionCounts(tools, f({ mIn: new Set(['ISO050']), group: new Set(['fre']) }), 'group'), [{ value: 'opr', count: 2 }, { value: 'fre', count: 0 }].sort((a, b) => a.value.localeCompare(b.value)), 'wybrana wartość zostaje, nawet bez dopasowań');
   assert.deepEqual(B.optionCounts(tools, f({}), 'diameter').map((o) => o.value), ['10', '12', '20']);   // liczby rosnąco
 });
 
