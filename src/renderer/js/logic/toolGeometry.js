@@ -186,7 +186,8 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     const offsetY0 = offsetY;
     const outline = tool.contour.map((p) => pt(p.x, offsetY + (b.maxY - p.y)));
     // płytki: własny układ narzędzia (rodzaj, wiele płytek, położenie) albo płytki katalogu; centralna – jeden wielokąt na osi, obwodowa – para lewa / prawa
-    const list = tool.plates ? (allInserts ? tool.plates : tool.plates.slice(0, 1))
+    // podgląd zapisu (allInserts = false) pokazuje pierwszą płytkę, ale nie gubi płytek, które tworzą układ: własny układ, płytki centralne / nieregularne i wiertła płytkowe (np. Komet z dwiema płytkami)
+    const list = tool.plates ? (allInserts ? tool.plates : tool.plates.filter((p, i) => i === 0 || p.custom || (p.kind && p.kind !== 'edge') || tool.drill))
       : (allInserts ? tool.inserts : tool.inserts.slice(0, 1)).map((path) => ({ path, code: '', kind: tool.central ? 'central' : 'edge', central: !!tool.central, dx: 0, dz: 0, ang: 0, phi: 0, z: 0 }));
     const placed = [], plates = [];
     for (const pl0 of list) {

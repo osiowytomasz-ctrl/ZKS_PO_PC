@@ -135,3 +135,17 @@ test('płytka obrócona wokół osi narzędzia (φ = 180°): w rzucie z boku lus
     assert.deepEqual(ins[1].poly, ins[0].poly);
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('podgląd zapisu (tylko pierwsza płytka) nie gubi drugiej płytki wiertła płytkowego ani własnego układu', () => {
+  const plate = 'M 0 0 L 10 0 L 10 3 L 5 6 L 0 3 Z';
+  const mk = (company, group = 'wie', type = 'ply') => ({ productCode: 'W1', columnD: group, columnE: type, columnP: company, columnF: '10', columnJ: '50', columnG: '' });
+  const det = { columnAY: '-50_-650;50_-650;50_500;-50_500', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] };
+  const cnt = (t) => { const idx = G.toolIndex({ tools: [t], detailsMap: { W1: det } }, null); return G.buildStack([idx.stackTool(t)], false, true).layers[0].plates.length; };
+  assert.equal(cnt(mk('Komet')), 2, 'wiertło Komet – obie płytki');
+  assert.equal(cnt(mk('ISCAR')), 2, 'drugą płytką wiertła płytkowego ISCAR jest obwodowa – wiertło płytkowe pokazuje wszystkie');
+  assert.equal(cnt(mk('Iscar', 'fre', 'wsp')), 1, 'frez: tylko pierwsza płytka (reszta to zamienniki)');
+  try {
+    G.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge' }, { code: 'B', mode: 'edge' }]);
+    assert.equal(cnt(mk('Iscar', 'fre', 'wsp')), 2, 'własny układ – wszystkie płytki układu');
+  } finally { G.setPlateSetupProvider(null); }
+});
