@@ -319,3 +319,16 @@ test('frez na trzpieniu FRExxx osadza się dolną płaszczyzną na czole oprawki
   assert.ok(Math.abs(zFace - zBottom) < 1e-9);
   assert.equal(G2.fitSeat(idx.stackTool(holder)), 0);
 });
+
+test('frezy: poziome krawędzie średnic (linia przez całą szerokość na uskoku i załamaniu) dopisywane do konturu z każdego źródła, idempotentnie', async () => {
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  const t = { productCode: 'FR9', columnD: 'fre', columnE: 'tar', columnP: 'X', columnF: '80', columnJ: '50', columnM: 'ABS040', columnG: '' };
+  // kontur z kolumny T: walec Ø60 (r 300), uskok do Ø80 (r 400) i faza – bez linii wewnętrznych
+  const src = '-300_0;300_0;300_200;400_300;400_500;-400_500;-400_300;-300_200';
+  const ix = G2.toolIndex({ tools: [t, { ...t, productCode: 'OP9', columnD: 'opr' }], detailsMap: { FR9: { columnAY: src, insertContours: [] }, OP9: { columnAY: src, insertContours: [] } } }, null);
+  const pts = G2.parseContour(ix.details('FR9').columnAY), horizontal = (z) => pts.some((p, i) => { const q = pts[(i + 1) % pts.length]; return p.y === z && q.y === z && (p.x === 0 || q.x === 0); });
+  assert.ok(horizontal(200) && horizontal(300), 'linie na załamaniach (Z 20 i 30 mm) przez całą szerokość');
+  assert.equal(ix.details('OP9').columnAY, src, 'inne grupy bez zmian (tu: oprawka)');
+  const again = G2.toolIndex({ tools: [t], detailsMap: { FR9: { columnAY: ix.details('FR9').columnAY, insertContours: [] } } }, null);
+  assert.equal(again.details('FR9').columnAY, ix.details('FR9').columnAY, 'ponowne przetworzenie nic nie zmienia');
+});

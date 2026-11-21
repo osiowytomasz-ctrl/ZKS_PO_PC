@@ -2,7 +2,7 @@
 // Kontur trzonu (ND_CACHE kolumna T, w API `columnAY`) to pary `x_y` rozdzielone `;` w jednostkach 0,1 mm; kontury płytek (PL_kontur, kolumna G)
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
-import { halfFromContour } from './contourEditor.js';
+import { halfFromContour, halfPath, withEdgeLines, expandHalf } from './contourEditor.js';
 import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits, freL2, freD, freKeyDepth } from './contourGen.js';
 import { resolvePlates, normPlates } from './plateLayout.js';
 import { naturalCompare } from './common.js';
@@ -414,20 +414,25 @@ export function toolIndex(catalog, overrides = null) {
     if (!o) return rg0 && d ? { ...d, regions: rg0 } : d;
     return { ...(d || {}), columnAY: o, confirmedContour: !genC, generatedContour: genC, originalAY: d ? d.columnAY : '', regions: rg0 || null }; };
   /**
-   * Frez z mocowaniem FRExxx: kontur (z dowolnego źródła – T, V, BC, generator) jest przesunięty w osi Z tak, aby jego najniższy punkt (dolna płaszczyzna) leżał
-   * na Z = −L2; wtedy Z = 0 to dno otworu pod trzpień (czubek trzpienia), a gniazdo, kamienie i osadzenie na oprawce są zgodne. Przesunięcie jest idempotentne.
+   * Frezy (grupa „fre”): kontur z dowolnego źródła (T, V, BC, generator) jest uzupełniany o poziome krawędzie średnic (linia przez całą szerokość na każdym uskoku i załamaniu
+   * obrysu – jak w innych narzędziach), a frez z mocowaniem FRExxx dodatkowo przesunięty w osi Z tak, aby jego najniższy punkt (dolna płaszczyzna) leżał na Z = −L2:
+   * wtedy Z = 0 to dno otworu pod trzpień, a gniazdo, kamienie i osadzenie na oprawce są zgodne. Obie operacje są idempotentne.
    */
   const detMemo = new Map();
   const det = (code) => {
     const r = det0(code), t = tools.get(normCode(code));
-    if (!r || !t || !isFreFit(t) || !String(r.columnAY ?? '').trim()) return r;
-    const l2 = freL2(t.columnM), key = normCode(code), hit = detMemo.get(key);
-    if (hit && hit.src === r.columnAY && hit.l2 === l2 && hit.regions === r.regions) return { ...r, columnAY: hit.ay, regions: hit.rg };
-    const pts = parseContour(r.columnAY), minY = pts.length ? Math.min(...pts.map((p) => p.y)) : 0, dy = -l2 * 10 - minY;
-    const ay = Math.abs(dy) < 1e-6 ? r.columnAY : pts.map((p) => `${Math.round(p.x * 1000) / 1000}_${Math.round((p.y + dy) * 1000) / 1000}`).join(';');
-    const rg = r.regions && Math.abs(dy) >= 1e-6 ? r.regions.map((g) => ({ ...g, z1: Math.round((g.z1 + dy / 10) * 1000) / 1000, z2: Math.round((g.z2 + dy / 10) * 1000) / 1000 })) : r.regions;
+    if (!r || !t || String(t.columnD ?? '').trim().toLowerCase() !== 'fre' || !String(r.columnAY ?? '').trim()) return r;
+    const l2 = isFreFit(t) ? freL2(t.columnM) : 0, key = normCode(code), hit = detMemo.get(key);
+    if (hit && hit.src === r.columnAY && hit.l2 === l2 && hit.regions === r.regions) return hit.ay === r.columnAY && hit.rg === r.regions ? r : { ...r, columnAY: hit.ay, regions: hit.rg };
+    let pts = parseContour(r.columnAY), dy = 0;
+    if (l2 && pts.length) { dy = -l2 * 10 - Math.min(...pts.map((p) => p.y)); if (Math.abs(dy) >= 1e-6) pts = pts.map((p) => ({ x: p.x, y: p.y + dy })); else dy = 0; }
+    const half = pts.length >= 3 ? halfPath(pts) : [], withLines = half.length >= 3 ? withEdgeLines(half) : half;
+    if (withLines !== half) pts = expandHalf(withLines);   // dopisane brakujące krawędzie średnic
+    const fmt3 = (v) => String(Math.round(v * 1000) / 1000);
+    const ay = dy || withLines !== half ? pts.map((p) => `${fmt3(p.x)}_${fmt3(p.y)}`).join(';') : r.columnAY;
+    const rg = r.regions && dy ? r.regions.map((g) => ({ ...g, z1: Math.round((g.z1 + dy / 10) * 1000) / 1000, z2: Math.round((g.z2 + dy / 10) * 1000) / 1000 })) : r.regions;
     detMemo.set(key, { src: r.columnAY, l2, regions: r.regions, ay, rg });
-    return { ...r, columnAY: ay, regions: rg };
+    return ay === r.columnAY && rg === r.regions ? r : { ...r, columnAY: ay, regions: rg };
   };
   let usage = null;
   const idx = {
