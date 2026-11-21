@@ -20,7 +20,7 @@ export function openPlateEditor(o) {
   const orig = P.parsePlate(o.path);
   const st = { pts: orig.pts.length >= 3 ? orig.pts : DEFAULT_PLATE.map((p) => ({ ...p })), sel: 0, step: 0.1, hist: [], zoom: 1, pan: { x: 0, y: 0 }, view: null, drag: null,
     setup: { z: 2, draft: 7, thickness: 0, ...(o.setup || {}) }, plate: o.plate ? { mode: 'auto', dx: 0, dz: 0, ang: 0, phi: 0, z: 0, ...o.plate } : null, busy: false };
-  const isCentral = () => (st.plate ? (st.plate.mode === 'central' ? true : st.plate.mode === 'edge' ? false : !!o.autoCentral) : !!o.autoCentral);
+  const isCentral = () => (st.plate ? (st.plate.mode === 'central' ? true : st.plate.mode === 'edge' || st.plate.mode === 'irregular' ? false : !!o.autoCentral) : !!o.autoCentral);
   const status = h('div', { class: 'status-line', style: { minHeight: '18px' } });
   const say = (t, kind) => { status.textContent = t || ''; status.style.color = kind === 'error' ? '#c62828' : kind === 'neutral' ? '#666' : '#1b5e20'; };
 
@@ -121,14 +121,14 @@ export function openPlateEditor(o) {
   // ---------- parametry 3D i położenie ----------
   const field = (label, value, onSet, unit = '', w = '64px') => { const inp = h('input', { type: 'text', value: comma(value), style: { width: w, padding: '1px 4px' }, onchange: () => { const v = num(inp.value); if (Number.isFinite(v)) { onSet(v); schedule3d(); } else inp.value = comma(value); } }); return h('label', { class: 'row', style: { gap: '4px', margin: '2px 0', alignItems: 'center' } }, h('span', { style: { width: '110px' } }, label), inp, h('span', { class: 'muted' }, unit)); };
   const kindNote = h('div', { class: 'muted', style: { fontSize: '12px' } });
-  const paintNote = () => { kindNote.textContent = isCentral() ? 'Płytka centralna (wiertło ISCAR / AMEC): jedna na osi narzędzia, opad na obie strony.' : 'Płytka obwodowa (frez): z kopii co 360° / z, przyłożenie z tyłu.'; };
-  const modeSel = st.plate ? h('select', { onchange: () => { st.plate.mode = modeSel.value; paintNote(); paintParams(); schedule3d(); } }, ...[['auto', 'automatycznie'], ['central', 'centralna (na osi narzędzia)'], ['edge', 'obwodowa (przy krawędzi)']].map(([v, l]) => h('option', { value: v, selected: st.plate.mode === v }, l))) : null;
+  const paintNote = () => { kindNote.textContent = st.plate && st.plate.mode === 'irregular' ? 'Płytka nieregularna (np. wiertło płytkowe Komet): jedna płytka w dowolnym miejscu – ustaw ΔX, ΔZ, obrót i kąt na obwodzie.' : isCentral() ? 'Płytka centralna (wiertło ISCAR / AMEC): jedna na osi narzędzia, opad na obie strony.' : 'Płytka obwodowa (frez): z kopii co 360° / z, przyłożenie z tyłu.'; };
+  const modeSel = st.plate ? h('select', { onchange: () => { st.plate.mode = modeSel.value; paintNote(); paintParams(); schedule3d(); } }, ...[['auto', 'automatycznie'], ['central', 'centralna (na osi narzędzia)'], ['edge', 'obwodowa (przy krawędzi)'], ['irregular', 'nieregularna (dowolne położenie)']].map(([v, l]) => h('option', { value: v, selected: st.plate.mode === v }, l))) : null;
   const params = h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } });
   function paintParams() {
     clear(params);
     params.append(h('b', {}, 'Płytka w narzędziu (3D)'),
       modeSel ? h('label', { class: 'row', style: { gap: '4px', margin: '2px 0', alignItems: 'center' } }, h('span', { style: { width: '110px' } }, 'Rodzaj płytki'), modeSel) : null, kindNote,
-      isCentral() ? null : field('Liczba płytek z', st.plate && st.plate.z ? st.plate.z : st.setup.z, (v) => { const z = Math.max(1, Math.min(60, Math.round(v))); if (st.plate) st.plate.z = z; else st.setup.z = z; }, 'szt. (na obwodzie)'),
+      isCentral() || (st.plate && st.plate.mode === 'irregular') ? null : field('Liczba płytek z', st.plate && st.plate.z ? st.plate.z : st.setup.z, (v) => { const z = Math.max(1, Math.min(60, Math.round(v))); if (st.plate) st.plate.z = z; else st.setup.z = z; }, 'szt. (na obwodzie)'),
       field(isCentral() ? 'Opad na obie strony' : 'Pochylenie ścian', st.setup.draft, (v) => { st.setup.draft = Math.max(0, Math.min(30, v)); }, '°'),
       field('Grubość płytki', st.setup.thickness, (v) => { st.setup.thickness = Math.max(0, Math.min(30, v)); }, 'mm (0 – auto)'));
   }

@@ -113,7 +113,7 @@ export function toolView3d(index, tools) {
     mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
     mesh.trepan = stts.map((s, i) => (s && s.trepan ? G.trepanBlade(s.diameter, mesh.regions[i], savedInsertZ(index.tool(s.code) || s.code)) : null));   // płytki ostrza wiertła rurowego
   }
-  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => { const set = insertSetup(index.tool(q.code) || q.code); return { poly: q.poly, ...set, central: q.central, alone: q.central, phi: q.phi, z: q.central ? 1 : q.z || set.z }; }) : [];
+  const ins = mesh ? G.insertsForMesh(stts, mesh.offsets).map((q) => { const set = insertSetup(index.tool(q.code) || q.code); return { poly: q.poly, ...set, central: q.central, alone: q.central || q.irregular, phi: q.phi, z: q.central || q.irregular ? 1 : q.z || set.z }; }) : [];
   return view3d(mesh, ins);
 }
 

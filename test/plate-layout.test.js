@@ -71,3 +71,39 @@ test('wiertło płytkowe z płytką centralną: długość J = odległość wier
     for (const [name, v] of [['2D', bottom2d], ['3D', Math.min(...z3)], ['miniatura', bottomMini]]) assert.ok(Math.abs(v - 467.3) < 1e-6, `dół płytki (${name}) = J − wysokość płytki: ${v}`);
   }
 });
+
+test('wiertło płytkowe Komet (płytki nie są centralne): wierzchołek płytki na Z = J (korpus 10 mm krótszy), tryb „nieregularnie”, miniatura zgodna z podglądem', () => {
+  const params = { D: 'wie', E: 'ply', F: '64', I: '', J: '247', K: '192', M: 'ABS080', N: '' };
+  const full = E.expandHalf(E.generatedHalf(params, {})), str = full.map((q) => q.x + '_' + q.y).join(';'), zs = full.map((q) => q.y / 10);
+  const zTop = Math.max(...zs), zBot = Math.min(...zs);
+  assert.ok(zBot < 0 && zTop < 247, 'kontur z mocowaniem poniżej Z = 0, korpus krótszy od J: ' + zBot + ' … ' + zTop);
+  const plate = 'M 0 0 L 8 0 L 8 6 L 4 11 L 0 6 Z';
+  const t = { productCode: 'WK2', columnD: 'wie', columnE: 'ply', columnP: 'Komet', columnF: '64', columnJ: '247', columnG: '', columnM: 'ABS080' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { WK2: { columnAY: str, insertContours: [{ code: 'V14', contour: plate }] } } }, null);
+  const zOf = (stt, poly) => { const b = G.bounds(stt.contour); return poly.map((q) => (b.maxY - q.y) / 10); };
+  try {
+    // automatycznie: Komet to nie płytka centralna – para przy krawędzi, ale wierzchołek płytki na Z = J (nie przesunięty o długość mocowania)
+    G.setPlateSetupProvider(() => null);
+    const stt = idx.stackTool(t), lay = G.buildStack([stt], true, false).layers[0];
+    assert.equal(stt.central, false); assert.equal(stt.drill, true);
+    assert.deepEqual(lay.plates.map((p) => [p.kind, p.polys.length, p.single]), [['edge', 2, false]]);
+    assert.ok(Math.abs(Math.max(...lay.plates[0].polys[1].flatMap((p) => zOf(stt, [p]))) - 247) < 1e-9, 'wierzchołek płytki obwodowej na Z = J');
+    // nieregularnie: jedna płytka w dowolnym miejscu (start na osi, wierzchołek Z = J), przesunięta o ΔX / ΔZ; 3D – pojedyncza płytka z kątem na obwodzie
+    // miniatura Komet (układ automatyczny) = ten sam układ co podgląd: para przy krawędzi, wierzchołki płytek na Z = J (dawniej płytka na osi)
+    const mini0 = G.buildMini(t, idx.details('WK2'), (c) => idx.insertContour(c)), mo0 = mini0.outline, iT0 = zs.indexOf(zTop), iB0 = zs.indexOf(zBot);
+    const k0 = (mo0[iB0].y - mo0[iT0].y) / (zTop - zBot), zM0 = (y) => zTop - (y - mo0[iT0].y) / k0;
+    assert.equal(mini0.inserts.length, 2); assert.ok(Math.abs(zM0(Math.min(...mini0.inserts[1].map((q) => q.y))) - 247) < 1e-6);
+    assert.ok(mini0.inserts[0].every((q) => q.x < mo0[iT0].x) && mini0.inserts[1].every((q) => q.x > mo0[iT0].x), 'płytki po obu stronach osi, nie na osi');
+    G.setPlateSetupProvider(() => [{ code: 'V14', mode: 'irregular', dx: 12, dz: -3, ang: 0, phi: 30 }]);
+    const s2 = idx.stackTool(t), l2 = G.buildStack([s2], true, false).layers[0], pm = l2.plates[0];
+    assert.deepEqual([pm.kind, pm.single, pm.polys.length, pm.irregular, pm.central, pm.phi], ['irregular', true, 1, true, false, 30]);
+    const xs = pm.polys[0].map((p) => p.x), zz = zOf(s2, pm.polys[0]);
+    assert.ok(Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - 120) < 1e-9, 'środek płytki 12 mm od osi (ΔX)'); assert.ok(Math.abs(Math.max(...zz) - 244) < 1e-9, 'wierzchołek 3 mm niżej niż J (ΔZ = −3)');
+    const ins = G.insertsForMesh([s2], G.buildMesh([s2.contour]).offsets); assert.deepEqual(ins.map((q) => [q.central, q.irregular, q.phi]), [[false, true, 30]]);
+    // miniatura z własnym układem = ten sam układ co podgląd (y miniatury = offset + y stosu · skala)
+    const mini = G.buildMini(t, idx.details('WK2'), (c) => idx.insertContour(c)), mo = mini.outline, b = G.bounds(s2.contour);
+    const iTop = zs.indexOf(zTop), iBot = zs.indexOf(zBot), k = (mo[iBot].y - mo[iTop].y) / (zTop - zBot), zMini = (y) => zTop - (y - mo[iTop].y) / k;
+    assert.equal(mini.inserts.length, 1); assert.ok(Math.abs(zMini(Math.min(...mini.inserts[0].map((q) => q.y))) - 244) < 1e-6, 'wierzchołek płytki w miniaturze też Z = 244');
+    assert.ok(b.maxY > 0);
+  } finally { G.setPlateSetupProvider(null); }
+});

@@ -6,12 +6,16 @@
 const num = (v, d = 0) => (v !== '' && v != null && Number.isFinite(Number(v)) ? Number(v) : d);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
-export const PLATE_MODES = [['auto', 'automatycznie'], ['central', 'centralna (na osi)'], ['edge', 'obwodowa (przy krawędzi)']];
+/**
+ * Rodzaje ułożenia płytki: automatycznie, centralna (jedna na osi narzędzia – wiertła ISCAR / AMEC), obwodowa (para przy krawędzi – frezy),
+ * nieregularna (jedna płytka w dowolnym miejscu: położenie ustawiane ΔX, ΔZ, obrotem i kątem na obwodzie – np. wiertła płytkowe Komet).
+ */
+export const PLATE_MODES = [['auto', 'automatycznie'], ['central', 'centralna (na osi)'], ['edge', 'obwodowa (przy krawędzi)'], ['irregular', 'nieregularna (dowolne położenie)']];
 
 /** Płytka układu: { code, mode: auto | central | edge, dx, dz (mm), ang (°), phi – kąt na obwodzie narzędzia (°), z – liczba kopii na obwodzie (0 – wg narzędzia) }. */
 export function normPlate(p) {
   const o = p || {}, z = Math.round(num(o.z, 0));
-  return { code: String(o.code ?? '').trim(), mode: o.mode === 'central' || o.mode === 'edge' ? o.mode : 'auto', dx: r3(num(o.dx)), dz: r3(num(o.dz)), ang: r3(num(o.ang)), phi: r3(num(o.phi)), z: z >= 1 ? Math.min(60, z) : 0 };
+  return { code: String(o.code ?? '').trim(), mode: ['central', 'edge', 'irregular'].includes(o.mode) ? o.mode : 'auto', dx: r3(num(o.dx)), dz: r3(num(o.dz)), ang: r3(num(o.ang)), phi: r3(num(o.phi)), z: z >= 1 ? Math.min(60, z) : 0 };
 }
 /** Lista płytek znormalizowana albo null (brak własnego układu). Płytki bez kodu są pomijane. */
 export function normPlates(list) {
@@ -20,15 +24,17 @@ export function normPlates(list) {
   return out.length ? out : null;
 }
 /** Czy płytka o numerze [j] jest centralna: rodzaj wymuszony albo automatycznie (pierwsza płytka narzędzia centralnego). */
-export const isCentralPlate = (plate, j, toolCentral) => (plate.mode === 'central' ? true : plate.mode === 'edge' ? false : j === 0 && !!toolCentral);
+export const isCentralPlate = (plate, j, toolCentral) => (plate.mode === 'central' ? true : plate.mode === 'edge' || plate.mode === 'irregular' ? false : j === 0 && !!toolCentral);
+/** Rodzaj płytki do rysowania: 'central' | 'irregular' | 'edge' (obwodowa – para lewa / prawa). */
+export const plateKind = (plate, j, toolCentral) => (plate.mode === 'irregular' ? 'irregular' : isCentralPlate(plate, j, toolCentral) ? 'central' : 'edge');
 /**
  * Płytki do narysowania: własny układ [custom] albo płytki katalogu ([catalogCodes]) z ustawieniami domyślnymi.
- * Wynik: [{ code, central, dx, dz, ang, phi, z, custom }].
+ * Wynik: [{ code, kind, central, irregular, dx, dz, ang, phi, z, custom }].
  */
 export function resolvePlates(custom, catalogCodes, toolCentral) {
   const own = normPlates(custom);
   const list = own || (catalogCodes || []).map((code) => normPlate({ code }));
-  return list.map((p, j) => ({ ...p, central: isCentralPlate(p, j, toolCentral), custom: !!own }));
+  return list.map((p, j) => { const kind = plateKind(p, j, toolCentral); return { ...p, kind, central: kind === 'central', irregular: kind === 'irregular', custom: !!own }; });
 }
 /** Zmiana jednej płytki [j] – gdy własnego układu jeszcze nie ma, powstaje z płytek katalogu. Zwraca nową listę. */
 export function patchPlate(custom, catalogCodes, j, patch) {

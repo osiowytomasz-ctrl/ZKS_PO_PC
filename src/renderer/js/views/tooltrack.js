@@ -59,7 +59,7 @@ export function mountToolTrack(el, ctx) {
     if (Object.values(st.filters).some((v) => String(v).trim())) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = T.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
   }
 
-  const mini = (t) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w: 90, hgt: 110 });
+  const mini = (t) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode), (c) => st.index.insertContour(c)), { w: 90, hgt: 110 });
   /** Narzędzie jako wiersz (kliknięcie) albo kafelek (przycisk „+ Dodaj do listy” / „Usuń z listy” zamiast kliknięcia). */
   const row = (t, onclick, kind) => {
     if (st.view !== 'tiles') return toolRow(t, { warning: st.warnings.has(t.productCode), onclick });

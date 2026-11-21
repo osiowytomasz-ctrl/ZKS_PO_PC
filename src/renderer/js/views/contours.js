@@ -346,7 +346,7 @@ export function mountContours(el, ctx) {
       if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
       if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
-      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: q.central ? 1 : q.z || set.z, draft: set.draft, thickness: set.thickness, central: q.central, alone: q.central, phi: q.phi })) : [];
+      const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: q.single ? 1 : q.z || set.z, draft: set.draft, thickness: set.thickness, central: q.central, alone: q.single, phi: q.phi })) : [];
       prev3d.append(mesh || ins.length ? view3d(mesh, ins, { xf: f0 }) : h('p', { class: 'muted', style: { padding: '10px' } }, 'Brak konturu do pokazania w 3D.'));
     }
     const layers = [];
@@ -531,10 +531,10 @@ export function mountContours(el, ctx) {
     if (!stack || !stack0) return [];
     const bT = G.bounds(stt.contour), conv = (pts) => pts.map((p) => ({ x: p.x, y: bT.maxY - p.y }));
     const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
-    const pick = (pm) => (pm.central ? pm.polys[0] : pm.polys[pm.polys.length - 1]);
+    const pick = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]);
     return stack.layers[0].plates.map((pm, j) => {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
-      return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.central ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: pm.central, phi: pm.phi, z: pm.z };
+      return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z };
     });
   }
   /** Okno „Płytki na narzędziu”: rodzaj płytki (centralna / obwodowa), wiele płytek, położenie. */

@@ -15,7 +15,7 @@ export function openPlateLayout(o) {
   let rows = (o.plates || []).map((p) => normPlate(p));
   const tbody = h('tbody', {});
   const toolCentral = !!o.toolCentral;
-  const kind = (p, j) => (p.mode === 'central' || (p.mode === 'auto' && j === 0 && toolCentral) ? 'centralna' : 'obwodowa');
+  const kind = (p, j) => (p.mode === 'irregular' ? 'nieregularna' : p.mode === 'central' || (p.mode === 'auto' && j === 0 && toolCentral) ? 'centralna' : 'obwodowa');
   const field = (j, key, w = '60px') => { const inp = h('input', { type: 'text', value: comma(rows[j][key]), style: { width: w, padding: '1px 4px' }, onchange: () => { const v = num(inp.value); if (!Number.isFinite(v)) { inp.value = comma(rows[j][key]); return; } rows[j] = normPlate({ ...rows[j], [key]: key === 'z' ? Math.round(v) : v }); inp.value = comma(rows[j][key]); } }); return inp; };
   function draw() {
     clear(tbody);
@@ -32,7 +32,7 @@ export function openPlateLayout(o) {
   const add = () => { const used = new Set(rows.map((r) => r.code)), code = (o.allCodes || []).find((c) => !used.has(c)) || (o.allCodes || [])[0] || ''; if (!code) return; rows.push(normPlate({ code, mode: rows.length ? 'edge' : 'auto' })); draw(); };
   const m = modal(null, h('div', { class: 'fs-dialog', style: { minWidth: '760px' } },
     h('div', { class: 'row', style: { marginBottom: '6px' } }, h('h3', { style: { margin: 0, flex: 1 } }, `Płytki na narzędziu – ${o.tool}`), h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij')),
-    h('div', { class: 'muted', style: { fontSize: '12px', marginBottom: '6px' } }, 'Rodzaj: centralna – jedna płytka na osi narzędzia (wiertła ISCAR / AMEC), obwodowa – para przy krawędzi (frezy; w 3D z kopii co 360° / z). '
+    h('div', { class: 'muted', style: { fontSize: '12px', marginBottom: '6px' } }, 'Rodzaj: centralna – jedna płytka na osi narzędzia (wiertła ISCAR / AMEC), obwodowa – para przy krawędzi (frezy; w 3D z kopii co 360° / z), nieregularna – jedna płytka w dowolnym miejscu (np. Komet; start na osi, położenie ΔX / ΔZ / obrotem). '
       + 'ΔX, ΔZ w mm (ΔZ w górę wzdłuż osi), obrót płytki w °, φ – kąt pierwszej płytki na obwodzie narzędzia (3D), z – liczba kopii na obwodzie (0 – wg ustawienia narzędzia).'),
     h('div', { class: 'table-wrap', style: { maxHeight: '45vh' } }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka (kod)', 'Rodzaj', 'ΔX', 'ΔZ', 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
     h('div', { class: 'row', style: { gap: '6px', marginTop: '8px', flexWrap: 'wrap' } },

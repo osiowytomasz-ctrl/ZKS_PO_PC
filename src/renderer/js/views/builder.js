@@ -163,7 +163,7 @@ export function mountBuilder(el, ctx) {
 
   const shown = () => B.sorted(st.selected.length ? B.nextCandidates(st.all, st.selected) : B.filterTools(st.listed, st.filters));
   // ikonka narzędzia: Kontury z tym narzędziem; karta narzędzia – prawy przycisk myszy na wierszu / kafelku
-  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode)), { w, hgt, onclick: () => contoursWindow(t) });
+  const mini = (t, w = 60, hgt = 70) => miniSvg(st.index && G.buildMini(t, st.index.details(t.productCode), (c) => st.index.insertContour(c)), { w, hgt, onclick: () => contoursWindow(t) });
   /**
    * Narzędzie jako kafelek albo wiersz. Zamiast kliknięcia – przycisk: kandydat ma „+ Dodaj do narzędzia” ([add]), narzędzie z zestawu – „Usuń narzędzie” ([remove] =
    * jego numer w zestawie): usuwa to narzędzie i wszystkie dodane po nim (niższe poziomy).
