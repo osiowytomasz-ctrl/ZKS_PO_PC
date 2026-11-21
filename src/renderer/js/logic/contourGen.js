@@ -54,6 +54,33 @@ export function tapHole(N) {
   const d = nv(m[1]), depth = Number(m[3]);
   return d > 0 && depth > 0 ? { r: d * 5, depth: depth * 10 } : null;
 }
+/**
+ * Nakrętki ER (zewnętrzny kształt) z plików STEP / IGES: [promień, odległość od otwartego końca (od strony oprawki)] w mm – od otwartego końca
+ * do czoła z otworem na tulejkę. Pomiary: ER-25, ER-32, ER-40 (STEP), ER-20 (IGES). Dla pozostałych rozmiarów – skalowanie najbliższego wzoru.
+ */
+const NUTS = {
+  20: { R: 17, L: 22, prof: [[17, 0], [17, 19.5], [12.66, 22]], slotBottom: 0.43 },
+  25: { R: 20.85, L: 20, prof: [[20.55, 0], [20.85, 0.3], [20.85, 15.764], [20.643, 16.114], [13.69, 19.95], [13.497, 20]], slotBottom: 0.425 },
+  32: { R: 25, L: 22.606, prof: [[24, 0], [25, 1], [25, 19.725], [24.351, 20.662], [19.326, 22.543], [13.325, 22.606]], slotBottom: 0.44 },
+  40: { R: 31.5, L: 23.9, prof: [[31.5, 0], [31.5, 18.85], [30.5, 20.58], [25.214, 23.632], [24.214, 23.9]], slotBottom: 0.44 },
+};
+/** Średnica zewnętrzna nakrętki (promień, mm) dla rozmiarów bez pliku. */
+const NUT_R = { 8: 6.85, 11: 9.5, 16: 13.75, 50: 39 };
+/** Wcięcia pod klucz: 6 co 60° (w nakrętkach z plików), połowa szerokości ≈ 0,13·R. */
+const NUT_SLOTS = 6, NUT_SLOT_HALF = 0.13;
+/**
+ * Nakrętka ER dla kodu ER_nnn: { R, L, prof: [[r, t]…] (mm, t od otwartego końca), slot: { n, half (mm), from, to (t, mm) } } albo null.
+ * Wcięcia biegną od dna (ok. 43% długości) do końca walca przed stożkiem czoła.
+ */
+export function nutFor(code) {
+  const m = /^ER_(\d{3})$/.exec(txt(code).toUpperCase());
+  if (!m) return null;
+  const n = Number(m[1]), known = NUTS[n];
+  const base = known || (() => { const R = NUT_R[n]; if (!R) return null; const ref = NUTS[25], k = R / ref.R; return { R, L: ref.L * k, prof: ref.prof.map(([r, t]) => [r * k, t * k]), slotBottom: ref.slotBottom }; })();
+  if (!base) return null;
+  const top = base.prof.filter(([r]) => r >= base.R - 1e-6).reduce((mx, [, t]) => Math.max(mx, t), 0);   // koniec walca zewnętrznego
+  return { R: base.R, L: base.L, prof: base.prof, slot: { n: NUT_SLOTS, half: base.R * NUT_SLOT_HALF, from: base.L * base.slotBottom, to: top } };
+}
 /** Najniższe Y lewej części mocowania (głębokość mocowania). */
 export function minY(av) {
   const ys = txt(av).split(';').map((p) => p.split('_')[1]).filter((y) => y != null && y.trim() !== '').map(nv);
@@ -276,8 +303,8 @@ export function formulaMountPoints(code) {
   }
   return null;
 }
-/** Mocowania męskie, dla których oprawka (kolumna N) ma gniazdo żeńskie o kształcie tego zakończenia: ABS, Weldon, Capto, MHD, KAR, stożek Morse'a, termo (T__ / SP). */
-const SOCKET_CODES = /^(ABS|WEL|CAP|MHD|KAR|SP_)\d|^(MK_|T__)\d/;
+/** Mocowania męskie, dla których oprawka (kolumna N) ma gniazdo żeńskie o kształcie tego zakończenia: ABS, Weldon, Capto, MHD, KAR, stożek Morse'a, termo (T__ / SP), tulejka zaciskowa ER. */
+const SOCKET_CODES = /^(ABS|WEL|CAP|MHD|KAR|SP_)\d|^(MK_|T__|ER_)\d/;
 /**
  * Gniazdo żeńskie oprawki z kodu mocowania końcowego N: kształt męskiego zakończenia (wzór karty „kontury”) – prawa połowa [x, z] (0,1 mm) od dna
  * gniazda na osi do jego otworu (z = 0 przy otworze, głębiej – ujemne). null – kod spoza listy lub bez wzoru.

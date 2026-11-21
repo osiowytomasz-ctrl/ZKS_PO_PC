@@ -1,7 +1,7 @@
 // ToolBuilder – jak w aplikacji na Androida (BuilderScreen.kt): składanie zestawu narzędzi. Pierwsze narzędzie z listy z filtrami,
 // kolejne pasują mocowaniem (Mk = Ms ostatniego). Wiersze z paskiem zużycia i miniaturą; zapis do BN z podglądem 2D, 3D i współrzędnymi,
 // części zamienne, przekazanie do ToolTrack i eksport DXF.
-import { h, clear, api, toast, modal, alertBox, confirmBox } from '../ui.js';
+import { h, clear, api, toast, modal, alertBox, confirmBox, columnFilterDialog } from '../ui.js';
 import { toolCatalog, confirmedContoursQuick, invalidateConfirmed, contourGenOn } from '../catalog.js';
 import { ndLoad, ndPatch } from '../ndStore.js';
 import * as E from '../logic/contourEditor.js';
@@ -173,9 +173,16 @@ export function mountBuilder(el, ctx) {
     clear(filtersBox);
     if (st.selected.length) filtersBox.append(h('span', { class: 'muted' }, 'Filtry są wyłączone. Kolejne narzędzie musi pasować mocowaniem: Mk = Ms ostatnio wybranego.'));
     else {
-      const code = h('input', { type: 'search', placeholder: 'Kod', value: st.filters.code, style: { width: '110px', padding: '4px 8px' }, oninput: () => { st.filters.code = code.value; drawList(); } });
-      filtersBox.append(code, ...FILTERS.map(([f, l]) => filterDropdown(l, st.filters[f], B.options(st.listed, st.filters, f), (v) => { st.filters[f] = v; draw(); })));
-      if (Object.values(st.filters).some((v) => String(v).trim())) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); draw(); } }, 'Wyczyść'));
+      const code = h('input', { type: 'search', class: 'filter-in', placeholder: 'Kod', value: st.filters.code, style: { width: '110px' }, oninput: () => { st.filters.code = code.value; drawList(); } });
+      // filtry z wielokrotnym wyborem wartości – okno jak autofiltr w Grafiku i Harmonogramie (zaznaczanie, szukanie, liczniki)
+      const multi = ([f, l]) => {
+        const sel = st.filters[f] instanceof Set ? st.filters[f] : null;
+        const text = sel ? (sel.size === 1 ? [...sel][0] : `${l} (${sel.size})`) : l;
+        return h('button', { class: 'filter-dd' + (sel ? ' on' : ''), title: sel ? `${l}: ${[...sel].join(', ')}` : l, onclick: () => columnFilterDialog({ title: l, noSort: true, options: B.optionCounts(st.listed, st.filters, f), activeFilter: sel || undefined,
+          onApply: (set) => { st.filters[f] = set && set.size ? set : ''; draw(); } }) }, text + ' ▾');
+      };
+      filtersBox.append(code, ...FILTERS.map(multi));
+      if (B.hasFilters(st.filters)) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); draw(); } }, 'Wyczyść'));
     }
     drawList();
   }

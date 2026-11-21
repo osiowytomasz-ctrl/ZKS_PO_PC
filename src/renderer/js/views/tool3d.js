@@ -154,7 +154,8 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
       if (!pr0) return;
       // część robocza (rejon „ostrze” z PSWT BE / Konturów) – kolor płytek z modułu Części; reszta – kolor narzędzia
       const regs = ((mesh.regions && mesh.regions[i]) || []).filter((r) => r.role === 'ostrze');
-      const pr = regs.length ? splitProfile(pr0, regs.flatMap((r) => [r.z1 * 10, r.z2 * 10])) : pr0;
+      const ntR = mesh.nut && mesh.nut[i];
+      const pr = regs.length ? splitProfile(pr0, regs.flatMap((r) => [r.z1 * 10, r.z2 * 10])) : ntR ? splitProfile(pr0, [ntR.z1]) : pr0;
       const tb = mesh.trepan && mesh.trepan[i];   // wiertło rurowe: korpus – bryła wydrążona do czubka, ostrze to osobne płytki wlutowane w ściankę
       const isWork = (a, b) => { const z = (a.y + b.y) / 20; return regs.some((r) => z >= r.z1 - 1e-6 && z <= r.z2 + 1e-6); };
       const col = new T.Color(G.TOOL_PALETTE[i % G.TOOL_PALETTE.length]).lerp(new T.Color(0xb8bec6), 0.45);
@@ -167,7 +168,10 @@ export function view3dGl(mesh, inserts, fallback, opts = {}) {
           edges(g, 0x3b0000, 0.6);
         }
       }
-      for (const [keep, mat] of tb ? [[null, m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
+      const nt = mesh.nut && mesh.nut[i];   // nakrętka ER: część bryły od jej podstawy w ciemniejszym kolorze
+      const nutMat = nt ? new T.MeshStandardMaterial({ color: new T.Color(col).multiplyScalar(0.45), metalness: 0.7, roughness: 0.4, side: T.DoubleSide }) : null; if (nutMat) mats.push(nutMat);
+      const isNut = nt ? (a, b) => (a.y + b.y) / 20 >= nt.z1 / 10 - 1e-6 : null;
+      for (const [keep, mat] of nt ? [[(a, b) => !isNut(a, b), m], [isNut, nutMat]] : tb ? [[null, m]] : regs.length ? [[(a, b) => !isWork(a, b), m], [isWork, workMat]] : [[null, m]]) {
         const g = latheGeometry(T, pr, mesh.offsets[i], keep); if (!g) continue;
         group.add(new T.Mesh(g, mat)); geos.push(g);
         edges(g, 0x2a2f36, 0.35);

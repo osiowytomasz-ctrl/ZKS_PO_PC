@@ -391,3 +391,23 @@ test('ToolBuilder: filtry po mocowaniu na wejściu (Ms, kolumna M) i na wyjściu
   assert.deepEqual(B.options(tools, f({ mIn: 'ISO050' }), 'mOut'), ['MK_003', 'WEL016']);
   assert.deepEqual(B.options(tools, f({ mOut: 'WEL016' }), 'mIn'), ['FZS_031', 'ISO050']);
 });
+
+test('ToolBuilder: filtry z wielokrotnym wyborem wartości (jak autofiltr w Grafiku)', async () => {
+  const B = await import('../src/renderer/js/logic/builder.js');
+  const tools = [
+    { productCode: 'A', columnD: 'opr', columnE: 'red', columnF: '20', columnM: 'ISO050', columnN: 'WEL016' },
+    { productCode: 'B', columnD: 'wie', columnE: 'hss', columnF: '10', columnM: 'ABS040', columnN: '' },
+    { productCode: 'C', columnD: 'opr', columnE: 'stż', columnF: '20', columnM: 'ISO050', columnN: 'MK_003' },
+    { productCode: 'D', columnD: 'fre', columnE: 'pal', columnF: '12', columnM: 'WEL016', columnN: '' },
+  ];
+  const f = (o) => ({ ...B.emptyFilters(), ...o }), codes = (l) => l.map((t) => t.productCode);
+  assert.deepEqual(codes(B.filterTools(tools, f({ group: new Set(['opr', 'WIE']) }))), ['A', 'B', 'C']);   // kilka wartości naraz, bez względu na wielkość liter
+  assert.deepEqual(codes(B.filterTools(tools, f({ group: new Set(['opr']), mOut: new Set(['MK_003', 'WEL016']) }))), ['A', 'C']);   // pola się sumują (AND)
+  assert.deepEqual(codes(B.filterTools(tools, f({ diameter: new Set(['10', '12']) }))), ['B', 'D']);
+  assert.deepEqual(codes(B.filterTools(tools, f({ group: new Set() }))), ['A', 'B', 'C', 'D']);   // pusty zbiór = bez filtra
+  assert.equal(B.hasFilters(f({})), false); assert.equal(B.hasFilters(f({ group: new Set(['opr']) })), true); assert.equal(B.hasFilters(f({ code: 'x' })), true);
+  // liczniki: wszystkie wartości pola, licznik – narzędzia przechodzące filtry innych pól
+  assert.deepEqual(B.optionCounts(tools, f({ group: new Set(['opr']) }), 'mIn'), [{ value: 'ABS040', count: 0 }, { value: 'ISO050', count: 2 }, { value: 'WEL016', count: 0 }]);
+  assert.deepEqual(B.optionCounts(tools, f({ mIn: new Set(['ISO050']) }), 'group'), [{ value: 'fre', count: 0 }, { value: 'opr', count: 2 }, { value: 'wie', count: 0 }]);
+  assert.deepEqual(B.optionCounts(tools, f({}), 'diameter').map((o) => o.value), ['10', '12', '20']);   // liczby rosnąco
+});

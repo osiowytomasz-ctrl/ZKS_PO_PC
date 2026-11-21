@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../src/renderer/js/logic/contourGen.js';
 import { parseContour } from '../src/renderer/js/logic/toolGeometry.js';
-import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines } from '../src/renderer/js/logic/contourEditor.js';
-import { profileOf, trepanBlade, holeDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
+import { halfFromContour, generatedHalf, contourOverrides, bladeLength, withEdgeLines, withNut } from '../src/renderer/js/logic/contourEditor.js';
+import { profileOf, trepanBlade, holeDrawingFor, nutDrawingFor } from '../src/renderer/js/logic/toolGeometry.js';
 
 const mounts = {
   ABS040: { left: '0_-200;100_-200;100_0;-200_0', right: '200_0;-100_0;-100_-200;0_-200' },
@@ -154,7 +154,7 @@ test('gniazdo żeńskie oprawki z męskiego zakończenia N (ABS, Weldon, Capto, 
   assert.deepEqual(C.socketProfile('KAR019'), [[0, -220], [95, -220], [95, 0]]);
   assert.deepEqual(C.socketProfile('MK_003'), [[0, -940], [40, -940], [40, -690], [100, -690], [119, 0]]);
   assert.equal(C.socketProfile('MHD063').at(-1)[0], 315);
-  for (const k of ['ER_032', 'ISO050', 'FZS_031', 'FRE016', '']) assert.equal(C.socketProfile(k), null);
+  for (const k of ['ISO050', 'FZS_031', 'FRE016', '']) assert.equal(C.socketProfile(k), null);
   const pts = parseContour(C.fullContour({ D: 'opr', E: 'red', F: '31', I: '50', J: '70', K: '34', M: 'FZS_031', N: 'WEL016' }, {}));   // czubek konturu = 340
   const h = holeDrawingFor('WEL016', pts);
   assert.deepEqual(h.hidden[0].map((q) => [q.x, q.y]), [[-80, 340], [-80, -140], [0, -140], [80, -140], [80, 340]]);
@@ -174,4 +174,26 @@ test('gniazdo: T__ / SP (termo), poziome linie przerywane na załamaniach profil
   assert.deepEqual(mk.hidden[1].map((q) => [q.x, q.y]), [[-40, t2 - 690], [40, t2 - 690]]); assert.equal(mk.hidden.length, 2);
   // proste gniazda (ABS, Weldon, Capto, T__) nie mają dodatkowych linii poziomych
   for (const k of ['ABS040', 'WEL016', 'CAP080', 'T__010']) assert.equal(top(k).hidden.length, 1, k);
+});
+
+test('tulejka ER: gniazdo w oprawce (wzór męskiego zakończenia ER) i nakrętka ER z plików STEP / IGES', () => {
+  // gniazdo ER_032: stożek tulejki 8° z wcięciem pod nakrętkę i fazą przy czole
+  assert.deepEqual(C.socketProfile('ER_032'), [[0, -400], [125, -400], [165, -91], [146, -91], [146, -55], [165, -55], [110, 0]]);
+  assert.deepEqual(C.socketProfile('ER_008').at(-1), [17.25, 0]); assert.equal(C.socketProfile('ER_099'), null);
+  // nakrętki: Ø i długość z plików (ER-20 Ø34 × 22, ER-25 Ø41,7 × 20, ER-32 Ø50 × 22,6, ER-40 Ø63 × 23,9); 6 wcięć co 60°
+  const ns = Object.fromEntries([20, 25, 32, 40, 16, 50].map((n) => [n, C.nutFor('ER_0' + n)]));
+  assert.deepEqual([20, 25, 32, 40].map((n) => [ns[n].R, ns[n].L]), [[17, 22], [20.85, 20], [25, 22.606], [31.5, 23.9]]);
+  assert.ok(ns[16].R === 13.75 && ns[16].L < ns[20].L && ns[50].L > ns[40].L, 'rozmiary bez pliku – skalowanie');   // ER16 mniejsza, ER50 większa niż wzory
+  assert.equal(ns[25].slot.n, 6); assert.equal(ns[25].slot.to, 15.764); assert.equal(C.nutFor('ABS040'), null);
+  // oprawka z nakrętką: górne L mm zastąpione kształtem nakrętki (faza, walec, stożek czoła), linie krawędzi dopisane
+  const o = { D: 'opr', E: 'stż', F: '42', I: '50', J: '70', K: '50', M: 'ISO050', N: 'ER_025' };
+  const h = generatedHalf(o, {});
+  assert.ok(h.some((q) => q.x === 205.5 && q.y === 500) && h.some((q) => q.x === 208.5 && q.y === 657.64) && h.some((q) => q.x === 135 && q.y === 700));
+  assert.ok(h.every((q) => q.x >= 0));
+  assert.deepEqual(withNut(h, 'ABS040'), h);   // nie ER – bez zmian
+  // rysunek 2D: ciemny pas nakrętki i trzy wcięcia zwrócone do patrzącego (środkowe i dwa boczne)
+  const pts = parseContour(C.fullContour(o, {})), nd = nutDrawingFor('ER_025', pts);
+  assert.equal(nd.z2 - nd.z1, 200); assert.equal(nd.slots.length, 3);
+  assert.ok(nd.slots[0][0].x < 0 && nd.slots[0][3].x > 0 && Math.abs(nd.slots[0][0].x + nd.slots[0][3].x) < 1e-6);   // środkowe: symetryczne
+  assert.equal(nutDrawingFor('FRE016', pts), null);
 });

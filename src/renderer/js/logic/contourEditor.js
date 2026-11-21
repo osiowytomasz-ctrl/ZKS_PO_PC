@@ -3,7 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
-import { fullContour, TREPAN } from './contourGen.js';
+import { fullContour, TREPAN, nutFor } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -96,6 +96,24 @@ export function halfPath(points) {
   return k > 0 ? [...out.slice(k), ...out.slice(0, k)] : out;
 }
 /**
+ * Dokłada nakrętkę ER (kolumna N oprawki) na czubku prawej połowy konturu [half] (0,1 mm): górne [L] mm zastępuje zewnętrzny kształt nakrętki
+ * (walec z fazą i stożkiem czoła z plików STEP / IGES). Przy braku nakrętki albo zbyt krótkim korpusie – bez zmian.
+ */
+export function withNut(half, N) {
+  const nut = nutFor(N), P = half || [];
+  if (!nut || P.length < 3) return P;
+  const rows = halfFromContour(expandHalf(P)).map((r) => ({ x: Number(r.r) * 10, y: Number(r.z) * 10 }));
+  if (rows.length < 2) return P;
+  const top = Math.max(...rows.map((r) => r.y)), bottom = Math.min(...rows.map((r) => r.y)), cut = top - nut.L * 10;
+  if (cut <= bottom + 10) return P;
+  const keep = rows.filter((r) => r.y < cut - 1e-6), next = rows.find((r) => r.y >= cut - 1e-6), last = keep[keep.length - 1];
+  const edge = last && next && next.y > last.y ? last.x + ((next.x - last.x) * (cut - last.y)) / (next.y - last.y) : (last ? last.x : nut.R * 10);
+  const out = [{ x: 0, y: bottom }, ...keep, { x: Math.max(edge, 0), y: cut }];
+  for (const [r, t] of nut.prof) out.push({ x: Math.round(r * 100) / 10, y: Math.round((cut + t * 10) * 1000) / 1000 });
+  out.push({ x: 0, y: top });
+  return out.filter((q, i, a) => !i || Math.abs(q.x - a[i - 1].x) > 1e-6 || Math.abs(q.y - a[i - 1].y) > 1e-6);
+}
+/**
  * Linie krawędzi średnic w połowie konturu (0,1 mm): na każdym uskoku i załamaniu obrysu (> 15°) linia przez całą szerokość – w połowie odcinek
  * od obrysu do osi i z powrotem. Linie już narysowane nie są powtarzane. Robi to samo co [addEdgeLines] na ścieżce SVG.
  */
@@ -122,7 +140,10 @@ export function generatedHalf(p, mounts) {
   const g = p ? parseContour(fullContour(p, mounts || {}) || '') : [];
   if (g.length < 3 || Math.max(...g.map((q) => q.x)) <= Math.min(...g.map((q) => q.x))) return [];
   const h = halfPath(g);
-  return h.length >= 3 ? (isTrepan(p) ? h : withEdgeLines(h)) : [];   // linie krawędzi średnic wszędzie (wiertło rurowe ma własne linie w sylwecie)
+  if (h.length < 3) return [];
+  if (isTrepan(p)) return h;
+  const n = p && String(p.D || '').trim().toLowerCase() === 'opr' ? withNut(h, p.N) : h;   // oprawka z nakrętką ER na końcu (kolumna N)
+  return withEdgeLines(n);   // linie krawędzi średnic wszędzie (wiertło rurowe ma własne linie w sylwecie)
 }
 /** Prawa połowa (z liniami krawędzi) pełnego konturu jako ścieżka SVG w mm – zapis do BC / V. */
 export const halfPathSvg = (points) => contourToSvg(halfPath(points));

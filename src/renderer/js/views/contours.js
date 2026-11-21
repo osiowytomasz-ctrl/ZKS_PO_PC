@@ -334,6 +334,7 @@ export function mountContours(el, ctx) {
       const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // oprawka gwintująca: otwór
       const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : hld ? hld.cavity : null]) : null;
       if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
+      if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
       if (mesh) mesh.trepan = [trd ? G.trepanBlade(t.columnF, mesh.regions[0], savedInsertZ(t)) : null];
       const set = insertSetup(t);
       const ins = t && pv.showIns && !tre ? insertsOf(t).map((q) => ({ poly: q.local, z: set.z, draft: set.draft })) : [];
@@ -389,6 +390,10 @@ export function mountContours(el, ctx) {
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
     { const pr = (t && st.params[normCode(t.productCode)]) || {};   // oprawka gwintująca: otwór pod chwyt gwintownika – przerywana linia 1 px
       const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg)) : null;
+      const nd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.nutDrawingFor(pr.N, E.svgToContour(svg)) : null;   // nakrętka ER: ciemniejszy pas + wcięcia pod klucz
+      if (nd) { const nc = E.svgToContour(svg), pp2 = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
+        out += `<clipPath id="nutclip"><rect x="0" y="${f2(Y(nd.z2))}" width="${W}" height="${f2((nd.z2 - nd.z1) * sc)}"/></clipPath><polygon points="${pp2(nc)}" fill="#000" fill-opacity="0.35" clip-path="url(#nutclip)" pointer-events="none"/>`
+          + nd.slots.map((q) => `<polyline points="${pp2(q)}" fill="none" stroke="#333" stroke-width="1" pointer-events="none"/>`).join(''); }
       if (hd) out += hd.hidden.map((q) => `<polyline points="${q.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="none" stroke="#1565c0" stroke-width="1" stroke-dasharray="5 4" pointer-events="none"/>`).join(''); }
     if (trePv && svg) {   // wiertło rurowe: płytki w ściankach (żółte), wnęka i środek linii płytki – przerywana 1 px
       const d = G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg)), pp = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');

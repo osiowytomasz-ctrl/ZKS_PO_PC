@@ -12,14 +12,34 @@ export const rAlphaValue = (t) => { const g = num(t.columnG); return g !== 0 ? g
 export const rAlphaText = (t) => { const v = rAlphaValue(t); return v !== 0 ? v.toFixed(2) : null; };
 
 const value = (t, f) => ({ code: t.productCode, location: t.location, group: t.columnD, type: t.columnE, company: t.columnP, diameter: t.columnF, length: t.columnJ, rAlpha: rAlphaText(t) ?? '', mIn: t.columnM, mOut: t.columnN }[f]);
-function matches(t, f, wanted) {
+/** Filtr pola aktywny: tekst niepusty albo zbiór wybranych wartości (wielokrotny wybór) niepusty. */
+export const isActive = (v) => (v instanceof Set || Array.isArray(v) ? v.size > 0 || v.length > 0 : !!String(v ?? '').trim());
+export const hasFilters = (filters) => Object.values(filters || {}).some(isActive);
+function matchesOne(t, f, wanted) {
   if (f === 'code') return norm(t.productCode).includes(norm(wanted));
   if (f === 'diameter' || f === 'length') return num(value(t, f)) === num(wanted);
   if (f === 'rAlpha') return rAlphaText(t) === num(wanted).toFixed(2);
   return norm(value(t, f)) === norm(wanted);
 }
+/** [wanted]: tekst (jedna wartość) albo zbiór / lista – wystarczy zgodność z którąkolwiek wybraną wartością. */
+function matches(t, f, wanted) {
+  return wanted instanceof Set || Array.isArray(wanted) ? [...wanted].some((w) => matchesOne(t, f, w)) : matchesOne(t, f, wanted);
+}
 export function filterTools(tools, filters, exclude = null) {
-  return tools.filter((t) => FIELDS.every((f) => f === exclude || !String(filters[f]).trim() || matches(t, f, filters[f])));
+  return tools.filter((t) => FIELDS.every((f) => f === exclude || !isActive(filters[f]) || matches(t, f, filters[f])));
+}
+/** Wartości pola do okna filtra z wielokrotnym wyborem: [{ value, count }] – wszystkie wartości, licznik = narzędzia przechodzące filtry INNYCH pól. */
+export function optionCounts(tools, filters, field) {
+  const passing = new Set(filterTools(tools, filters, field)), counts = new Map(), label = new Map();
+  for (const t of tools) {
+    const v = String(value(t, field) ?? '').trim();
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (!label.has(k)) label.set(k, v);
+    counts.set(k, (counts.get(k) || 0) + (passing.has(t) ? 1 : 0));
+  }
+  const list = [...counts].map(([k, count]) => ({ value: label.get(k), count }));
+  return ['diameter', 'length', 'rAlpha'].includes(field) ? list.sort((a, b) => num(a.value) - num(b.value)) : list.sort((a, b) => naturalCompare(a.value, b.value));
 }
 export function options(tools, filters, field) {
   const seen = new Map();

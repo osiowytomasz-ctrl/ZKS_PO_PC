@@ -115,7 +115,8 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .tool-params { border-top: 1px solid #999; font-size: 12px; line-height: 15px; padding: 3px 6px; color: #000; white-space: pre-wrap; }
 .tool-mini-col { width: 62px; flex: none; display: flex; align-items: center; justify-content: center; border-left: 1px solid #ddd; }
 .tool-mini { display: flex; align-items: center; justify-content: center; }
-.filter-dd { padding: 4px 6px; border: 1px solid #888; border-radius: 16px; background: #fff; max-width: 170px; }
+.filter-dd { padding: 4px 8px; border: 1px solid #888; border-radius: 0; background: #fff; max-width: 190px; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.filter-in { padding: 4px 8px; border: 1px solid #888; border-radius: 0; background: #fff; }
 .filter-dd.on { background: #d3e3fd; border-color: #d3e3fd; font-weight: 600; }
 .status-line { font-size: 13px; min-height: 18px; }
 .tool-title { font-size: 13px; font-weight: 700; margin: 4px 0 2px; }

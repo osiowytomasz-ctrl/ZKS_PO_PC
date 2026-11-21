@@ -44,6 +44,7 @@ export function frameStyle(location) {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const poly = (pts, sx = 1, ox = 0, oy = 0) => pts.map((p) => `${(ox + p.x * sx).toFixed(2)},${(oy + p.y * sx).toFixed(2)}`).join(' ');
 
+let nutId = 0;   // unikalne id przycięcia pasa nakrętki
 /** Miniatura 60 × 70: szary obrys i żółte płytki (wiertło rurowe – żółte ostrze); brak konturu – „brak”. */
 export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   const box = h('div', { class: 'tool-mini', style: { width: w + 'px', height: hgt + 'px', cursor: onclick ? 'pointer' : '' }, onclick: onclick ? (e) => { e.stopPropagation(); onclick(); } : null });
@@ -51,6 +52,7 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   const s = Math.min(w / G.MINI_W, hgt / G.MINI_H);
   box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="none"/>`
     + `<path d="${G.outlinePath(mini.outline, (p) => [p.x * s, p.y * s], mini.axisX ?? NaN)}" fill="none" stroke="#000" stroke-width="0.5"/>`
+    + (mini.nut ? `<clipPath id="nt${nutId}"><rect x="0" y="${(mini.nut.y1 * s).toFixed(2)}" width="${w}" height="${((mini.nut.y2 - mini.nut.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(mini.outline, s)}" fill="#5f636a" clip-path="url(#nt${nutId++})"/>` + mini.nut.slots.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4"/>`).join('') : '')
     + (mini.hole ? mini.hole.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4" stroke-dasharray="1.5 1.2"/>`).join('') : '')
     + (mini.draw ? mini.draw.plates.map((q) => `<polygon points="${poly(q, s)}" fill="#c8a400" stroke="#000" stroke-width="0.4"/>`).join('') + mini.draw.hidden.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4" stroke-dasharray="1.5 1.2"/>`).join('') : '')
     + mini.inserts.map((p) => `<polygon points="${poly(p, s)}" fill="#c8a400" stroke="#000" stroke-width="0.5"/>`).join('') + '</svg>';
@@ -73,6 +75,11 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
     } else
     svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
     for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#c8a400" fill-opacity="0.85" stroke="#8a6d00" stroke-width="1.5"/>`;
+    if (l.nut) {   // nakrętka ER: ciemniejszy pas i wcięcia pod klucz
+      const id = 'nt' + nutId++;
+      svg += `<clipPath id="${id}"><rect x="0" y="${(oy + l.nut.y1 * s).toFixed(2)}" width="${width}" height="${((l.nut.y2 - l.nut.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(l.outline, s, ox, oy)}" fill="#000" fill-opacity="0.38" clip-path="url(#${id})"/>`
+        + l.nut.slots.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1"/>`).join('');
+    }
     if (l.hole) svg += l.hole.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="5 4"/>`).join('');   // otwór pod gwintownik – niewidoczny
     if (labels) {
       const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
@@ -98,6 +105,7 @@ export function toolView3d(index, tools) {
   const holes = stts.map((s) => (s && s.holeN ? G.holeDrawingFor(s.holeN, s.contour) : null));   // oprawki gwintujące: otwór pod chwyt gwintownika
   const mesh = G.buildMesh(stts.map((s) => (s ? s.contour : [])), 36, draws.map((d, i) => (d ? d.cavity : holes[i] ? holes[i].cavity : null)));
   if (mesh) {
+    mesh.nut = stts.map((s) => (s && s.holeN ? G.nutDrawingFor(s.holeN, s.contour) : null));   // nakrętka ER – ciemniejsza część bryły
     mesh.regions = stts.map((s) => (s && (index.details(s.code) || {}).regions) || null);   // część robocza (BE)
     mesh.trepan = stts.map((s, i) => (s && s.trepan ? G.trepanBlade(s.diameter, mesh.regions[i], savedInsertZ(index.tool(s.code) || s.code)) : null));   // płytki ostrza wiertła rurowego
   }

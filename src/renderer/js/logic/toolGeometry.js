@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor } from './contourGen.js';
 import { naturalCompare } from './common.js';
 
 export const pt = (x, y) => ({ x, y });
@@ -137,6 +137,27 @@ export function holeDrawingFor(N, contour) {
   const top = b.maxY, yb = top - h.depth;
   return { hidden: [[pt(-h.r, top), pt(-h.r, yb), pt(h.r, yb), pt(h.r, top)]], cavity: { ri: h.r, yb, rb: 0, y7: Infinity } };
 }
+/**
+ * Nakrętka ER na czubku oprawki (kolumna N „ER_025”): pas nakrętki [z1, z2] (współrzędne konturu, 0,1 mm – ciemniejszy kolor) i wcięcia pod klucz
+ * (linie widoczne w rzucie 2D: 6 wcięć co 60°, jedno na środku, dwa po bokach ze skrótem perspektywicznym). null – brak nakrętki.
+ */
+export function nutDrawingFor(N, contour) {
+  const nut = nutFor(N), b = bounds(contour);
+  if (!nut || !b) return null;
+  const R = nut.R * 10, h = nut.slot.half * 10, d = Math.asin(Math.min(1, h / R)), base = b.maxY - nut.L * 10;
+  const y0 = base + nut.slot.from * 10, y1 = base + nut.slot.to * 10;
+  const slots = [90, 30, 150].map((deg) => {   // wcięcia zwrócone do patrzącego: 90° – środek, 30° / 150° – po bokach
+    const c = (deg * Math.PI) / 180, xs = [R * Math.cos(c + d), R * Math.cos(c - d)].sort((p, q) => p - q);
+    return [pt(xs[0], y1), pt(xs[0], y0), pt(xs[1], y0), pt(xs[1], y1)];
+  });
+  return { z1: base, z2: b.maxY, slots };
+}
+/** Pas nakrętki i wcięcia przeniesione do układu rysunku: [map] – punkt konturu → punkt rysunku. */
+export function mapNut(n, map) {
+  if (!n) return null;
+  const a = map(pt(0, n.z1)).y, c = map(pt(0, n.z2)).y;
+  return { y1: Math.min(a, c), y2: Math.max(a, c), slots: n.slots.map((q) => q.map(map)) };
+}
 /** Rysunek wiertła rurowego przeniesiony do układu rysunku: [map] – punkt konturu → punkt rysunku. */
 export const mapTrepanDrawing = (d, map) => (d ? { plates: d.plates.map((q) => q.map(map)), hidden: d.hidden.map((q) => q.map(map)) } : null);
 
@@ -160,7 +181,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     });
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -225,7 +246,8 @@ export function buildMini(tool, details) {
   }
   const draw = group === 'tre' ? mapTrepanDrawing(trepanDrawingFor(diameter, length, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // wiertło rurowe: płytki żółte, wnęka przerywana
   const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points)) : null;   // oprawka gwintująca: otwór przerywaną linią
-  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole };
+  const nut = group === 'opr' ? mapNut(nutDrawingFor(tool.columnN, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // nakrętka ER: ciemniejszy pas i wcięcia
+  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut };
 }
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------

@@ -146,7 +146,7 @@ export function field(label, input) {
  * onApply(filter: Set|rangeFilter|null, sort: true|false|null). [dateRange] – kolumna z datami: dodatkowo zakres od – do.
  */
 /** [top] – dodatkowy element na górze okna (np. wybór kolumny); zwraca okno (close). */
-export function columnFilterDialog({ title, options, activeFilter, activeSort, onApply, dateRange = false, top = null }) {
+export function columnFilterDialog({ title, options, activeFilter, activeSort, onApply, dateRange = false, top = null, noSort = false }) {
   let sort = activeSort === undefined ? null : activeSort;
   const isRange = !!(activeFilter && activeFilter.range);
   const selected = new Set(activeFilter && !isRange ? [...activeFilter] : options.map((o) => o.value));
@@ -207,7 +207,7 @@ export function columnFilterDialog({ title, options, activeFilter, activeSort, o
     for (const i of [fromI, toI]) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyRange(); });
   }
   const content = h('div', {}, top,
-    h('div', { class: 'row' }, 'Sortuj: ', mkSort('A→Z', true), mkSort('Z→A', false), mkSort('Brak', null)),
+    noSort ? null : h('div', { class: 'row' }, 'Sortuj: ', mkSort('A→Z', true), mkSort('Z→A', false), mkSort('Brak', null)),
     rangeBox, dateRange ? h('div', { style: { fontWeight: 700, fontSize: '12px', marginTop: '4px' } }, 'albo wybrane wartości:') : null,
     search, list,
     h('div', { class: 'row' },
