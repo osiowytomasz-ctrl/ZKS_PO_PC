@@ -375,6 +375,13 @@ export function formulaMountPoints(code) {
   }
   return null;
 }
+/** Głębokość chwytu Weldon (mm) z kodu WELxxx (długość chwytu z tabeli; rozmiary spoza tabeli – interpolacja); 0 – inny kod. */
+export function weldonDepth(code) {
+  const c = txt(code).toUpperCase();
+  if (!/^WEL\d{3}$/.test(c)) return 0;
+  const f = formulaMountPoints(c);
+  return f ? Math.round((-Math.min(...f.pts.map((q) => q[1])) / 10) * 1000) / 1000 : 0;
+}
 /** Mocowania męskie, dla których oprawka (kolumna N) ma gniazdo żeńskie o kształcie tego zakończenia: ABS, Weldon, Capto, MHD, KAR, stożek Morse'a, termo (T__ / SP), tulejka zaciskowa ER. */
 const SOCKET_CODES = /^(ABS|WEL|CAP|MHD|KAR|SP_)\d|^(MK_|T__|ER_)\d/;
 /**

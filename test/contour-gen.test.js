@@ -340,3 +340,20 @@ test('frez FRExxx w edytorze Kontury: wczytany kontur w układzie indeksu (dolna
   const r = G2.fitNormalize(stale, t); assert.equal(Math.min(...r.pts.map((p) => p.y)), -190); assert.equal(r.dy, 80);
   assert.equal(G2.fitNormalize(r.pts, t).dy, 0, 'idempotentnie'); assert.equal(G2.fitNormalize(stale, { ...t, columnM: 'ABS040' }).dy, 0, 'inne mocowanie – bez zmian');
 });
+
+test('frezy palcowe i jeżowe na chwycie Weldon: płytki ustalone względem długości roboczej pomniejszonej o długość chwytu Weldon', async () => {
+  const GEN = await import('../src/renderer/js/logic/contourGen.js');
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  assert.equal(GEN.weldonDepth('WEL012'), 45); assert.equal(GEN.weldonDepth('WEL020'), 50); assert.equal(GEN.weldonDepth('ABS040'), 0); assert.equal(GEN.weldonDepth('WEL015') > 0, true, 'rozmiar spoza tabeli – interpolacja');
+  const mk = (E, M) => ({ productCode: 'F', columnD: 'fre', columnE: E, columnP: 'X', columnF: '12', columnJ: '80', columnM: M, columnG: '' });
+  assert.equal(G2.plateLength(mk('pal', 'WEL012')), 35); assert.equal(G2.plateLength(mk('jez', 'WEL012')), 35);
+  assert.equal(G2.plateLength(mk('pal', 'ER_032')), 80, 'inne mocowanie – bez zmian'); assert.equal(G2.plateLength(mk('hss', 'WEL012')), 80, 'inne rodzaje – bez zmian');
+  assert.equal(G2.plateLength({ ...mk('pal', 'WEL012'), columnD: 'wie' }), 80);
+  // kontur z generatora leży o głębokość chwytu niżej, więc wierzchołek płytki (Z = J − chwyt) wypada przy górze korpusu
+  const p = { D: 'fre', E: 'pal', F: '12', I: '12', J: '80', K: '30', L: '0', M: 'WEL012', N: '' };
+  const m = GEN.mounting({}, 'WEL012'), full = GEN.fullContour(p, {}), ys = full.split(';').filter(Boolean).map((q) => Number(q.split('_')[1]));
+  assert.equal(Math.min(...ys), -450); assert.equal(Math.max(...ys), (80 - 1) * 10 - 450, 'góra korpusu na J − 1 − chwyt'); void m;
+  const idx = G2.toolIndex({ tools: [mk('pal', 'WEL012')], detailsMap: { F: { columnAY: full, insertContours: [{ code: 'A', contour: 'M 0 0 L 4 0 L 4 6 L 0 6 Z' }] } } }, null);
+  const lay = G2.buildStack([idx.stackTool(idx.tool('F'))], true, false).layers[0], topBody = Math.min(...lay.outline.map((q) => q.y)), apex = Math.min(...lay.inserts.flat().map((q) => q.y));
+  assert.ok(Math.abs(topBody - apex - 10) < 1e-6, 'wierzchołek płytki 1 mm nad górą korpusu (jak w innych frezach), nie wyżej o długość chwytu');
+});

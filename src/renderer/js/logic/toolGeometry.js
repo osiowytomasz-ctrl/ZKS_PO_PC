@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour, halfPath, withEdgeLines, expandHalf } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits, freL2, freD, freKeyDepth } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits, freL2, freD, freKeyDepth, weldonDepth } from './contourGen.js';
 import { resolvePlates, normPlates } from './plateLayout.js';
 import { naturalCompare } from './common.js';
 
@@ -112,8 +112,13 @@ export function rotateAround(p, pivot, angleDeg) {
 
 /** Frez z mocowaniem FRExxx (nasadzany na trzpień, grupa „fre”). */
 export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
-/** Długość do ustalenia płytek: J, a dla frezów z mocowaniem FRExxx J − L2 (kontur cofnięty o wysokość trzpienia mocującego). */
-export const plateLength = (t) => num(t && t.columnJ) - (isFreFit(t) ? freL2(t.columnM) : 0);
+/** Frez palcowy / jeżowy (fre / pal, fre / jez) zamocowany na chwycie Weldon (M = WELxxx): kontur leży niżej o głębokość chwytu. */
+export const isWeldonMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['pal', 'jez'].includes(String((t && t.columnE) ?? '').trim().toLowerCase()) && weldonDepth(t && t.columnM) > 0;
+/**
+ * Długość do ustalenia płytek: J, a dla frezów z mocowaniem FRExxx J − L2 (kontur cofnięty o wysokość trzpienia mocującego), dla frezów palcowych i jeżowych
+ * na chwycie Weldon J − długość chwytu Weldon (kontur leży niżej o głębokość chwytu).
+ */
+export const plateLength = (t) => num(t && t.columnJ) - (isFreFit(t) ? freL2(t.columnM) : isWeldonMill(t) ? weldonDepth(t.columnM) : 0);
 /**
  * Frez z mocowaniem FRExxx: kontur [points] (0,1 mm) przesunięty w osi Z tak, aby najniższy punkt leżał na Z = −L2 (Z = 0 – dno otworu pod trzpień). Wynik: { pts, dy } (dy w 0,1 mm,
  * 0 – bez zmian; idempotentne). Inne narzędzia – bez zmian.
