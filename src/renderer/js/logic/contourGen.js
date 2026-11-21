@@ -180,7 +180,7 @@ function bodyContour0(p, av = '') {
       [(-L * 10) / 2, (J + yK) * 10], [(-L * 10) / 2, J * 10], [i2 - a1, J * 10], [i2 - a1, (J + H) * 10], [i2 - a9, (J + H) * 10], [i2 - a9, J * 10], [i2, J * 10]];
   };
   if (D === 'opr' && E === 'red' && N3 === 'FRE' && (M3 === 'ABS' || M3 === 'MHD')) {
-    return pts([[(-F * 10) / 2, 0], [(-I * 10) / 2, (I - F) * 5], ...holder(freL2(N) || K), [(I * 10) / 2, (I - F) * 5], [(F * 10) / 2, 0]]);   // trzpień FRExxx: wysokość L2 z tabeli
+    return pts([[(-F * 10) / 2, 0], [(-I * 10) / 2, (I - F) * 5], ...holder(K || freL2(N)), [(I * 10) / 2, (I - F) * 5], [(F * 10) / 2, 0]]);   // trzpień: wysokość z kolumny K (PSWT), bez niej – tabela FRExxx
   }
   if (D === 'fre' && (['tar', 'teo', 'jez', 'pal'].includes(E) || (E === 'plu' && M3 === 'WEL'))) {
     // wersja z kolumny T: chwyt Fi_większe (I), część robocza 0,98·F (tarczowe – F), czoło 1 mm krócej; w oprawce Weldon całość niżej o głębokość mocowania
@@ -214,7 +214,7 @@ function bodyContour0(p, av = '') {
     return pts([[-a, 0], [-a, (J - s - K) * 10], [i2, (J - s - K) * 10], [i2, (J - s) * 10], [-i2, (J - s) * 10], [-i2, (J - s - K) * 10], [a, (J - s - K) * 10], [a, 0], [a, 0]]);
   }
   if (D === 'opr' && E === 'stż' && mid(N, 1, 4).toUpperCase() === 'FRE0') {
-    return pts([[(-I * 10) / 2, 191], ...holder(freL2(N) || K), [(I * 10) / 2, 191]]);   // trzpień FRExxx: wysokość L2 z tabeli
+    return pts([[(-I * 10) / 2, 191], ...holder(K || freL2(N)), [(I * 10) / 2, 191]]);   // trzpień: wysokość z kolumny K (PSWT), bez niej – tabela FRExxx
   }
   if (D === 'opr' && E === 'stż' && mid(N, 1, 4).toUpperCase() === 'FREM') {
     const a = (F * 10) / 2, i2 = (I * 10) / 2;
@@ -258,12 +258,23 @@ function bodyContour0(p, av = '') {
  * o L2 (najniższy punkt konturu na Z = −L2), a gniazdo żeńskie (otwór ød, głębokość L2) i kanał pod kamień rysuje się linią przerywaną.
  */
 export const FRE_L2 = { 16: 17, 22: 19, 27: 21, 32: 24, 40: 27, 50: 30, 60: 40 };
-/** Wysokość trzpienia L2 (mm) dla kodu FRExxx (np. „FRE032”); 0 – inny kod albo rozmiar spoza tabeli. */
-export const freL2 = (code) => { const m = /^FRE(\d{3})$/.exec(txt(code).toUpperCase()); return m ? FRE_L2[Number(m[1])] || 0 : 0; };
-/** Średnica trzpienia ød (mm) z kodu FRExxx albo 0. */
-export const freD = (code) => { const m = /^FRE(\d{3})$/.exec(txt(code).toUpperCase()); return m && FRE_L2[Number(m[1])] ? Number(m[1]) : 0; };
-/** Głębokość kanału pod kamień (mm od dolnej płaszczyzny frezu) – ok. 22% wysokości trzpienia (przybliżenie do potwierdzenia). */
-export const freKeyDepth = (code) => Math.round(freL2(code) * 0.22 * 10) / 10;
+/** Wymiary trzpieni FRExxx poznane z oprawek w PSWT (kolumna N = FRExxx: L – średnica trzpienia, K – wysokość): kod → { d, l2 }; pierwszeństwo przed tabelą. */
+const learnedFre = new Map();
+/** Zapamiętuje wymiary trzpieni FRExxx z oprawek (PSWT: D = opr, N = FRExxx, L i K) – frezy z mocowaniem FRExxx rysuje się wg tych samych wymiarów. */
+export function learnFre(params) {
+  learnedFre.clear();
+  for (const p of Object.values(params || {})) {
+    if (!p || low(p.D) !== 'opr') continue;
+    const code = txt(p.N).toUpperCase(), m = /^FRE(\d{3})$/.exec(code), d = nv(p.L), l2 = nv(p.K);
+    if (m && d > 0 && l2 > 0 && !learnedFre.has(code)) learnedFre.set(code, { d, l2 });
+  }
+}
+/** Wysokość trzpienia L2 (mm) dla kodu FRExxx (z oprawek PSWT, inaczej z tabeli); 0 – inny kod albo rozmiar spoza tabeli. */
+export const freL2 = (code) => { const c = txt(code).toUpperCase(), m = /^FRE(\d{3})$/.exec(c); return m ? (learnedFre.get(c) || {}).l2 || FRE_L2[Number(m[1])] || 0 : 0; };
+/** Średnica trzpienia ød (mm) dla kodu FRExxx (z oprawek PSWT, inaczej z kodu) albo 0. */
+export const freD = (code) => { const c = txt(code).toUpperCase(), m = /^FRE(\d{3})$/.exec(c); return m && (learnedFre.get(c) || FRE_L2[Number(m[1])]) ? (learnedFre.get(c) || {}).d || Number(m[1]) : 0; };
+/** Wysokość kamieni (mm od dolnej płaszczyzny frezu), na której wisi pozioma linia kanału pod kamień – wysokość trzpienia L2 z tabeli. */
+export const freKeyDepth = (code) => freL2(code);
 /** Przesunięcie punktów konturu „x_y;…” o [dy] w osi Y (0,1 mm); zachowuje „;” na początku i na końcu. */
 function shiftY(body, dy) {
   if (!dy || !body) return body;
@@ -410,7 +421,7 @@ export function mounting(mounts, M, opis = '') {
 
 /** Pełny kontur (dawne PSWT!AY = AV + (AW albo „;”) + AX); null, gdy brak i mocowania, i reguły korpusu. */
 export function fullContour(p, mounts) {
-  let m = mounting(mounts, p.M, p.C) || { left: '', right: '' };
+  let m = low(p.D) === 'fre' && freL2(p.M) > 0 ? { left: '', right: '' } : mounting(mounts, p.M, p.C) || { left: '', right: '' };   // frez FRExxx: bez mocowania z arkusza (kontur cofnięty o L2)
   let body = bodyContour(p, m.left);
   // reguły bez „;” na początku (wariant ER, frezy HSS/WĘG) rysują własny chwyt poniżej zera – wyliczonego mocowania nie dokładamy
   if (body && !body.startsWith(';')) { m = { left: '', right: '' }; body = bodyContour(p, ''); }

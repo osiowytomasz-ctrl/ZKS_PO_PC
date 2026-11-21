@@ -3,7 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
-import { fullContour, TREPAN, nutFor, NUT_UNDERCUT, NUT_FILLET } from './contourGen.js';
+import { fullContour, TREPAN, nutFor, NUT_UNDERCUT, NUT_FILLET, learnFre } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -199,6 +199,7 @@ export function confirmedOverrides(params) {
  * Narzędzia monolityczne bez rejonów – część robocza wg długości roboczej (K). Wynik: Map kod → kontur x_y; .regions, .generated (Set).
  */
 export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
+  learnFre(params);   // wymiary trzpieni FRExxx z oprawek PSWT (L – średnica, K – wysokość) dla frezów z tym mocowaniem
   const m = confirmedOverrides(params);
   m.generated = new Set();
   m.blade = new Map();   // długość ostrza (mm) narzędzi monolitycznych – podział na ostrze / oprawkę także bez zatwierdzonego konturu

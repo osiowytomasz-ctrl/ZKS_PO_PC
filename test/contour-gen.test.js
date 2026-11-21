@@ -252,7 +252,7 @@ test('trzpienie i frezy z mocowaniem FRExxx: wysokość trzpienia L2 z tabeli, k
   assert.deepEqual([16, 22, 27, 32, 40, 50, 60].map((d) => GEN.freL2('FRE0' + d)), [17, 19, 21, 24, 27, 30, 40]);
   assert.equal(GEN.freL2('FRE070'), 0); assert.equal(GEN.freL2('ABS063'), 0); assert.equal(GEN.freD('FRE032'), 32);
   // oprawka z trzpieniem FRE032: wysokość trzpienia 24 mm (zamiast K)
-  const holder = { D: 'opr', E: 'stż', F: '50', I: '60', J: '100', K: '5', L: '32', H: '3', M: 'ISO050', N: 'FRE032' };
+  const holder = { D: 'opr', E: 'stż', F: '50', I: '60', J: '100', K: '24', L: '32', H: '3', M: 'ISO050', N: 'FRE032' };   // oprawka: wysokość trzpienia z K
   const ys = GEN.fullContour(holder, {}).split(';').map((q) => Number(q.split('_')[1])), top = Math.max(...ys.filter((y) => y < 2000));
   assert.ok(ys.includes(1000 + 240), 'wierzchołek trzpienia na J + L2 (100 + 24 mm)'); void top;
   // frez z mocowaniem FRE032: najniższy punkt konturu na Z = −L2, inne mocowanie – bez cofnięcia
@@ -265,9 +265,24 @@ test('trzpienie i frezy z mocowaniem FRExxx: wysokość trzpienia L2 z tabeli, k
   const contour = GEN.fullContour(mill, {}).split(';').filter(Boolean).map((q) => { const [x, y] = q.split('_').map(Number); return { x, y }; });
   const fit = G2.fitDrawingFor('FRE032', contour);
   assert.deepEqual(fit.hidden[0].map((p) => [p.x, p.y]), [[-160, -240], [-160, 0], [160, 0], [160, -240]], 'otwór ød32, głębokość L2 = 24 od dolnej płaszczyzny');
-  const key = fit.hidden[1]; assert.equal(key[0].y, key[1].y); assert.ok(key[0].y > -240 && key[0].y < 0); assert.ok(key[1].x > 160, 'kanał pod kamień na całej szerokości frezu');
+  const key = fit.hidden[1]; assert.equal(key[0].y, key[1].y); assert.equal(key[0].y, 0, 'linia kanału pod kamień na wysokości L2 nad dolną płaszczyzną (Z = 0 po cofnięciu o L2)'); assert.ok(key[1].x > 160, 'kanał pod kamień na całej szerokości frezu');
   assert.deepEqual(fit.cavity, { bottom: true, ri: 160, yTop: 0 });
   assert.equal(G2.fitDrawingFor('ABS063', contour), null);
   // 3D: wnęka otwarta od dołu – bryła ma otwór przy dolnej płaszczyźnie
   const prof = G2.profileOf(contour, fit.cavity); assert.deepEqual([prof[0].x, prof[0].y], [160, -240]); assert.ok(prof.some((p) => p.x === 0 && p.y === 0 - 0), 'dno otworu na osi');
+});
+
+test('frezy FRExxx: wymiary trzpienia poznane z oprawek PSWT (L – średnica, K – wysokość), bez mocowania z arkusza', async () => {
+  const GEN = await import('../src/renderer/js/logic/contourGen.js');
+  const { contourOverrides } = await import('../src/renderer/js/logic/contourEditor.js');
+  try {
+    contourOverrides({ h1: { D: 'opr', E: 'stż', N: 'FRE022', L: '22', K: '19' }, h2: { D: 'opr', E: 'stż', N: 'FRE027', L: '27', K: '23' } }, {}, { gen: false });
+    assert.equal(GEN.freL2('FRE022'), 19); assert.equal(GEN.freL2('FRE027'), 23, 'wysokość z oprawki (K) ma pierwszeństwo przed tabelą'); assert.equal(GEN.freD('FRE027'), 27); assert.equal(GEN.freL2('FRE032'), 24, 'brak oprawki – tabela');
+    // frez z mocowaniem FRE027: kontur cofnięty o 23 mm; mocowanie z arkusza pominięte
+    const mill = { D: 'fre', E: 'tar', F: '80', I: '60', J: '50', K: '20', L: '16', M: 'FRE027' };
+    const ys = GEN.fullContour(mill, { FRE027: { left: '0_-270;-200_-270;-200_0', right: '' } }).split(';').filter(Boolean).map((q) => Number(q.split('_')[1]));
+    assert.equal(Math.min(...ys), -230);
+    // fre / glo bez reguły korpusu: nie rysuje się samego mocowania z arkusza (zostaje kolumna T)
+    assert.equal(GEN.fullContour({ D: 'fre', E: 'glo', F: '50', J: '48', K: '48', M: 'FRE022' }, { FRE022: { left: '0_-270;-200_-270;-200_0', right: '' } }), null);
+  } finally { contourOverrides({}, {}, { gen: false }); }
 });
