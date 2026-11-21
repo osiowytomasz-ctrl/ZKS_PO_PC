@@ -53,10 +53,10 @@ test('rysunek zestawu i 3D wg układu płytek: położenie, rodzaj, wiele płyte
 });
 
 test('wiertło płytkowe z płytką centralną: długość J = odległość wierzchołka płytki od Z = 0; miniatura, podgląd 2D i 3D zgodne (kontur krótszy od J)', () => {
-  // dane jak wiertło AMEC z Weldonem: kontur od Z = −65 do 466,3 (generator), J = 476,3 – korpus krótszy o 10 mm, płytka sięga do J
+  // dane jak wiertło AMEC z Weldonem: kontur od Z = −65 do 471,5 (generator), J = 476,3 – korpus krótszy o 10% średnicy, płytka sięga do J
   const params = { D: 'wie', E: 'ply', F: '48', I: '65', J: '476,3', K: '422', M: 'WEL040', N: '' };
   const full = E.expandHalf(E.generatedHalf(params, {})), str = full.map((q) => q.x + '_' + q.y).join(';'), zs = full.map((q) => q.y / 10);
-  assert.equal(Math.min(...zs), -65); assert.equal(Math.max(...zs), 466.3);
+  assert.equal(Math.min(...zs), -65); assert.equal(Math.max(...zs), 471.5);   // korpus krótszy od J o 10% średnicy (4,8 mm)
   const t = { productCode: 'WA1', columnD: 'wie', columnE: 'ply', columnP: 'AMEC', columnF: '48', columnJ: '476.3', columnG: '', columnM: 'WEL040' };
   for (const path of ['M 0 0 L 6 0 L 12 1.5 L 18 0 L 24 0 L 24 4 L 12 9 L 0 4 Z', 'M 0 3 L 6 3 L 12 4.5 L 18 3 L 24 3 L 24 7 L 12 12 L 0 7 Z']) {   // ścieżka od y = 0 i przesunięta
     const idx = G.toolIndex({ tools: [t], detailsMap: { WA1: { columnAY: str, insertContours: [{ code: 'ICP', contour: path }] } } }, null), stt = idx.stackTool(t), b = G.bounds(stt.contour);
@@ -64,8 +64,8 @@ test('wiertło płytkowe z płytką centralną: długość J = odległość wier
     const apex2d = (b.maxY - Math.min(...pp.map((q) => q.y))) / 10, bottom2d = (b.maxY - Math.max(...pp.map((q) => q.y))) / 10;
     const ins = G.insertsForMesh([stt], G.buildMesh([stt.contour]).offsets), z3 = ins[0].poly.map((q) => q.y / 10);
     // miniatura: skala i początek z konturu (outline ma te same punkty co kontur)
-    const mini = G.buildMini(t, idx.details('WA1')), iTop = zs.indexOf(466.3), iBot = zs.indexOf(-65);
-    const k = (mini.outline[iBot].y - mini.outline[iTop].y) / (466.3 + 65), zMini = (y) => 466.3 - (y - mini.outline[iTop].y) / k;
+    const mini = G.buildMini(t, idx.details('WA1')), iTop = zs.indexOf(471.5), iBot = zs.indexOf(-65);
+    const k = (mini.outline[iBot].y - mini.outline[iTop].y) / (471.5 + 65), zMini = (y) => 471.5 - (y - mini.outline[iTop].y) / k;
     const my = mini.inserts[0].map((q) => q.y), apexMini = zMini(Math.min(...my)), bottomMini = zMini(Math.max(...my));
     for (const [name, v] of [['2D', apex2d], ['3D', Math.max(...z3)], ['miniatura', apexMini]]) assert.ok(Math.abs(v - 476.3) < 1e-6, `wierzchołek płytki (${name}) = J: ${v}`);
     for (const [name, v] of [['2D', bottom2d], ['3D', Math.min(...z3)], ['miniatura', bottomMini]]) assert.ok(Math.abs(v - 467.3) < 1e-6, `dół płytki (${name}) = J − wysokość płytki: ${v}`);

@@ -148,8 +148,8 @@ export function bodyContour(p, av = '') {
     return pts([[0, b], [-a, b], [-a, b + (J - K) * 10], [a, b + (J - K) * 10], [a, b + J * 10], [0, b + J * 10 + t30], [-a, b + J * 10], [-a, b + (J - K) * 10],
       [a, b + (J - K) * 10], [a, b], [0, b]], { lead: false, tail: false });
   }
-  if (D === 'wie' && E === 'ply') { // wersja z kolumny T: korpus 0,98·F, czoło 10 mm krócej niż J
-    const m = ((midN(M, 4, 3) + 10) * 10) / 2, a = (0.98 * F * 10) / 2, top = J * 10 - 100;
+  if (D === 'wie' && E === 'ply') { // wiertło płytkowe: korpus 0,98·F, czoło krótsze od J o 10% średnicy (J sięga do wierzchołka płytki, korpus kończy się niżej)
+    const m = ((midN(M, 4, 3) + 10) * 10) / 2, a = (0.98 * F * 10) / 2, top = J * 10 - F;   // 10% · F mm = F w jednostkach 0,1 mm
     return pts([[-m, 0], [-a, J * 10 - K * 10], [a, J * 10 - K * 10], [a, top - F], [0, top], [-a, top - F], [-a, J * 10 - K * 10], [a, J * 10 - K * 10], [m, 0], [-m, 0]]);
   }
   if (D === 'wyt' && E === 'wst') {
