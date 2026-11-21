@@ -148,7 +148,9 @@ export function nutDrawingFor(N, contour) {
   const y0 = base + nut.slot.from * 10, y1 = base + nut.slot.to * 10;
   const slots = [90, 30, 150].map((deg) => {   // wcięcia zwrócone do patrzącego: 90° – środek, 30° / 150° – po bokach
     const c = (deg * Math.PI) / 180, xs = [R * Math.cos(c + d), R * Math.cos(c - d)].sort((p, q) => p - q);
-    return [pt(xs[0], y1), pt(xs[0], y0), pt(xs[1], y0), pt(xs[1], y1)];
+    // dno wcięcia zaokrąglone (półkole o promieniu połowy szerokości wcięcia; po bokach – elipsa ze skrótem)
+    const a = (xs[1] - xs[0]) / 2, xc = (xs[0] + xs[1]) / 2, yc = y0 + h, arc = [...Array(9)].map((_, i) => { const th = Math.PI + (Math.PI * i) / 8; return pt(xc + a * Math.cos(th), yc + h * Math.sin(th)); });
+    return [pt(xs[0], y1), ...arc, pt(xs[1], y1)];
   });
   return { z1: base, z2: b.maxY, slots };
 }

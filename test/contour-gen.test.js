@@ -194,6 +194,20 @@ test('tulejka ER: gniazdo w oprawce (wzór męskiego zakończenia ER) i nakrętk
   // rysunek 2D: ciemny pas nakrętki i trzy wcięcia zwrócone do patrzącego (środkowe i dwa boczne)
   const pts = parseContour(C.fullContour(o, {})), nd = nutDrawingFor('ER_025', pts);
   assert.equal(nd.z2 - nd.z1, 200); assert.equal(nd.slots.length, 3);
-  assert.ok(nd.slots[0][0].x < 0 && nd.slots[0][3].x > 0 && Math.abs(nd.slots[0][0].x + nd.slots[0][3].x) < 1e-6);   // środkowe: symetryczne
+  assert.ok(nd.slots[0][0].x < 0 && nd.slots[0].at(-1).x > 0 && Math.abs(nd.slots[0][0].x + nd.slots[0].at(-1).x) < 1e-6);   // środkowe: symetryczne, dno zaokrąglone
   assert.equal(nutDrawingFor('FRE016', pts), null);
+});
+
+test('podcięcie pod nakrętką ER wg oprawki CAT50 + ER32 (STEP): szyjka i stożek do korpusu, proporcjonalnie do nakrętki', () => {
+  const o = { D: 'opr', E: 'stż', F: '48', I: '60', J: '100', K: '80', M: 'ISO050', N: 'ER_032' };   // korpus R 24 jak w pliku
+  const h = generatedHalf(o, {}), cut = 1000 - 22.606 * 10;
+  const at = (x, y) => h.some((q) => Math.abs(q.x - x) < 0.05 && Math.abs(q.y - y) < 0.05);
+  assert.ok(at(199.39, cut - 20) && at(199.39, cut), 'szyjka Ø39,9 długości 2 mm pod nakrętką');
+  assert.ok(at(240, cut - 20 - 51.26), 'stożek 5,13 mm do korpusu Ø48 (kąt 38,4° jak w pliku)');
+  // ER40: korpus R 31,5 – ten sam kąt stożka, szyjka 0,7976·R, szyjka 0,08·R
+  const g = generatedHalf({ ...o, F: '63', I: '63', N: 'ER_040' }, {}), cut2 = 1000 - 23.9 * 10;
+  assert.ok(g.some((q) => Math.abs(q.x - 251.2314) < 0.01 && Math.abs(q.y - cut2) < 0.01) && g.some((q) => Math.abs(q.x - 251.2314) < 0.01 && Math.abs(q.y - (cut2 - 25.2)) < 0.01));
+  // korpus węższy od szyjki – bez podcięcia (nakrętka od razu na korpusie)
+  const n = generatedHalf({ ...o, F: '30', I: '30' }, {});
+  assert.ok(!n.some((q) => Math.abs(q.x - 199.39) < 0.05));
 });

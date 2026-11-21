@@ -3,7 +3,7 @@
 // Układ: x = promień (±, mm), y = Z – pozycja wzdłuż osi narzędzia (mm), jak w kolumnie T (tam jednostki 0,1 mm).
 // Czyste funkcje – testy: test/contour-editor.test.js.
 import { parseInsertPath, parseContour } from './toolGeometry.js';
-import { fullContour, TREPAN, nutFor } from './contourGen.js';
+import { fullContour, TREPAN, nutFor, NUT_UNDERCUT } from './contourGen.js';
 
 const n = (v) => { const x = Number(String(v ?? '').trim().replace(',', '.')); return String(v ?? '').trim() === '' ? NaN : x; };
 const fmt = (v) => { const r = Math.round(v * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r); };
@@ -97,7 +97,7 @@ export function halfPath(points) {
 }
 /**
  * Dokłada nakrętkę ER (kolumna N oprawki) na czubku prawej połowy konturu [half] (0,1 mm): górne [L] mm zastępuje zewnętrzny kształt nakrętki
- * (walec z fazą i stożkiem czoła z plików STEP / IGES). Przy braku nakrętki albo zbyt krótkim korpusie – bez zmian.
+ * (walec z fazą i stożkiem czoła z plików STEP / IGES) z podcięciem pod nią (szyjka + stożek do korpusu). Przy braku nakrętki albo zbyt krótkim korpusie – bez zmian.
  */
 export function withNut(half, N) {
   const nut = nutFor(N), P = half || [];
@@ -106,9 +106,16 @@ export function withNut(half, N) {
   if (rows.length < 2) return P;
   const top = Math.max(...rows.map((r) => r.y)), bottom = Math.min(...rows.map((r) => r.y)), cut = top - nut.L * 10;
   if (cut <= bottom + 10) return P;
-  const keep = rows.filter((r) => r.y < cut - 1e-6), next = rows.find((r) => r.y >= cut - 1e-6), last = keep[keep.length - 1];
-  const edge = last && next && next.y > last.y ? last.x + ((next.x - last.x) * (cut - last.y)) / (next.y - last.y) : (last ? last.x : nut.R * 10);
-  const out = [{ x: 0, y: bottom }, ...keep, { x: Math.max(edge, 0), y: cut }];
+  // promień korpusu na wysokości y (obrys: największy promień, w skokach – ten niżej)
+  const radiusAt = (y) => { const a = [...rows].reverse().find((r) => r.y <= y + 1e-6), b = rows.find((r) => r.y >= y - 1e-6); return a && b && b.y > a.y ? a.x + ((b.x - a.x) * (y - a.y)) / (b.y - a.y) : (a ? a.x : 0); };
+  // podcięcie pod nakrętką (jak w oprawce CAT50 ER32): walec szyjki, niżej stożek do korpusu – proporcjonalnie do promienia nakrętki
+  const u = NUT_UNDERCUT, neckR = u.neckR * nut.R * 10, neckLen = u.neckLen * nut.R * 10, body = radiusAt(cut - 1e-3);
+  const coneLen = body > neckR + 1 ? (body - neckR) / u.tan : 0, y0 = cut - neckLen - coneLen;
+  const under = coneLen > 0 && y0 > bottom + 10;
+  const keep = rows.filter((r) => r.y < (under ? y0 : cut) - 1e-6);
+  const out = [{ x: 0, y: bottom }, ...keep];
+  if (under) out.push({ x: radiusAt(y0), y: y0 }, { x: neckR, y: cut - neckLen }, { x: neckR, y: cut });
+  else out.push({ x: Math.max(body, 0), y: cut });
   for (const [r, t] of nut.prof) out.push({ x: Math.round(r * 100) / 10, y: Math.round((cut + t * 10) * 1000) / 1000 });
   out.push({ x: 0, y: top });
   return out.filter((q, i, a) => !i || Math.abs(q.x - a[i - 1].x) > 1e-6 || Math.abs(q.y - a[i - 1].y) > 1e-6);
