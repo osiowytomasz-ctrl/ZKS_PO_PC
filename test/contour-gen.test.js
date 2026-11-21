@@ -265,7 +265,7 @@ test('trzpienie i frezy z mocowaniem FRExxx: wysokość trzpienia L2 z tabeli, k
   const contour = GEN.fullContour(mill, {}).split(';').filter(Boolean).map((q) => { const [x, y] = q.split('_').map(Number); return { x, y }; });
   const fit = G2.fitDrawingFor('FRE032', contour);
   assert.deepEqual(fit.hidden[0].map((p) => [p.x, p.y]), [[-160, -240], [-160, 0], [160, 0], [160, -240]], 'otwór ød32, głębokość L2 = 24 od dolnej płaszczyzny');
-  const key = fit.hidden[1]; assert.equal(key[0].y, key[1].y); assert.equal(key[0].y, 0, 'linia kanału pod kamień na wysokości L2 nad dolną płaszczyzną (Z = 0 po cofnięciu o L2)'); assert.ok(key[1].x > 160, 'kanał pod kamień na całej szerokości frezu');
+  const key = fit.hidden[1]; assert.equal(key[0].y, key[1].y); assert.equal(key[0].y, -180, 'linia kanału pod kamień na wysokości kamieni nad dolną płaszczyzną (bez oprawki ≈ 25% L2 = 6 mm)'); assert.ok(key[1].x > 160, 'kanał pod kamień na całej szerokości frezu');
   assert.deepEqual(fit.cavity, { bottom: true, ri: 160, yTop: 0 });
   assert.equal(G2.fitDrawingFor('ABS063', contour), null);
   // 3D: wnęka otwarta od dołu – bryła ma otwór przy dolnej płaszczyźnie
@@ -282,6 +282,13 @@ test('frezy FRExxx: wymiary trzpienia poznane z oprawek PSWT (L – średnica, K
     const mill = { D: 'fre', E: 'tar', F: '80', I: '60', J: '50', K: '20', L: '16', M: 'FRE027' };
     const ys = GEN.fullContour(mill, { FRE027: { left: '0_-270;-200_-270;-200_0', right: '' } }).split(';').filter(Boolean).map((q) => Number(q.split('_')[1]));
     assert.equal(Math.min(...ys), -230);
+    // gniazdo: układ współrzędnych na dnie otworu (Z = 0), otwór od −L2 do 0; kamienie – wysokość H z oprawki
+    contourOverrides({ h1: { D: 'opr', E: 'stż', N: 'FRE022', L: '22', K: '19', H: '5' } }, {}, { gen: false });
+    const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+    const flat = [{ x: -300, y: 500 }, { x: 300, y: 500 }, { x: 300, y: 1000 }, { x: -300, y: 1000 }];   // kontur NIE przesunięty o L2 – gniazdo i tak od Z = −L2 do 0
+    const fit = G2.fitDrawingFor('FRE022', flat);
+    assert.deepEqual(fit.hidden[0].map((p) => p.y), [-190, 0, 0, -190]); assert.equal(fit.hidden[1][0].y, -140, 'kamienie H = 5 mm nad dolną płaszczyzną (Z = −L2 + H)');
+    contourOverrides({ h1: { D: 'opr', E: 'stż', N: 'FRE022', L: '22', K: '19' }, h2: { D: 'opr', E: 'stż', N: 'FRE027', L: '27', K: '23' } }, {}, { gen: false });
     // fre / glo bez reguły korpusu: nie rysuje się samego mocowania z arkusza (zostaje kolumna T)
     assert.equal(GEN.fullContour({ D: 'fre', E: 'glo', F: '50', J: '48', K: '48', M: 'FRE022' }, { FRE022: { left: '0_-270;-200_-270;-200_0', right: '' } }), null);
   } finally { contourOverrides({}, {}, { gen: false }); }

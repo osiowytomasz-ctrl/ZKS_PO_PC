@@ -258,23 +258,26 @@ function bodyContour0(p, av = '') {
  * o L2 (najniższy punkt konturu na Z = −L2), a gniazdo żeńskie (otwór ød, głębokość L2) i kanał pod kamień rysuje się linią przerywaną.
  */
 export const FRE_L2 = { 16: 17, 22: 19, 27: 21, 32: 24, 40: 27, 50: 30, 60: 40 };
-/** Wymiary trzpieni FRExxx poznane z oprawek w PSWT (kolumna N = FRExxx: L – średnica trzpienia, K – wysokość): kod → { d, l2 }; pierwszeństwo przed tabelą. */
+/** Wymiary trzpieni FRExxx poznane z oprawek w PSWT (kolumna N = FRExxx: L – średnica trzpienia, K – wysokość): kod → { d, l2, h } (h – wysokość kamieni, kolumna H); pierwszeństwo przed tabelą. */
 const learnedFre = new Map();
 /** Zapamiętuje wymiary trzpieni FRExxx z oprawek (PSWT: D = opr, N = FRExxx, L i K) – frezy z mocowaniem FRExxx rysuje się wg tych samych wymiarów. */
 export function learnFre(params) {
   learnedFre.clear();
   for (const p of Object.values(params || {})) {
     if (!p || low(p.D) !== 'opr') continue;
-    const code = txt(p.N).toUpperCase(), m = /^FRE(\d{3})$/.exec(code), d = nv(p.L), l2 = nv(p.K);
-    if (m && d > 0 && l2 > 0 && !learnedFre.has(code)) learnedFre.set(code, { d, l2 });
+    const code = txt(p.N).toUpperCase(), m = /^FRE(\d{3})$/.exec(code), d = nv(p.L), l2 = nv(p.K), h = nv(p.H);
+    if (m && d > 0 && l2 > 0 && !learnedFre.has(code)) learnedFre.set(code, { d, l2, h });
   }
 }
 /** Wysokość trzpienia L2 (mm) dla kodu FRExxx (z oprawek PSWT, inaczej z tabeli); 0 – inny kod albo rozmiar spoza tabeli. */
 export const freL2 = (code) => { const c = txt(code).toUpperCase(), m = /^FRE(\d{3})$/.exec(c); return m ? (learnedFre.get(c) || {}).l2 || FRE_L2[Number(m[1])] || 0 : 0; };
 /** Średnica trzpienia ød (mm) dla kodu FRExxx (z oprawek PSWT, inaczej z kodu) albo 0. */
 export const freD = (code) => { const c = txt(code).toUpperCase(), m = /^FRE(\d{3})$/.exec(c); return m && (learnedFre.get(c) || FRE_L2[Number(m[1])]) ? (learnedFre.get(c) || {}).d || Number(m[1]) : 0; };
-/** Wysokość kamieni (mm od dolnej płaszczyzny frezu), na której wisi pozioma linia kanału pod kamień – wysokość trzpienia L2 z tabeli. */
-export const freKeyDepth = (code) => freL2(code);
+/**
+ * Wysokość kamieni (mm od dolnej płaszczyzny frezu), na której wisi pozioma linia kanału pod kamień: kolumna H oprawki z PSWT (wysokość nakładek / kamieni na kołnierzu),
+ * a bez oprawki – ok. 25% wysokości trzpienia (przybliżenie).
+ */
+export const freKeyDepth = (code) => { const h = (learnedFre.get(txt(code).toUpperCase()) || {}).h; return h > 0 ? h : Math.round(freL2(code) * 0.25 * 10) / 10; };
 /** Przesunięcie punktów konturu „x_y;…” o [dy] w osi Y (0,1 mm); zachowuje „;” na początku i na końcu. */
 function shiftY(body, dy) {
   if (!dy || !body) return body;

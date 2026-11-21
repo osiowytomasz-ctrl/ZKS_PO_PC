@@ -128,7 +128,8 @@ function radiusAtY(contour, y) {
 export function fitDrawingFor(M, contour) {
   const L2 = freL2(M), d = freD(M), b = bounds(contour);
   if (!L2 || !d || !b) return null;
-  const r = d * 5, yb = b.minY, yt = yb + L2 * 10, ys = yb + freKeyDepth(M) * 10, rad = radiusAtY(contour, ys) || b.maxX;
+  // układ współrzędnych na czole otworu pod trzpień (dno otworu): otwór od Z = −L2 (dolna płaszczyzna frezu) do Z = 0, kamienie – H nad dolną płaszczyzną
+  const r = d * 5, yb = -L2 * 10, yt = 0, ys = yb + freKeyDepth(M) * 10, rad = radiusAtY(contour, ys) || b.maxX;
   return { hidden: [[pt(-r, yb), pt(-r, yt), pt(r, yt), pt(r, yb)], [pt(-rad, ys), pt(rad, ys)]], cavity: { bottom: true, ri: r, yTop: yt } };
 }
 /** Rysunek wiertła rurowego (płytki i linie niewidoczne, 0,1 mm) dla konturu: czubek z konturu, gdy odbiega od długości J narzędzia. null – brak. */

@@ -5,6 +5,7 @@ import { h, clear, api, toast, confirmBox, modal } from '../ui.js';
 import { toolCatalog, contourGenOn, invalidateConfirmed } from '../catalog.js';
 import { ndLoad, ndPatch } from '../ndStore.js';
 import * as G from '../logic/toolGeometry.js';
+import { learnFre } from '../logic/contourGen.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
@@ -79,7 +80,7 @@ export function mountContours(el, ctx) {
     st.dataError = null;
     try {
       const cd = await ndLoad({ manage: canSave, user: (ctx.user && (ctx.user.name || ctx.user.email)) || '', force });
-      st.mounts = cd.mounts || {}; st.params = cd.params || {}; st.v = cd.v || {}; st.dataSource = cd.source;
+      st.mounts = cd.mounts || {}; st.params = cd.params || {}; st.v = cd.v || {}; st.dataSource = cd.source; learnFre(st.params);   // trzpienie FRExxx z oprawek (przed generatorem konturów)
       if (!Object.keys(st.params).length) st.dataError = 'serwer nie zwrócił żadnych narzędzi z arkusza PSWT (sprawdź nazwę karty „PSWT” i kolumny B:N).';
     } catch (e) {
       st.mounts = {}; st.params = {}; st.v = {};
