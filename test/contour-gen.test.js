@@ -105,7 +105,7 @@ test('generator – sama prawa połowa (od osi do osi, x ≥ 0)', () => {
 
 test('frez fazowy (dopisana reguła): walec Ø I, stożek pod kątem G do Ø F', () => {
   const b = C.bodyContour({ D: 'fre', E: 'faz', F: '63', G: '45', I: '79', J: '40', K: '40', M: 'FRE022' }, '0_0;0_0;0_0;0_0');
-  assert.equal(b, ';0_0;-395_0;-395_320;-315_400;315_400;395_320;395_0;0_0;');
+  assert.equal(b, ';0_-190;-395_-190;-395_130;-315_210;315_210;395_130;395_-190;0_-190;', 'mocowanie FRE022: kontur cofnięty o L2 = 19 mm');
 });
 
 test('wiertło rurowe: rejon ostrza = węglik 7 mm od czubka (nie K), brak linii przez całą szerokość, wnęka w 3D, płytki ≤ 4 mm po obwodzie', () => {
@@ -244,4 +244,30 @@ test('tulejki ER: szczeliny wzdłużne, otwór przelotowy od czoła do końca, E
   const cup = profileOf(pts, h.cavity); assert.ok(cup[0].x === 50 && cup[0].y === bot && cup.at(-1).x === 50 && cup.at(-1).y === bot);
   // głębokość z N obowiązuje tylko poza tulejkami (oprawka gwintująca): otwór nie wychodzi poza kontur
   assert.equal(holeDrawingFor('D10,0□08,0_010', pts, 'ISO050').hidden.length, 1);
+});
+
+test('trzpienie i frezy z mocowaniem FRExxx: wysokość trzpienia L2 z tabeli, kontur frezu cofnięty o L2, gniazdo żeńskie i kanał pod kamień', async () => {
+  const GEN = await import('../src/renderer/js/logic/contourGen.js');
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  assert.deepEqual([16, 22, 27, 32, 40, 50, 60].map((d) => GEN.freL2('FRE0' + d)), [17, 19, 21, 24, 27, 30, 40]);
+  assert.equal(GEN.freL2('FRE070'), 0); assert.equal(GEN.freL2('ABS063'), 0); assert.equal(GEN.freD('FRE032'), 32);
+  // oprawka z trzpieniem FRE032: wysokość trzpienia 24 mm (zamiast K)
+  const holder = { D: 'opr', E: 'stż', F: '50', I: '60', J: '100', K: '5', L: '32', H: '3', M: 'ISO050', N: 'FRE032' };
+  const ys = GEN.fullContour(holder, {}).split(';').map((q) => Number(q.split('_')[1])), top = Math.max(...ys.filter((y) => y < 2000));
+  assert.ok(ys.includes(1000 + 240), 'wierzchołek trzpienia na J + L2 (100 + 24 mm)'); void top;
+  // frez z mocowaniem FRE032: najniższy punkt konturu na Z = −L2, inne mocowanie – bez cofnięcia
+  const mill = { D: 'fre', E: 'tar', F: '80', I: '60', J: '50', K: '20', L: '16', M: 'FRE032' };
+  const lo = (p) => Math.min(...GEN.fullContour(p, {}).split(';').filter(Boolean).map((q) => Number(q.split('_')[1])));
+  assert.equal(lo(mill), -240); assert.equal(lo({ ...mill, M: 'XXX001' }), 0);
+  // płytki: długość robocza J − L2 tylko dla frezów z mocowaniem FRExxx; gniazdo i kanał
+  const t = { productCode: 'FR1', columnD: 'fre', columnE: 'tar', columnP: 'Iscar', columnF: '80', columnJ: '50', columnM: 'FRE032', columnG: '' };
+  assert.equal(G2.plateLength(t), 26); assert.equal(G2.plateLength({ ...t, columnM: 'ABS063' }), 50); assert.equal(G2.plateLength({ ...t, columnD: 'opr' }), 50);
+  const contour = GEN.fullContour(mill, {}).split(';').filter(Boolean).map((q) => { const [x, y] = q.split('_').map(Number); return { x, y }; });
+  const fit = G2.fitDrawingFor('FRE032', contour);
+  assert.deepEqual(fit.hidden[0].map((p) => [p.x, p.y]), [[-160, -240], [-160, 0], [160, 0], [160, -240]], 'otwór ød32, głębokość L2 = 24 od dolnej płaszczyzny');
+  const key = fit.hidden[1]; assert.equal(key[0].y, key[1].y); assert.ok(key[0].y > -240 && key[0].y < 0); assert.ok(key[1].x > 160, 'kanał pod kamień na całej szerokości frezu');
+  assert.deepEqual(fit.cavity, { bottom: true, ri: 160, yTop: 0 });
+  assert.equal(G2.fitDrawingFor('ABS063', contour), null);
+  // 3D: wnęka otwarta od dołu – bryła ma otwór przy dolnej płaszczyźnie
+  const prof = G2.profileOf(contour, fit.cavity); assert.deepEqual([prof[0].x, prof[0].y], [160, -240]); assert.ok(prof.some((p) => p.x === 0 && p.y === 0 - 0), 'dno otworu na osi');
 });

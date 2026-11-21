@@ -343,7 +343,8 @@ export function mountContours(el, ctx) {
       const tre = !!t && E.isTrepan(st.params[normCode(t.productCode)]);   // wiertło rurowe: kielich i płytki ostrza wg Ø
       const trd = tre && svg ? G.trepanDrawingFor(t.columnF, t.columnJ, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // kielich: wnęka z wymiarów
       const hlN = t && !tre && String((st.params[normCode(t.productCode)] || {}).D || '').trim().toLowerCase() === 'opr' ? (st.params[normCode(t.productCode)] || {}).N : '';
-      const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)), (st.params[normCode(t.productCode)] || {}).M) : null;   // oprawka gwintująca: otwór
+      const pr0 = (t && st.params[normCode(t.productCode)]) || {};
+      const hld = hlN && svg ? G.holeDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)), pr0.M) : String(pr0.D || '').trim().toLowerCase() === 'fre' && svg ? G.fitDrawingFor(pr0.M, E.svgToContour(svg).map((p) => unXf(p, f0))) : null;   // oprawka gwintująca: otwór; frez FRExxx: gniazdo żeńskie   // oprawka gwintująca: otwór
       const mesh = svg ? G.buildMesh([E.svgToContour(svg).map((p) => unXf(p, f0))], 36, [trd ? trd.cavity : hld ? hld.cavity : null]) : null;
       if (mesh) mesh.regions = [(st.regions || []).map((r) => (f0.ang ? r : { ...r, z1: r.z1 - f0.dz, z2: r.z2 - f0.dz }))];   // część robocza w kolorze płytek
       if (mesh && hlN && svg) mesh.nut = [G.nutDrawingFor(hlN, E.svgToContour(svg).map((p) => unXf(p, f0)))];   // nakrętka ER – ciemniejsza część bryły
@@ -402,7 +403,7 @@ export function mountContours(el, ctx) {
     for (const l of layers) out += `<polygon points="${l.pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="${l.fill}" stroke="none" pointer-events="none"/>`
       + `<path d="${G.outlinePath(l.pts, (p) => [X(p.x), Y(p.y)])}" fill="none" stroke="${l.stroke}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} pointer-events="none"/>`;
     { const pr = (t && st.params[normCode(t.productCode)]) || {};   // oprawka gwintująca: otwór pod chwyt gwintownika – przerywana linia 1 px
-      const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg), pr.M) : null;
+      const hd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.holeDrawingFor(pr.N, E.svgToContour(svg), pr.M) : svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'fre' ? G.fitDrawingFor(pr.M, E.svgToContour(svg)) : null;   // frez FRExxx: gniazdo żeńskie + kanał pod kamień
       const cs = svg && !trePv ? G.colletDrawingFor(pr.M) : null;   // szczeliny wzdłużne tulejki ER
       if (cs) out += cs.map((q) => `<polyline points="${q.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ')}" fill="none" stroke="#333" stroke-width="0.9" pointer-events="none"/>`).join('');
       const nd = svg && !trePv && String(pr.D || '').trim().toLowerCase() === 'opr' ? G.nutDrawingFor(pr.N, E.svgToContour(svg)) : null;   // nakrętka ER: ciemniejszy pas + wcięcia pod klucz

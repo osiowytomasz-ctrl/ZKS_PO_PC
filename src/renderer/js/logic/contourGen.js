@@ -130,7 +130,7 @@ export function lastY(av) {
  * Korpus narzędzia (dawne PSWT!AW) z kolumn D:N: { D grupa, E rodzaj, F Fi_mniejsze, G pochylenie, H promień, I Fi_większe, J długość 1,
  * K długość robocza, L ząb / ap, M mocowanie początkowe, N mocowanie końcowe } i lewej części mocowania [av]. '' – brak reguły dla tej grupy.
  */
-export function bodyContour(p, av = '') {
+function bodyContour0(p, av = '') {
   const D = low(p.D), E = low(p.E), M = txt(p.M), N = txt(p.N);
   const F = nv(p.F), G = nv(p.G), H = nv(p.H), I = nv(p.I), J = nv(p.J), K = nv(p.K), L = nv(p.L);
   const M3 = mid(M, 1, 3).toUpperCase(), N3 = mid(N, 1, 3).toUpperCase(), M2 = mid(M, 1, 2).toUpperCase(), N2 = mid(N, 1, 2).toUpperCase();
@@ -175,12 +175,12 @@ export function bodyContour(p, av = '') {
     return pts([...L, ...Rr]);
   }
   const holder = (yK) => { // oprawka z kołnierzem: wspólny kawałek reguł „opr red FRE ABS/MHD” i „opr stż FRE0”
-    const i2 = (I * 10) / 2, a9 = (I - L) * 0.9 * 5, a1 = (I - L) * 0.1 * 5;
-    return [[-i2, J * 10], [-i2 + a9, J * 10], [-i2 + a9, (J + H) * 10], [-i2 + a1, (J + H) * 10], [-i2 + a1, J * 10], [(L * 10) / 2, J * 10], [(L * 10) / 2, (J + yK) * 10],
+    const LL = L || freD(N), i2 = (I * 10) / 2, a9 = (I - LL) * 0.9 * 5, a1 = (I - LL) * 0.1 * 5;
+    return [[-i2, J * 10], [-i2 + a9, J * 10], [-i2 + a9, (J + H) * 10], [-i2 + a1, (J + H) * 10], [-i2 + a1, J * 10], [(LL * 10) / 2, J * 10], [(LL * 10) / 2, (J + yK) * 10],
       [(-L * 10) / 2, (J + yK) * 10], [(-L * 10) / 2, J * 10], [i2 - a1, J * 10], [i2 - a1, (J + H) * 10], [i2 - a9, (J + H) * 10], [i2 - a9, J * 10], [i2, J * 10]];
   };
   if (D === 'opr' && E === 'red' && N3 === 'FRE' && (M3 === 'ABS' || M3 === 'MHD')) {
-    return pts([[(-F * 10) / 2, 0], [(-I * 10) / 2, (I - F) * 5], ...holder(K), [(I * 10) / 2, (I - F) * 5], [(F * 10) / 2, 0]]);
+    return pts([[(-F * 10) / 2, 0], [(-I * 10) / 2, (I - F) * 5], ...holder(freL2(N) || K), [(I * 10) / 2, (I - F) * 5], [(F * 10) / 2, 0]]);   // trzpień FRExxx: wysokość L2 z tabeli
   }
   if (D === 'fre' && (['tar', 'teo', 'jez', 'pal'].includes(E) || (E === 'plu' && M3 === 'WEL'))) {
     // wersja z kolumny T: chwyt Fi_większe (I), część robocza 0,98·F (tarczowe – F), czoło 1 mm krócej; w oprawce Weldon całość niżej o głębokość mocowania
@@ -214,7 +214,7 @@ export function bodyContour(p, av = '') {
     return pts([[-a, 0], [-a, (J - s - K) * 10], [i2, (J - s - K) * 10], [i2, (J - s) * 10], [-i2, (J - s) * 10], [-i2, (J - s - K) * 10], [a, (J - s - K) * 10], [a, 0], [a, 0]]);
   }
   if (D === 'opr' && E === 'stż' && mid(N, 1, 4).toUpperCase() === 'FRE0') {
-    return pts([[(-I * 10) / 2, 191], ...holder(K), [(I * 10) / 2, 191]]);
+    return pts([[(-I * 10) / 2, 191], ...holder(freL2(N) || K), [(I * 10) / 2, 191]]);   // trzpień FRExxx: wysokość L2 z tabeli
   }
   if (D === 'opr' && E === 'stż' && mid(N, 1, 4).toUpperCase() === 'FREM') {
     const a = (F * 10) / 2, i2 = (I * 10) / 2;
@@ -251,6 +251,29 @@ export function bodyContour(p, av = '') {
     return pts([[a, 0], [a, K * 10], [-a, K * 10], [-a, 0]]);
   }
   return '';
+}
+
+/**
+ * Trzpień mocujący frezów nasadzanych (mocowanie FRExxx, xxx = średnica ød w mm): wysokość trzpienia L2 (mm) wg tabeli. Frez z mocowaniem FRExxx ma kontur cofnięty
+ * o L2 (najniższy punkt konturu na Z = −L2), a gniazdo żeńskie (otwór ød, głębokość L2) i kanał pod kamień rysuje się linią przerywaną.
+ */
+export const FRE_L2 = { 16: 17, 22: 19, 27: 21, 32: 24, 40: 27, 50: 30, 60: 40 };
+/** Wysokość trzpienia L2 (mm) dla kodu FRExxx (np. „FRE032”); 0 – inny kod albo rozmiar spoza tabeli. */
+export const freL2 = (code) => { const m = /^FRE(\d{3})$/.exec(txt(code).toUpperCase()); return m ? FRE_L2[Number(m[1])] || 0 : 0; };
+/** Średnica trzpienia ød (mm) z kodu FRExxx albo 0. */
+export const freD = (code) => { const m = /^FRE(\d{3})$/.exec(txt(code).toUpperCase()); return m && FRE_L2[Number(m[1])] ? Number(m[1]) : 0; };
+/** Głębokość kanału pod kamień (mm od dolnej płaszczyzny frezu) – ok. 22% wysokości trzpienia (przybliżenie do potwierdzenia). */
+export const freKeyDepth = (code) => Math.round(freL2(code) * 0.22 * 10) / 10;
+/** Przesunięcie punktów konturu „x_y;…” o [dy] w osi Y (0,1 mm); zachowuje „;” na początku i na końcu. */
+function shiftY(body, dy) {
+  if (!dy || !body) return body;
+  const lead = body.startsWith(';'), tail = body.endsWith(';');
+  const list = body.split(';').filter((q) => q !== '').map((q) => { const [x, y] = q.split('_'); return x + '_' + f(nv(y) + dy); });
+  return (lead ? ';' : '') + list.join(';') + (tail ? ';' : '');
+}
+export function bodyContour(p, av = '') {
+  const body = bodyContour0(p, av), L2 = low(p.D) === 'fre' ? freL2(mid(p.M, 1, 6)) : 0;
+  return L2 ? shiftY(body, -L2 * 10) : body;   // frez z mocowaniem FRExxx: kontur cofnięty o L2 (wysokość trzpienia mocującego)
 }
 
 /** Prawa część mocowania = lewa w odwrotnej kolejności, z X ze zmienionym znakiem (jak w zakładce „kontury”). */

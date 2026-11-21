@@ -3,7 +3,7 @@
 // to ścieżki SVG w mm, przeliczane ×10. Czyste funkcje – testy: test/tool-geometry.test.js.
 import { normCode } from './tooltrack.js';
 import { halfFromContour } from './contourEditor.js';
-import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits } from './contourGen.js';
+import { TREPAN, trepanPlates, trepanDrawing, tapHole, socketProfile, nutFor, colletSlits, freL2, freD, freKeyDepth } from './contourGen.js';
 import { resolvePlates, normPlates } from './plateLayout.js';
 import { naturalCompare } from './common.js';
 
@@ -110,6 +110,27 @@ export function rotateAround(p, pivot, angleDeg) {
 
 // ---------- zestaw narzędzi jeden pod drugim (widok 2D) ----------
 
+/** Frez z mocowaniem FRExxx (nasadzany na trzpień, grupa „fre”). */
+export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
+/** Długość do ustalenia płytek: J, a dla frezów z mocowaniem FRExxx J − L2 (kontur cofnięty o wysokość trzpienia mocującego). */
+export const plateLength = (t) => num(t && t.columnJ) - (isFreFit(t) ? freL2(t.columnM) : 0);
+/** Promień obrysu (0,1 mm) konturu na wysokości [y]; 0 – poza konturem. */
+function radiusAtY(contour, y) {
+  let r = 0;
+  const rows = halfFromContour(contour).map((q) => pt(Number(q.r) * 10, Number(q.z) * 10));
+  for (let i = 0; i + 1 < rows.length; i++) { const a = rows[i], c = rows[i + 1]; if (y < Math.min(a.y, c.y) - 1e-6 || y > Math.max(a.y, c.y) + 1e-6) continue; r = Math.max(r, a.y === c.y ? Math.max(a.x, c.x) : a.x + ((c.x - a.x) * (y - a.y)) / (c.y - a.y)); }
+  return r;
+}
+/**
+ * Gniazdo żeńskie frezu nasadzanego z mocowaniem FRExxx: otwór ød (z kodu) o głębokości L2 od dolnej płaszczyzny frezu (linia przerywana) i pozioma linia przerywana
+ * kanału pod kamień na całej szerokości frezu. Wynik: { hidden, cavity } (wnęka 3D otwarta od dołu) albo null.
+ */
+export function fitDrawingFor(M, contour) {
+  const L2 = freL2(M), d = freD(M), b = bounds(contour);
+  if (!L2 || !d || !b) return null;
+  const r = d * 5, yb = b.minY, yt = yb + L2 * 10, ys = yb + freKeyDepth(M) * 10, rad = radiusAtY(contour, ys) || b.maxX;
+  return { hidden: [[pt(-r, yb), pt(-r, yt), pt(r, yt), pt(r, yb)], [pt(-rad, ys), pt(rad, ys)]], cavity: { bottom: true, ri: r, yTop: yt } };
+}
 /** Rysunek wiertła rurowego (płytki i linie niewidoczne, 0,1 mm) dla konturu: czubek z konturu, gdy odbiega od długości J narzędzia. null – brak. */
 export function trepanDrawingFor(diameter, length, contour) {
   const b = bounds(contour);
@@ -208,7 +229,8 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     }
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    const fitD = tool.fitM ? fitDrawingFor(tool.fitM, tool.contour) : null, fitH = fitD ? fitD.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null;   // gniazdo frezu nasadzanego (FRExxx)
+    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -315,7 +337,7 @@ export function buildMini(tool, details, plateLookup = null) {
   const isWiePly = group === 'wie' && type === 'ply';
   const inserts = (details && details.insertContours) || [];
   const toRender = isWiePly && company.includes('komet') && !company.includes('iscar') && !company.includes('amec') ? inserts : inserts.slice(0, 1);
-  const diameter = num(tool.columnF), length = num(tool.columnJ), faz = isChamfer(tool);
+  const diameter = num(tool.columnF), length = plateLength(tool), faz = isChamfer(tool);   // płytki: J (frez FRExxx: J − L2)
   const tMounting = /t__0/i.test(String(tool.productCode ?? ''));
   const centerAxisX = offsetX + (0 - b.minX) * scale;
   const leftToolX = isWiePly ? centerAxisX - diameter * 5 * scale : offsetX + (-diameter * 5 - b.minX) * scale;
@@ -349,7 +371,9 @@ export function buildMini(tool, details, plateLookup = null) {
     else { polygons.push(polygon(false)); polygons.push(polygon(true)); }
   }
   const draw = group === 'tre' ? mapTrepanDrawing(trepanDrawingFor(diameter, length, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // wiertło rurowe: płytki żółte, wnęka przerywana
-  const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points, tool.columnM)) : null;
+  const mapM = (h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null);
+  const hole0 = group === 'opr' ? mapM(holeDrawingFor(tool.columnN, points, tool.columnM)) : null, fitM = group === 'fre' && freL2(tool.columnM) ? mapM(fitDrawingFor(tool.columnM, points)) : null;   // gniazdo frezu FRExxx
+  const hole = hole0 || fitM ? [...(hole0 || []), ...(fitM || [])] : null;
   const slits = ((d) => (d ? d.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(colletDrawingFor(tool.columnM));   // szczeliny tulejki ER   // oprawka gwintująca: otwór przerywaną linią
   const nut = group === 'opr' ? mapNut(nutDrawingFor(tool.columnN, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // nakrętka ER: ciemniejszy pas i wcięcia
   const blades = group === 'tre' ? [] : bladeBands(details && details.regions, (z) => offsetY + (b.maxY - z * 10) * scale);   // ostrze narzędzia obróbczego – żółty pas na sylwecie
@@ -407,7 +431,7 @@ export function toolIndex(catalog, overrides = null) {
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
       const contour = parseContour(d && d.columnAY);
-      return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
+      return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: plateLength(t), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM, fitM: String(t.columnD ?? '').trim().toLowerCase() === 'fre' && freL2(t.columnM) ? t.columnM : '' };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
@@ -574,6 +598,7 @@ export function profileOf(contour, cav = null) {
   // wiertło rurowe: wnęka otwarta od czubka; płytki (w ściance) rysuje osobno podgląd – bryła ma tu promień korpusu aż do czubka
   if (cav) rows = rows.map((p) => (p.y >= cav.y7 - 1e-6 ? pt(Math.min(p.x, cav.rb), p.y) : p));
   const out = [];
+  if (cav && cav.bottom) { for (const p of [pt(cav.ri, Math.min(...ys)), ...rows, pt(0, Math.max(...ys)), pt(0, cav.yTop), pt(cav.ri, cav.yTop)]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 1e-3 || Math.abs(l.y - p.y) > 1e-3) out.push(p); } return out.length >= 2 ? out : null; }   // gniazdo otwarte od dołu (frez FRExxx)
   for (const p of [pt(cav && cav.through ? cav.ri : 0, Math.min(...ys)), ...rows, ...(cav ? (cav.prof ? [...cav.prof].reverse() : cav.through ? [pt(cav.ri, Math.max(...ys)), pt(cav.ri, Math.min(...ys))] : [pt(cav.ri, Math.max(...ys)), pt(cav.ri, cav.yb), pt(0, cav.yb)]) : [pt(0, Math.max(...ys))])]) { const l = out[out.length - 1]; if (!l || Math.abs(l.x - p.x) > 0.001 || Math.abs(l.y - p.y) > 0.001) out.push(p); }
   return out.length >= 2 ? out : null;
 }
