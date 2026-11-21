@@ -105,3 +105,27 @@ test('obrys do rysowania bez odcinków na osi', () => {
   assert.ok(!d.includes('L0.00,30.00M') && !/0\.00,20\.00L0\.00,30\.00/.test(d));
   assert.ok(d.startsWith('M0.00,0.00L10.00,0.00'));
 });
+
+test('ostrze narzędzia obróbczego (rejon „ostrze”) – żółty pas w miniaturze i w rysunku zestawu', () => {
+  const t = { productCode: 'F1', columnD: 'fre', columnE: 'węg', columnP: 'Iscar', columnF: '10', columnJ: '60', columnG: '' };
+  const d = { columnAY: '-50_0;50_0;50_600;-50_600', insertContours: [], regions: [{ role: 'oprawka', z1: 0, z2: 30 }, { role: 'ostrze', z1: 30, z2: 60 }] };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { F1: d } }, null);
+  const mini = G.buildMini(t, idx.details('F1'));
+  assert.equal(mini.blades.length, 1);
+  const b = mini.blades[0], ys = mini.outline.map((p) => p.y), top = Math.min(...ys), bot = Math.max(...ys);
+  assert.ok(Math.abs(b.y1 - top) < 1e-9 && Math.abs((b.y2 - b.y1) - (bot - top) / 2) < 1e-9, 'górna połowa sylwety (Z 30–60 z 0–60)');
+  const lay = G.buildStack([idx.stackTool(t)], true, false).layers[0];
+  assert.equal(lay.blades.length, 1); assert.ok(Math.abs(lay.blades[0].y1 - 0) < 1e-9 && Math.abs(lay.blades[0].y2 - 300) < 1e-9);
+  // bez rejonów – bez pasa; wiertło rurowe ma własny rysunek płytek
+  assert.deepEqual(G.buildMini(t, { ...d, regions: null }).blades, []);
+  assert.deepEqual(G.bladeBands([{ role: 'oprawka', z1: 0, z2: 5 }], (z) => z), []);
+});
+
+test('ostrze narzędzia monolitycznego bez zatwierdzonego konturu: pas wg długości roboczej K (kolumna T)', () => {
+  const t = { productCode: 'F2', columnD: 'fre', columnE: 'hss', columnP: 'Iscar', columnF: '10', columnJ: '60', columnG: '' };
+  const E = null; void E;
+  const ov = new Map(); ov.blade = new Map([['f2', 20]]); ov.regions = new Map(); ov.generated = new Set();
+  const idx = G.toolIndex({ tools: [t], detailsMap: { F2: { columnAY: '-50_0;50_0;50_600;-50_600', insertContours: [] } } }, ov);
+  assert.deepEqual(idx.details('F2').regions, [{ role: 'oprawka', z1: 0, z2: 40 }, { role: 'ostrze', z1: 40, z2: 60 }]);
+  assert.equal(G.buildMini(t, idx.details('F2')).blades.length, 1);
+});

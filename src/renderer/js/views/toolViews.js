@@ -48,12 +48,14 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const poly = (pts, sx = 1, ox = 0, oy = 0) => pts.map((p) => `${(ox + p.x * sx).toFixed(2)},${(oy + p.y * sx).toFixed(2)}`).join(' ');
 
 let nutId = 0;   // unikalne id przycięcia pasa nakrętki
+let bladeId = 0;   // unikalne id przycięcia pasa ostrza
 /** Miniatura 60 × 70: szary obrys i żółte płytki (wiertło rurowe – żółte ostrze); brak konturu – „brak”. */
 export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   const box = h('div', { class: 'tool-mini', style: { width: w + 'px', height: hgt + 'px', cursor: onclick ? 'pointer' : '' }, onclick: onclick ? (e) => { e.stopPropagation(); onclick(); } : null });
   if (!mini) { box.append(h('span', { class: 'muted', style: { fontSize: '10px' } }, 'brak')); return box; }
-  const s = Math.min(w / G.MINI_W, hgt / G.MINI_H);
+  const s = Math.min(w / G.MINI_W, hgt / G.MINI_H), bid = bladeId++;
   box.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}" style="background:#fff"><polygon points="${poly(mini.outline, s)}" fill="#bfbfbf" stroke="none"/>`
+    + (mini.blades || []).map((bd, k) => `<clipPath id="bl${bid}_${k}"><rect x="0" y="${(bd.y1 * s).toFixed(2)}" width="${w}" height="${((bd.y2 - bd.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(mini.outline, s)}" fill="#c8a400" clip-path="url(#bl${bid}_${k})" stroke="none"/>`).join('')   // ostrze narzędzia obróbczego na żółto
     + `<path d="${G.outlinePath(mini.outline, (p) => [p.x * s, p.y * s], mini.axisX ?? NaN)}" fill="none" stroke="#000" stroke-width="0.5"/>`
     + (mini.nut ? `<clipPath id="nt${nutId}"><rect x="0" y="${(mini.nut.y1 * s).toFixed(2)}" width="${w}" height="${((mini.nut.y2 - mini.nut.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(mini.outline, s)}" fill="#5f636a" clip-path="url(#nt${nutId++})"/>` + mini.nut.slots.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.4"/>`).join('') : '')
     + (mini.slits ? mini.slits.map((q) => `<polyline points="${poly(q, s)}" fill="none" stroke="#000" stroke-width="0.3"/>`).join('') : '')
@@ -69,6 +71,7 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
   const s = Math.min((width - 2 * pad) / bw, (height - 2 * pad) / bh);
   const ox = width / 2 - ((b.minX + b.maxX) / 2) * s, oy = pad - b.minY * s;
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">`;
+  const sid = bladeId++;
   stack.layers.forEach((l, i) => {
     const c = G.TOOL_PALETTE[i % G.TOOL_PALETTE.length];
     if (l.draw) {   // wiertło rurowe: sylweta szara (ciągła), płytki żółte, wnęka (niewidoczna) przerywaną linią 1 px
@@ -77,7 +80,9 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
         + `<path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="#333" stroke-width="1"/>`
         + l.draw.hidden.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="5 4"/>`).join('');
     } else
-    svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/><path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
+    svg += `<polygon points="${poly(l.outline, s, ox, oy)}" fill="${c}" fill-opacity="0.2" stroke="none"/>`
+      + (l.blades || []).map((bd, k) => `<clipPath id="bs${sid}_${i}_${k}"><rect x="0" y="${(oy + bd.y1 * s).toFixed(2)}" width="${width}" height="${((bd.y2 - bd.y1) * s).toFixed(2)}"/></clipPath><polygon points="${poly(l.outline, s, ox, oy)}" fill="#c8a400" fill-opacity="0.75" clip-path="url(#bs${sid}_${i}_${k})" stroke="none"/>`).join('')   // ostrze narzędzia obróbczego na żółto
+      + `<path d="${G.outlinePath(l.outline, (p) => [ox + p.x * s, oy + p.y * s])}" fill="none" stroke="${c}" stroke-width="1"/>`;
     for (const ins of l.inserts) svg += `<polygon points="${poly(ins, s, ox, oy)}" fill="#c8a400" fill-opacity="0.85" stroke="#8a6d00" stroke-width="1.5"/>`;
     if (l.nut) {   // nakrętka ER: ciemniejszy pas i wcięcia pod klucz
       const id = 'nt' + nutId++;

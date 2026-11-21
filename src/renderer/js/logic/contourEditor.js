@@ -201,6 +201,7 @@ export function confirmedOverrides(params) {
 export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
   const m = confirmedOverrides(params);
   m.generated = new Set();
+  m.blade = new Map();   // długość ostrza (mm) narzędzi monolitycznych – podział na ostrze / oprawkę także bez zatwierdzonego konturu
   const key = (k) => String(k).trim().toLowerCase();
   const str = (pts) => pts.map((p) => `${fmt(p.x)}_${fmt(p.y)}`).join(';');
   for (const [k0, o] of Object.entries(params || {})) {
@@ -212,6 +213,7 @@ export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
       if (!pts || pts.length < 3) { const hh = generatedHalf(o, mounts); pts = hh.length >= 3 ? expandHalf(hh) : null; }
       if (pts && pts.length >= 3) { m.set(k, str(pts)); m.generated.add(k); }
     }
+    if (isMonolithic(o) && bladeLength(o) > 0) m.blade.set(k, bladeLength(o));
     if (!m.regions.has(k) && isMonolithic(o) && bladeLength(o) > 0) {   // część robocza (kolor w 3D): trepan – węglik 7 mm, inne wg L roboczej
       const src = m.has(k) ? parseContour(m.get(k)) : null;
       const s = src && src.length >= 3 ? workSplit(halfPathSvg(src), bladeLength(o)) : null;

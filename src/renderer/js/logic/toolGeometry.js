@@ -208,12 +208,19 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     }
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
-    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
 }
 
+/**
+ * Pasy ostrza narzędzia obróbczego (rejony „ostrze” z PSWT BE / podziału wg długości roboczej, Z w mm): [{ y1, y2 }] w układzie rysunku ([yOf] – Z mm → y);
+ * koloruje się je na żółto (kolor płytek) na sylwecie narzędzia w miniaturach i podglądach 2D.
+ */
+export function bladeBands(regions, yOf) {
+  return (regions || []).filter((r) => r && r.role === 'ostrze' && Number.isFinite(r.z1) && Number.isFinite(r.z2)).map((r) => { const a = yOf(r.z1), c = yOf(r.z2); return { y1: Math.min(a, c), y2: Math.max(a, c) }; });
+}
 /**
  * Y rysunku punktu Z = J (długość narzędzia – odległość wierzchołka płytki od Z = 0): kontur korpusu bywa od J krótszy (zależnie od oprawki), więc wierzchołek
  * płytki leży ponad jego górną krawędzią. Bez J – górna krawędź konturu.
@@ -345,7 +352,8 @@ export function buildMini(tool, details, plateLookup = null) {
   const hole = group === 'opr' ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(holeDrawingFor(tool.columnN, points, tool.columnM)) : null;
   const slits = ((d) => (d ? d.map((q) => q.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale))) : null))(colletDrawingFor(tool.columnM));   // szczeliny tulejki ER   // oprawka gwintująca: otwór przerywaną linią
   const nut = group === 'opr' ? mapNut(nutDrawingFor(tool.columnN, points), (p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + (b.maxY - p.y) * scale)) : null;   // nakrętka ER: ciemniejszy pas i wcięcia
-  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut, slits };
+  const blades = group === 'tre' ? [] : bladeBands(details && details.regions, (z) => offsetY + (b.maxY - z * 10) * scale);   // ostrze narzędzia obróbczego – żółty pas na sylwecie
+  return { outline, inserts: group === 'tre' ? [] : polygons, axisX: centerAxisX, draw, hole, nut, slits, blades };
 }
 
 // ---------- układ płytek na narzędziu: własny układ (rodzaj, wiele płytek, położenie) dostarcza program (zapis na tym komputerze) ----------
@@ -361,6 +369,13 @@ export const NO_DATA = 'Brak danych';
 const isWhite = (c) => { const x = String(c ?? '').trim().toLowerCase().replace(/ /g, ''); return !x || x === '#ffffff' || x === '#fff' || x === 'white' || x === 'rgb(255,255,255)'; };
 export const numberText = (v) => (Number(v) === Math.round(Number(v)) ? String(Math.round(Number(v))) : String(Number(v)));
 
+/** Rejony narzędzia monolitycznego z konturu x_y (0,1 mm): ostrze – górne [k] mm (od czubka), reszta oprawka; null, gdy kontur za krótki. */
+function bladeRegions(contourText, k) {
+  const ys = parseContour(contourText).map((p) => p.y / 10);
+  if (ys.length < 3 || !(k > 0)) return null;
+  const zMin = Math.min(...ys), zMax = Math.max(...ys), z = Math.round((zMax - k) * 1000) / 1000;
+  return z > zMin && z < zMax ? [{ role: 'oprawka', z1: Math.round(zMin * 1000) / 1000, z2: z }, { role: 'ostrze', z1: z, z2: Math.round(zMax * 1000) / 1000 }] : null;
+}
 /** Indeks katalogu narzędzi ({tools, detailsMap} z getStToolOptions): narzędzie, szczegóły, części, dane do 2D/3D/DXF. */
 export function toolIndex(catalog, overrides = null) {
   const tools = new Map(), details = new Map();
@@ -369,8 +384,9 @@ export function toolIndex(catalog, overrides = null) {
   const tool = (code) => tools.get(normCode(code)) || null;
   // zatwierdzony kontur (PSWT BC) zastępuje kontur z kolumny T
   const det = (code) => { const k = normCode(code), d = details.get(k) || null, o = overrides && overrides.get(k); const rg = overrides && overrides.regions && overrides.regions.get(k); const genC = !!(overrides && overrides.generated && overrides.generated.has(k));
-    if (!o) return rg && d ? { ...d, regions: rg } : d;
-    return { ...(d || {}), columnAY: o, confirmedContour: !genC, generatedContour: genC, originalAY: d ? d.columnAY : '', regions: rg || null }; };
+    const bl = overrides && overrides.blade && overrides.blade.get(k), rg0 = rg || (bl ? bladeRegions(o || (d && d.columnAY), bl) : null);   // ostrze narzędzia monolitycznego wg długości roboczej (żółty pas w podglądach)
+    if (!o) return rg0 && d ? { ...d, regions: rg0 } : d;
+    return { ...(d || {}), columnAY: o, confirmedContour: !genC, generatedContour: genC, originalAY: d ? d.columnAY : '', regions: rg0 || null }; };
   let usage = null;
   const idx = {
     tool, details: det,
@@ -391,7 +407,7 @@ export function toolIndex(catalog, overrides = null) {
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
       const contour = parseContour(d && d.columnAY);
-      return { code: t.productCode, contour, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
+      return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: num(t.columnJ), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },
