@@ -196,7 +196,11 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       const polys = kind === 'central' ? [placeCentral(raw, apexBase(b, offsetY, tool), pl)]
         : kind === 'irregular' ? [tool.drill ? placeCentral(raw, apexBase(b, offsetY, tool), pl) : placeInsert(raw, b, offsetY, tool, true, rotateChamfer, pl)]
           : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl));
-      placed.push(...polys); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single: polys.length === 1, phi: pl.phi || 0, z: pl.z || 0, polys });
+      // płytka pojedyncza (centralna / nieregularna) obrócona wokół osi narzędzia o φ: w rzucie z boku jej współrzędne X skaleją się przez cos φ
+      // (φ = 180° – lustrzane odbicie względem osi, ostrze po drugiej stronie), dzięki czemu dwie płytki nie nachodzą na siebie; src – położenie przed obrotem (dla 3D)
+      const phi = pl.phi || 0, single = polys.length === 1, cs = Math.abs(phi % 360) < 1e-9 ? 1 : Math.round(Math.cos((phi * Math.PI) / 180) * 1e9) / 1e9;
+      const shown = single && cs !== 1 ? polys.map((q) => q.map((p) => pt(p.x * cs, p.y))) : polys;
+      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys });
     }
     offsetY += b.r;
     if (index === tools.length - 1) offsetY += b.m;
@@ -595,7 +599,7 @@ export function insertsForMesh(stackTools, offsets) {
     const st2 = buildStack([stt], true, false); if (!st2) return;
     const b = bounds(stt.contour), off = (offsets && offsets[i]) || 0;
     for (const pm of st2.layers[0].plates) {   // centralna – jeden wielokąt, obwodowa – prawa płytka pary (kopie na obwodzie robi podgląd 3D)
-      const poly = pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1];
+      const poly = pm.single ? (pm.src || pm.polys)[0] : pm.polys[pm.polys.length - 1];   // 3D obraca płytkę o φ samo – bierze położenie przed obrotem
       if (poly) out.push({ code: stt.code, plate: pm.code, central: pm.central, irregular: !!pm.irregular, phi: pm.phi, z: pm.z, poly: poly.map((p) => pt(p.x, b.maxY - p.y + off)) });
     }
   });

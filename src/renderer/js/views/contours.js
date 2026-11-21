@@ -491,7 +491,7 @@ export function mountContours(el, ctx) {
     const w = world(e); if (!w) return;
     if (d.ins != null) {   // przesuwanie płytki w całości (bez deformacji); lewa płytka – odbicie
       const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
-      setPlate(d.ins, { dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) });
+      setPlate(d.ins, { dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10) / ((((preview._ins || [])[d.ins] || {}).single && Math.abs(Math.cos(((d.orig.phi || 0) * Math.PI) / 180)) > 0.1) ? Math.cos(((d.orig.phi || 0) * Math.PI) / 180) : 1)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) });
       d.moved = true; pv.insSel = d.ins; drawPreview(); return;
     }
     let dx = w.x - d.start.x, dy = w.y - d.start.y;
@@ -524,7 +524,7 @@ export function mountContours(el, ctx) {
   /** Własny układ płytek ograniczony do płytek przypisanych do narzędzia (spójnie ze stackTool). */
   const ownPlates = (t) => { const codes = plateCodes().map((c) => String(c).trim().toLowerCase()), l = (insertSetup(t).plates || []).filter((p) => codes.includes(String(p.code).trim().toLowerCase())); return l.length ? l : null; };
   const layoutNow = () => resolvePlates(ownPlates(st.tool), plateCodes(), insertSetup(st.tool).central);
-  const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang } : { dx: 0, dz: 0, ang: 0 }; };
+  const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi } : { dx: 0, dz: 0, ang: 0, phi: 0 }; };
   const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(ownPlates(st.tool), plateCodes(), j, patch) });
   /** Płytki narzędzia w układzie konturu (0,1 mm): auto – położenie z algorytmu zestawu (bez korekt); right – z korektą (dX, dZ, obrót) i rodzajem płytki; left – odbicie (tylko obwodowe). */
   function insertsOf(t) {
@@ -535,10 +535,10 @@ export function mountContours(el, ctx) {
     if (!stack || !stack0) return [];
     const bT = G.bounds(stt.contour), conv = (pts) => pts.map((p) => ({ x: p.x, y: bT.maxY - p.y }));
     const f = st.xf || { dx: 0, dz: 0, ang: 0 }, tx = (pts) => pts.map((p) => doXf(p, f));   // płytki przesuwają się razem z konturem
-    const pick = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]);
+    const pick = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]), pickSrc = (pm) => (pm.single ? (pm.src || pm.polys)[0] : pm.polys[pm.polys.length - 1]);   // src – przed obrotem o φ (dla 3D)
     return stack.layers[0].plates.map((pm, j) => {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
-      return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z };
+      return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z };
     });
   }
   /** Panel „Płytki” po lewej stronie rysunku (poza rejonem kreślenia): rodzaj płytki, wiele płytek, położenie; zmiany od razu na rysunku. */
@@ -608,9 +608,11 @@ export function mountContours(el, ctx) {
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.auto[0])} → po korekcie ${mm(q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
-        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
+        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót płytki', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
+        q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
+          num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, 'Punkt bazowy (●): z algorytmu ', h('b', {}, mm(q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.right[0]))),
-        h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small primary', onclick: () => openPlateFor(j) }, 'Edytor płytki…'), h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'),
+        h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small primary', onclick: () => openPlateFor(j) }, 'Edytor płytki…'), h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0, phi: 0 }) }, 'Zeruj'),
           h('button', { class: 'btn small primary', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(report) : navigator.clipboard.writeText(report)); toast('Skopiowano opis korekty'); } catch (e2) { toast(e2.message, true); } } }, 'Kopiuj opis korekty')));
     }
     if (platePanel) platePanel.sync(layoutNow(), pv.insSel);   // tabela po lewej odzwierciedla zmiany z rysunku i okienka

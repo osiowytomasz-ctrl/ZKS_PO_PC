@@ -98,7 +98,7 @@ test('wiertło płytkowe Komet (płytki nie są centralne): wierzchołek płytki
     const s2 = idx.stackTool(t), l2 = G.buildStack([s2], true, false).layers[0], pm = l2.plates[0];
     assert.deepEqual([pm.kind, pm.single, pm.polys.length, pm.irregular, pm.central, pm.phi], ['irregular', true, 1, true, false, 30]);
     const xs = pm.polys[0].map((p) => p.x), zz = zOf(s2, pm.polys[0]);
-    assert.ok(Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - 120) < 1e-9, 'środek płytki 12 mm od osi (ΔX)'); assert.ok(Math.abs(Math.max(...zz) - 244) < 1e-9, 'wierzchołek 3 mm niżej niż J (ΔZ = −3)');
+    assert.ok(Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - 120 * Math.cos(Math.PI / 6)) < 1e-6, 'środek płytki 12 mm od osi (ΔX) w rzucie z boku – skrócony przez cos φ (φ = 30°)'); assert.ok(Math.abs(Math.max(...zz) - 244) < 1e-9, 'wierzchołek 3 mm niżej niż J (ΔZ = −3)');
     const ins = G.insertsForMesh([s2], G.buildMesh([s2.contour]).offsets); assert.deepEqual(ins.map((q) => [q.central, q.irregular, q.phi]), [[false, true, 30]]);
     // miniatura z własnym układem = ten sam układ co podgląd (y miniatury = offset + y stosu · skala)
     const mini = G.buildMini(t, idx.details('WK2'), (c) => idx.insertContour(c)), mo = mini.outline, b = G.bounds(s2.contour);
@@ -116,5 +116,22 @@ test('narzędzie pokazuje tylko płytki do niego przypisane – własny układ z
     assert.deepEqual(idx.stackTool(t).plates.map((p) => p.code), ['A'], 'cudza płytka usunięta z układu');
     G.setPlateSetupProvider(() => [{ code: 'OBCA', mode: 'edge' }]);
     assert.deepEqual(idx.stackTool(t).plates.map((p) => p.code), ['A'], 'układ tylko z cudzą płytką → płytki katalogu narzędzia');
+  } finally { G.setPlateSetupProvider(null); }
+});
+
+test('płytka obrócona wokół osi narzędzia (φ = 180°): w rzucie z boku lustrzane odbicie względem osi, 3D dostaje położenie przed obrotem', () => {
+  const plateA = 'M 0 0 L 10 0 L 10 3 L 5 6 L 0 3 Z';
+  const t = { productCode: 'K1', columnD: 'wie', columnE: 'ply', columnP: 'Komet', columnF: '10', columnJ: '50', columnG: '' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { K1: { columnAY: '-50_-650;50_-650;50_500;-50_500', insertContours: [{ code: 'A', contour: plateA }] } } }, null);
+  try {
+    G.setPlateSetupProvider(() => [{ code: 'A', mode: 'irregular', dx: 2, phi: 0 }, { code: 'A', mode: 'irregular', dx: 2, phi: 180 }]);
+    const lay = G.buildStack([idx.stackTool(t)], true, false).layers[0];
+    const [p0, p1] = lay.plates;
+    assert.deepEqual(p1.polys[0].map((q) => Math.round(q.x * 1e6) / 1e6 || 0), p0.polys[0].map((q) => Math.round(-q.x * 1e6) / 1e6 || 0), 'φ = 180° odbija płytkę względem osi');
+    assert.deepEqual(p1.polys[0].map((q) => q.y), p0.polys[0].map((q) => q.y), 'wysokość bez zmian');
+    assert.deepEqual(p1.src[0], p0.src[0], 'położenie przed obrotem to samo – obrót robi widok 3D');
+    const m = G.buildMesh([idx.stackTool(t).contour]), ins = G.insertsForMesh([idx.stackTool(t)], m.offsets);
+    assert.deepEqual(ins.map((q) => q.phi), [0, 180]);
+    assert.deepEqual(ins[1].poly, ins[0].poly);
   } finally { G.setPlateSetupProvider(null); }
 });
