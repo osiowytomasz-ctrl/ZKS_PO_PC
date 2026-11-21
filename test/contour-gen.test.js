@@ -332,3 +332,11 @@ test('frezy: poziome krawędzie średnic (linia przez całą szerokość na usko
   const again = G2.toolIndex({ tools: [t], detailsMap: { FR9: { columnAY: ix.details('FR9').columnAY, insertContours: [] } } }, null);
   assert.equal(again.details('FR9').columnAY, ix.details('FR9').columnAY, 'ponowne przetworzenie nic nie zmienia');
 });
+
+test('frez FRExxx w edytorze Kontury: wczytany kontur w układzie indeksu (dolna płaszczyzna −L2), idempotentnie', async () => {
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  const t = { productCode: 'FC5', columnD: 'fre', columnE: 'tar', columnM: 'FRE022', columnJ: '45' };
+  const stale = G2.parseContour('-195_-270;195_-270;195_-110;299_0;299_143;275_166;-275_166;-299_143;-299_0;-195_-110');   // zapisany dawniej z mocowaniem od −27
+  const r = G2.fitNormalize(stale, t); assert.equal(Math.min(...r.pts.map((p) => p.y)), -190); assert.equal(r.dy, 80);
+  assert.equal(G2.fitNormalize(r.pts, t).dy, 0, 'idempotentnie'); assert.equal(G2.fitNormalize(stale, { ...t, columnM: 'ABS040' }).dy, 0, 'inne mocowanie – bez zmian');
+});

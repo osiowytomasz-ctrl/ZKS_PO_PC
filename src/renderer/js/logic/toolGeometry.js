@@ -114,6 +114,15 @@ export function rotateAround(p, pivot, angleDeg) {
 export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
 /** Długość do ustalenia płytek: J, a dla frezów z mocowaniem FRExxx J − L2 (kontur cofnięty o wysokość trzpienia mocującego). */
 export const plateLength = (t) => num(t && t.columnJ) - (isFreFit(t) ? freL2(t.columnM) : 0);
+/**
+ * Frez z mocowaniem FRExxx: kontur [points] (0,1 mm) przesunięty w osi Z tak, aby najniższy punkt leżał na Z = −L2 (Z = 0 – dno otworu pod trzpień). Wynik: { pts, dy } (dy w 0,1 mm,
+ * 0 – bez zmian; idempotentne). Inne narzędzia – bez zmian.
+ */
+export function fitNormalize(points, tool) {
+  if (!points || !points.length || !isFreFit(tool)) return { pts: points, dy: 0 };
+  const dy = -freL2(tool.columnM) * 10 - Math.min(...points.map((p) => p.y));
+  return Math.abs(dy) < 1e-6 ? { pts: points, dy: 0 } : { pts: points.map((p) => pt(p.x, p.y + dy)), dy };
+}
 /** Promień obrysu (0,1 mm) konturu na wysokości [y]; 0 – poza konturem. */
 function radiusAtY(contour, y) {
   let r = 0;

@@ -323,6 +323,9 @@ export function mountContours(el, ctx) {
   function setRows(rows, msg) { st.full = null; st.rows = rows.length ? rows : [{ z: '', r: '', rad: '' }]; st.dirty = true; status.set(msg, 'neutral'); drawEditor(); }
   /** Pełny kontur bez zmian (T / V / dane) – tabela pokazuje jego obrys (połowę) tylko do podglądu i ewentualnej edycji. */
   function setFull(points, label, srcHalf = null) {
+    // frez z mocowaniem FRExxx: wczytany kontur (T / V / BC / generator) w tym samym układzie co w indeksie – dolna płaszczyzna na Z = −L2, dzięki czemu płytki, gniazdo i bryła 3D pasują
+    const fx = points && points.length >= 3 && st.tool ? G.fitNormalize(points, st.tool) : null;
+    if (fx && fx.dy) { points = fx.pts; srcHalf = null; label = (label || '') + ` · przesunięty o ${String(Math.round(fx.dy) / 10).replace('.', ',')} mm (dolna płaszczyzna na −L2)`; }
     st.full = points && points.length >= 3 ? points : null; st.fullLabel = label || '';
     st.srcHalf = st.full && srcHalf && E.isHalf(E.svgToContour(srcHalf)) ? srcHalf : null;   // niezmieniona połowa z BC / V – zapis bez rozbijania łuków
     st.rows = st.full ? E.halfFromContour(st.full) : [];
