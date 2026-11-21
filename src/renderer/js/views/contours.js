@@ -9,7 +9,7 @@ import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPlateEditor } from './plateEditor.js';
-import { openPlateLayout } from './plateLayout.js';
+import { mountPlateLayout } from './plateLayout.js';
 import { resolvePlates, patchPlate } from '../logic/plateLayout.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ } from './toolViews.js';
 import * as B from '../logic/builder.js';
@@ -47,7 +47,7 @@ export function mountContours(el, ctx) {
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
   const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc', touchAction: 'none', userSelect: 'none' } });
   // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
-  let saveVBtn = null;
+  let saveVBtn = null, plateBtn = null, platePanel = null;
   const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null, zoom: 1, pan: { x: 0, y: 0 } };
   const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
   // krok siatki / przyciągania: auto, standardowe oraz drobniejsze (do 0,01 mm) i dowolny wpisany
@@ -65,8 +65,10 @@ export function mountContours(el, ctx) {
   const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel, customStep, fitBtn,
-    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), h('button', { class: 'btn small', title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu', onclick: () => openLayout() }, 'Płytki…'), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), (plateBtn = h('button', { class: 'btn small', style: { background: '#c8a400', color: '#000', borderColor: '#8a6d00', fontWeight: 600 }, title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu – tabela po lewej stronie rysunku', onclick: () => togglePlatePanel() }, 'Płytki…')), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję. Kółko myszy – powiększenie, przeciągnięcie tła – przesuwanie widoku.'), regionBar);
+  /** Rząd rysunku: po lewej panel płytek (poza rejonem kreślenia), dalej rysunek 2D / 3D. */
+  const previewRow = h('div', { style: { display: 'flex', gap: '6px', flex: 1, minHeight: 0, alignItems: 'stretch' } }, preview, prev3d);
   const info = h('div', { class: 'muted', style: { fontSize: '12px' } });
   const svgOut = h('textarea', { readonly: true, rows: 4, style: { width: '100%', fontFamily: 'monospace', fontSize: '11px' } });
   const errBox = h('div', { class: 'err', style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
@@ -146,7 +148,7 @@ export function mountContours(el, ctx) {
 
   async function pick(t) {
     if (st.dirty && !(await confirmBox('Kontury', 'Porzucić niezapisane zmiany konturu?', 'Porzuć'))) return;
-    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.insSel = null; pv.ptEdit = null; st.xf = { dx: 0, dz: 0, ang: 0 };
+    st.tool = t; st.dirty = false; st.test = null; pv.sel = null; pv.view = null; pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.insSel = null; pv.ptEdit = null; st.xf = { dx: 0, dz: 0, ang: 0 }; if (platePanel) togglePlatePanel(false);
     st.regions = parseRegions((st.params[normCode(t.productCode)] || {}).BE);
     // narzędzie monolityczne bez zapisanych rejonów: ostrze wg długości roboczej (K) – ustawiane po narysowaniu konturu
     { const p = st.params[normCode(t.productCode)]; st.autoSplit = !st.regions.length && E.isMonolithic(p) && E.bladeLength(p) > 0; }
@@ -415,8 +417,8 @@ export function mountContours(el, ctx) {
     const poly = (pts) => pts.map((p) => f2(X(p.x)) + ',' + f2(Y(p.y))).join(' ');
     ins.forEach((q, j) => {
       const on = pv.insSel === j;
-      if (q.left) out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="#8a6d00" stroke-width="1" stroke-dasharray="4 2" pointer-events="none"/>`;
-      out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#c8a400" fill-opacity="${on ? 0.8 : 0.65}" stroke="${on ? '#ff6d00' : '#8a6d00'}" stroke-width="${on ? 2.2 : 1.3}" style="cursor:move"/>`;
+      if (q.left) out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="${on ? '#e00000' : '#8a6d00'}" stroke-width="${on ? 1.6 : 1}" stroke-dasharray="4 2" pointer-events="none"/>`;
+      out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#c8a400" fill-opacity="${on ? 0.8 : 0.65}" stroke="${on ? '#e00000' : '#8a6d00'}" stroke-width="${on ? 2.4 : 1.3}" style="cursor:move"/>`;
       out += `<circle cx="${f2(X(q.right[0].x))}" cy="${f2(Y(q.right[0].y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
     });
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
@@ -511,7 +513,7 @@ export function mountContours(el, ctx) {
     const d = pv.drag; pv.drag = null;
     if (!d) return;
     if (d.click) { if (d.panning) return; pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
-    if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); if (!d.moved) openPlateFor(d.ins); return; }   // kliknięcie w płytkę – pełny edytor płytki
+    if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); return; }   // kliknięcie w płytkę – tylko wybór (okienko z danymi w rogu rysunku); pełny edytor – przycisk w okienku albo w tabeli płytek
     if (d.moved) { drawTable(); drawPreview(); return; }
     if (d.idx && d.idx.length === 1) { pv.ptEdit = d.idx[0]; pv.insSel = null; drawPreview(); }   // kliknięcie w punkt – okienko z parametrami
   });
@@ -539,14 +541,21 @@ export function mountContours(el, ctx) {
       return { code: pm.code || 'płytka ' + (j + 1), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: right, central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z };
     });
   }
-  /** Okno „Płytki na narzędziu”: rodzaj płytki (centralna / obwodowa), wiele płytek, położenie. */
-  function openLayout() {
-    const t = st.tool; if (!t || !st.index) return;
-    const set = insertSetup(t), codes = plateCodes(), cur = resolvePlates(ownPlates(t), codes, set.central), auto = resolvePlates(null, codes, set.central);
-    const allCodes = [...new Set(codes)];   // do wyboru tylko płytki przypisane do tego narzędzia
-    openPlateLayout({ tool: t.productCode, plates: cur, autoPlates: auto, custom: !!set.plates, allCodes, toolCentral: set.central,
-      onApply: (list, isAuto) => { saveInsertSetup(t, { plates: isAuto ? null : list }); pv.insSel = null; drawPreview(); status.set('Zapisano układ płytek narzędzia (na tym komputerze).', 'neutral'); },
-      onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); } });
+  /** Panel „Płytki” po lewej stronie rysunku (poza rejonem kreślenia): rodzaj płytki, wiele płytek, położenie; zmiany od razu na rysunku. */
+  function togglePlatePanel(force) {
+    const open = force != null ? force : !platePanel;
+    if (!open) { if (platePanel) { platePanel.remove(); platePanel = null; } plateBtn.classList.remove('primary'); return; }
+    const t = st.tool; if (!t || !st.index) { toast('Najpierw wybierz narzędzie.', true); return; }
+    if (platePanel) platePanel.remove();
+    const codes = plateCodes(), set = insertSetup(t);
+    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: resolvePlates(null, codes, set.central), allCodes: [...new Set(codes)], toolCentral: set.central,   // do wyboru tylko płytki przypisane do narzędzia
+      onChange: (list) => { saveInsertSetup(t, { plates: list }); drawPreview(); },
+      onSelect: (j) => { pv.insSel = j; pv.ptEdit = null; drawPreview(); },
+      onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); },
+      onClose: () => togglePlatePanel(false) });
+    previewRow.insertBefore(platePanel, previewRow.firstChild);
+    plateBtn.classList.add('primary');
+    drawPreview();
   }
   /** Pełny edytor płytki: kontur (PL_kontur), parametry 3D, położenie w tym narzędziu. */
   function openPlateFor(j) {
@@ -571,6 +580,9 @@ export function mountContours(el, ctx) {
     const at = (sel) => { const el = preview.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(), pr = preview.getBoundingClientRect(); return { x: r.left - pr.left + r.width / 2, y: r.top - pr.top + r.height / 2 }; };
     const box = (x, y, ...kids) => preview.append(h('div', { style: { position: 'absolute', left: Math.min(x + 12, preview.clientWidth - 250) + 'px', top: Math.max(4, y - 10) + 'px', zIndex: 3, background: '#fff', border: '1px solid #1565c0', borderRadius: '0', boxShadow: '0 2px 8px rgba(0,0,0,.25)', padding: '6px 8px', fontSize: '12px', minWidth: '210px' },
       onpointerdown: (e) => e.stopPropagation() }, ...kids));
+    /** Okienko z danymi płytki przyczepione do lewego górnego rogu rejonu kreślenia – nie zasłania rysunku płytki. */
+    const cornerBox = (...kids) => preview.append(h('div', { style: { position: 'absolute', left: '6px', top: '6px', zIndex: 3, background: 'rgba(255,255,255,.96)', border: '1px solid #e00000', borderRadius: '0', boxShadow: '0 2px 8px rgba(0,0,0,.25)', padding: '6px 8px', fontSize: '12px', width: '240px' },
+      onpointerdown: (e) => e.stopPropagation() }, ...kids));
     const num = (v, on) => h('input', { type: 'text', value: String(v).replace('.', ','), style: { width: '70px', padding: '1px 4px' }, onchange: (e) => on(Number(String(e.target.value).replace(',', '.'))) });
     const rowI = (label, inp, unit = 'mm') => h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' } }, label), inp, h('span', { class: 'muted' }, unit));
     const closeBtn = (fn) => h('button', { class: 'btn small', style: { float: 'right' }, onclick: fn }, '✕');
@@ -594,13 +606,14 @@ export function mountContours(el, ctx) {
       const set = (patch) => { setPlate(j, patch); drawPreview(); };
       const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.auto[0])} → po korekcie ${mm(q.right[0])} (mm)`;
-      box(pos.x, pos.y, closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
+      cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
         rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, 'Punkt bazowy (●): z algorytmu ', h('b', {}, mm(q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.right[0]))),
         h('div', { class: 'row', style: { gap: '4px' } }, h('button', { class: 'btn small primary', onclick: () => openPlateFor(j) }, 'Edytor płytki…'), h('button', { class: 'btn small', onclick: () => set({ dx: 0, dz: 0, ang: 0 }) }, 'Zeruj'),
           h('button', { class: 'btn small primary', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(report) : navigator.clipboard.writeText(report)); toast('Skopiowano opis korekty'); } catch (e2) { toast(e2.message, true); } } }, 'Kopiuj opis korekty')));
     }
+    if (platePanel) platePanel.sync(layoutNow(), pv.insSel);   // tabela po lewej odzwierciedla zmiany z rysunku i okienka
   }
 
   /** Rejony: pasy między kolejnymi poziomami Z nowego konturu (zamknięte przekrojem konturu). */
@@ -702,7 +715,7 @@ export function mountContours(el, ctx) {
   h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
     editBox,
-    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, preview, prev3d, info,
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, previewRow, info,
       h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kontur do zapisu – prawa połowa (SVG, mm; zatwierdzenie → PSWT BC, roboczo → ND_CACHE V):'), svgOut,
       h('div', { class: 'row' },
         h('button', { class: 'btn', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(svgOut.value) : navigator.clipboard.writeText(svgOut.value)); toast('Skopiowano'); } catch (e) { toast(e.message, true); } } }, 'Kopiuj'),
