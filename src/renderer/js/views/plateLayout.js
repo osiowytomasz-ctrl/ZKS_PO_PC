@@ -29,7 +29,7 @@ export function mountPlateLayout(o) {
   const field = (j, key, w = '44px') => {
     const inp = h('input', { type: 'text', value: comma(shown(key, rows[j][key])), style: { width: w, padding: '1px 3px' },
       onfocus: () => choose(j),
-      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate(withManual(rows[j], { [key]: key === 'z' ? Math.round(v) : key === 'ang' && o.angOffset ? v + off() : v })); apply(); },
+      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate(withManual(rows[j], key === 'ang' && o.angOffset ? { ang: v + off(), angRel: v } : { [key]: key === 'z' ? Math.round(v) : v })); apply(); },
       onchange: () => { const v = num(inp.value); if (!Number.isFinite(v)) inp.value = comma(shown(key, rows[j][key])); } });
     return inp;
   };

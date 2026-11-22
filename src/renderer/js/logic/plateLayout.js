@@ -16,16 +16,22 @@ export const PLATE_MODES = [['auto', 'automatycznie'], ['central', 'centralna (n
 export function normPlate(p) {
   const o = p || {}, z = Math.round(num(o.z, 0));
   return { code: String(o.code ?? '').trim(), mode: ['central', 'edge', 'irregular'].includes(o.mode) ? o.mode : 'auto', dx: r3(num(o.dx)), dz: r3(num(o.dz)), ang: r3(num(o.ang)), phi: r3(num(o.phi)), z: z >= 1 ? Math.min(60, z) : 0,
-    ...(o.autoAng ? { autoAng: true } : {}), ...(o.autoPos ? { autoPos: true } : {}),
+    ...(o.autoAng ? { autoAng: true } : {}), ...(o.autoPos ? { autoPos: true } : {}), ...(o.angRel != null && o.angRel !== '' && Number.isFinite(Number(o.angRel)) ? { angRel: r3(Number(o.angRel)) } : {}),   // angRel – kąt płytki frezu względem krawędzi skrawającej narzędzia: płytka podąża za zmianą kąta skrawania G
+
     ...(o.base && Number.isFinite(Number(o.base.x)) && Number.isFinite(Number(o.base.y)) ? { base: { x: Number(o.base.x), y: Number(o.base.y) } } : {}) };   // base – własny punkt bazowy tej płytki (inny niż domyślny dla kodu)   // autoAng / autoPos – kąt i położenie nadal wynikają z narzędzia (kąt skrawania G, rzędy); ręcznie wpisana wartość jest bezwzględna
 }
 /**
  * Układ płytek „jak jest rysowany” (płytki ze stackTool: rodzaj, korekty, kąt, rzędy frezów płytkowych / jeżowych) jako lista układu do edycji. Dzięki temu pierwsza zmiana
  * w oknie płytki / edytorze zaczyna się od faktycznego stanu (np. pochylenie G z tabeli), a nie od pustego układu z kątem 0°.
  */
-export const specsFromPlates = (plates) => (plates || []).map((p) => normPlate({ code: p.code, mode: p.kind === 'central' ? 'central' : p.kind === 'irregular' ? 'irregular' : 'edge', dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi, z: p.z, autoAng: p.autoAng, autoPos: p.autoPos, base: p.ownBase }));
+export const specsFromPlates = (plates) => (plates || []).map((p) => normPlate({ code: p.code, mode: p.kind === 'central' ? 'central' : p.kind === 'irregular' ? 'irregular' : 'edge', dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi, z: p.z, autoAng: p.autoAng, autoPos: p.autoPos, angRel: p.angRel, base: p.ownBase }));
 /** Pola płytki ustawione ręcznie przestają być automatyczne: [patch] z ang → bezwzględny kąt płytki, z dx / dz → bezwzględne położenie. */
-export const withManual = (p, patch) => { const o = { ...p, ...patch }; if (patch && 'ang' in patch) delete o.autoAng; if (patch && ('dx' in patch || 'dz' in patch)) delete o.autoPos; return o; };
+export const withManual = (p, patch) => {
+  const o = { ...p, ...patch }, ch = (k) => !!patch && k in patch && Math.abs(num(patch[k]) - num(p[k])) > 1e-9;   // pole nie zmienione (np. zwrotka z edytora) zostaje automatyczne
+  if (ch('ang')) { delete o.autoAng; if (!('angRel' in patch)) delete o.angRel; }
+  if (ch('dx') || ch('dz')) delete o.autoPos;
+  return o;
+};
 /** Lista płytek znormalizowana albo null (brak własnego układu). Płytki bez kodu są pomijane. */
 export function normPlates(list) {
   if (!Array.isArray(list)) return null;

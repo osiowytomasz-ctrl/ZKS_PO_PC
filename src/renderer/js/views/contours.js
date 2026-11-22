@@ -566,7 +566,7 @@ export function mountContours(el, ctx) {
     return stack.layers[0].plates.map((pm, j) => {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
       const pb = (m) => { const b = m.bases && m.bases[m.single ? 0 : m.bases.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt bazowy płytki (null – nie wybrany: pierwszy punkt konturu)
-      return { code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [] };
+      return { path: (stt.plates[j] && stt.plates[j].path) || '', code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [] };
     });
   }
   /** Panel „Płytki” po lewej stronie rysunku (poza rejonem kreślenia): rodzaj płytki, wiele płytek, położenie; zmiany od razu na rysunku. */
@@ -589,9 +589,9 @@ export function mountContours(el, ctx) {
   function openPlateFor(j) {
     const q = (preview._ins || [])[j], t = st.tool;
     if (!q || !t || !st.index) return;
-    const path = st.index.insertContour(q.code) || '';
+    const path = q.path || st.index.insertContour(q.code) || '';   // kontur płytki faktycznie użyty w układzie narzędzia
     const cur = layoutNow()[j] || {}, set0 = insertSetup(t);
-    openPlateEditor({ code: q.code, path, tool: t.productCode, base: cur.base || plateBase(q.code), angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? tiltOf(t) : null, edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
+    openPlateEditor({ code: q.code, path, tool: t.productCode, base: cur.base || plateBase(q.code), angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? tiltOf(t) : null, edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, ...(cur.angRel != null ? { angRel: cur.angRel } : {}), phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
       onApply: ({ path: np, setup, plate, base, edge }) => {
         saveInsertSetup(t, setup); savePlateEdge(q.code, edge);
@@ -652,13 +652,14 @@ export function mountContours(el, ctx) {
       const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
       const fre = String(st.tool.columnD ?? '').trim().toLowerCase() === 'fre';   // frezy: kąt bezwzględny (90° = płytka w pionie)
       const cs = q.single ? Math.cos(((a.phi || 0) * Math.PI) / 180) : 1;   // rzut X płytki pojedynczej obróconej wokół osi
-      const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = (layoutNow()[j] || {}).base || plateBase(q.code);   // punkt bazowy tej płytki (własny, inaczej zapisany dla kodu); + 4 rogi skrajne płytki pochylonej
+      const plateSrc = q.path || (st.index && st.index.insertContour(q.code)) || '';   // ścieżka płytki faktycznie użyta w układzie narzędzia
+      const presets = [...basePresets(parsePlate(plateSrc).pts), ...(q.corners || [])], cur = (layoutNow()[j] || {}).base || plateBase(q.code);   // punkt bazowy tej płytki (własny, inaczej zapisany dla kodu); + 4 rogi skrajne płytki pochylonej
       const same = (pr) => !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6;
       const curPreset = presets.find(same), defLabel = G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu';
       const curLabel = curPreset ? curPreset.label : cur ? `własny (${round3(cur.x)}; ${round3(cur.y)})` : defLabel;
       if (pv.basePick !== j) pv.basePick = null;
       if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki zamiast całego okna danych: tryb „na narzędziu” (z transformacją) albo „standardowo” (pozycja z konturu płytki)
-        const inTool = pv.baseMode !== 'std', plateSrc = (st.index && st.index.insertContour(q.code)) || '';
+        const inTool = pv.baseMode !== 'std';
         const raw = G.parseInsertPath(plateSrc), stdPts = parsePlate(plateSrc).pts;
         let poly, pts;
         if (inTool) { poly = q.right; pts = presets.map((pr) => ({ pr, p: G.basePlaced(raw, q.right, pr.pt) })).filter((x) => x.p).map((x) => ({ pr: x.pr, x: x.p.x / 10, y: x.p.y / 10 })); poly = q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })); }
@@ -691,7 +692,7 @@ export function mountContours(el, ctx) {
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.autoBase || q.auto[0])} → po korekcie ${mm(q.base || q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
-        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set({ ang: fre ? G.relAngle(v, tiltOf(st.tool)) : v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
+        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set(fre ? { ang: G.relAngle(v, tiltOf(st.tool)), angRel: v } : { ang: v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
         h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),

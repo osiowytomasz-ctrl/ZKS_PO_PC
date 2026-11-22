@@ -640,12 +640,12 @@ export function toolIndex(catalog, overrides = null) {
           if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
         }
       } else if (mill && !custom && opts.adj !== false) {   // pozostałe frezy: płytki obrócone o kąt skrawania G (normalne położenie – 90°, bez obrotu)
-        if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt, autoAng: true }));
+        plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt, autoAng: true }));   // zawsze oznaczone jako automatyczne (także przy G = 90°) – późniejsza zmiana G obraca płytkę
       } else if (mill && custom && opts.adj !== false) {   // własny układ: pola oznaczone jako automatyczne (autoAng / autoPos) nadal podążają za kątem skrawania i rzędami, a ręcznie wpisane wartości są bezwzględne
         const rows = plates.some((p) => p.autoPos) ? rowsOf() : null;
         plates = plates.map((p, j) => {
           let q = p;
-          if (p.autoAng) q = { ...q, ang: tilt };
+          if (p.autoAng) q = { ...q, ang: tilt }; else if (p.angRel != null) q = { ...q, ang: p.angRel + tilt };   // kąt względem krawędzi skrawającej: podąża za G
           const r = p.autoPos && rows && rows[j];
           if (r) q = { ...q, dx: r.dx, dz: r.dz, anchor: r.anchor, align: r.align, ang: p.autoAng ? r.ang : q.ang, row: true };
           return q;

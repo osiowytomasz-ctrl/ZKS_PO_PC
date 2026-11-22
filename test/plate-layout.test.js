@@ -242,3 +242,25 @@ test('kąt bezwzględny płytki (90° = pion) i osobny punkt bazowy każdej pły
     assert.deepEqual(L.specsFromPlates(pl).map((p) => p.base || null), [{ x: 60, y: 0 }, null]);
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('kąt płytki frezu względem krawędzi skrawającej: płytka podąża za zmianą G (także po pierwszej edycji przy G = 90°), wpisany kąt względny jest zachowany', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'glo', columnP: 'X', columnF: '50', columnJ: '80', columnM: 'ABS063', columnG: '90' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-250_0;250_0;250_770;-250_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const at = (g, opts = {}) => idx.stackTool(t, { pswt: { D: 'fre', E: 'glo', G: g }, ...opts }).plates[0];
+  // G = 90°: układ z faktycznego stanu zostaje automatyczny (autoAng), więc zmiana G obraca płytkę
+  const specs = L.specsFromPlates(idx.stackTool(t, { pswt: { D: 'fre', E: 'glo', G: '90' } }).plates);
+  assert.ok(specs[0].autoAng);
+  // zwrotka z edytora z tym samym kątem nie zdejmuje automatyki
+  const same = L.patchPlate(specs, ['A'], 0, { ...specs[0], dz: 3 });
+  assert.ok(same[0].autoAng, 'kąt bez zmian – nadal automatyczny');
+  try {
+    G.setPlateSetupProvider(() => same);
+    assert.equal(at('80').ang, -10); assert.equal(at('60').ang, -30);
+    // wpisany kąt względny 15° (względem krawędzi) – po zmianie G nadal 15° od krawędzi
+    const rel = L.patchPlate(same, ['A'], 0, { ang: 15 + G.plateTilt(t, 60), angRel: 15 });
+    G.setPlateSetupProvider(() => rel);
+    assert.equal(at('60').ang, -15); assert.equal(at('45').ang, -30);
+    assert.equal(G.absAngle(at('45').ang, G.plateTilt(t, 45)), 15);
+  } finally { G.setPlateSetupProvider(null); }
+});

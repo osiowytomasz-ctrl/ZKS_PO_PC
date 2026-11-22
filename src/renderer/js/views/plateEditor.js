@@ -192,7 +192,7 @@ export function openPlateEditor(o) {
       field('Grubość płytki', st.setup.thickness, (v) => { st.setup.thickness = Math.max(0, Math.min(30, v)); }, 'mm (0 – auto)'));
   }
   const place = st.plate ? h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } }, h('b', {}, 'Położenie w narzędziu' + (o.tool ? ` (${o.tool})` : '')),
-    field('Korekta ΔX', st.plate.dx, (v) => { st.plate.dx = v; }, 'mm'), field('Korekta ΔZ', st.plate.dz, (v) => { st.plate.dz = v; }, 'mm (wzdłuż osi, w górę)'), o.angOffset != null ? field('Kąt płytki', G.absAngle(st.plate.ang, o.angOffset), (v) => { st.plate.ang = G.relAngle(v, o.angOffset); paintBase(); }, '° (0° = krawędź płytki w linii z krawędzią skrawającą narzędzia)') : field('Obrót płytki', st.plate.ang, (v) => { st.plate.ang = v; paintBase(); }, '°'),
+    field('Korekta ΔX', st.plate.dx, (v) => { st.plate.dx = v; }, 'mm'), field('Korekta ΔZ', st.plate.dz, (v) => { st.plate.dz = v; }, 'mm (wzdłuż osi, w górę)'), o.angOffset != null ? field('Kąt płytki', G.absAngle(st.plate.ang, o.angOffset), (v) => { st.plate.ang = G.relAngle(v, o.angOffset); st.plate.angRel = v; paintBase(); }, '° (0° = krawędź płytki w linii z krawędzią skrawającą narzędzia)') : field('Obrót płytki', st.plate.ang, (v) => { st.plate.ang = v; paintBase(); }, '°'),
     field('Kąt na obwodzie φ', st.plate.phi, (v) => { st.plate.phi = v; }, '° (obrót wokół osi narzędzia, 3D)')) : null;
   paintNote(); paintParams();
 
