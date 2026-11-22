@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# tylko najnowszy push buduje i publikuje wydanie „latest” – starsze, wolniejsze uruchomienie nie nadpisze nowszego (wcześniej wydanie mogło dostać plik z poprzedniej wersji)
+concurrency:
+  group: build-windows-main
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
