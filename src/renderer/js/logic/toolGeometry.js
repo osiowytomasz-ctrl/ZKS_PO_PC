@@ -170,9 +170,12 @@ export function plateTilt(tool, g) {
   const k = num(g);
   return k > 0 && k < 90 ? k - 90 : 0;
 }
-/** Kąt bezwzględny (°) płytki z obrotu względnego [ang] (90° = płytka w pionie) i odwrotnie – do wyświetlania i wpisywania w oknach płytek. */
-export const absAngle = (ang) => Math.round((num(ang) + 90) * 1000) / 1000;
-export const relAngle = (abs) => Math.round((num(abs) - 90) * 1000) / 1000 || 0;
+/**
+ * Kąt płytki (°) względem krawędzi skrawającej narzędzia: 0° – krawędź płytki w linii z krawędzią skrawającą (obrót [ang] = obrót grupy [tilt] z kąta G), dla G = 90° / brak – płytka w pionie.
+ * Do wyświetlania i wpisywania w oknach płytek; zapis zawsze jako obrót [ang] (relAngle – odwrotnie).
+ */
+export const absAngle = (ang, tilt = 0) => Math.round((num(ang) - num(tilt)) * 1000) / 1000 || 0;
+export const relAngle = (v, tilt = 0) => Math.round((num(v) + num(tilt)) * 1000) / 1000 || 0;
 /** Frez płytkowy (plu), jeżowy (jez) albo fazowy (faz): płytki w rzędach równomiernie na długości roboczej (fazowy – wzdłuż linii fazy, wymaga krawędzi skrawającej). */
 export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['plu', 'jez', 'faz'].includes(String((t && t.columnE) ?? '').trim().toLowerCase());
 /**

@@ -227,7 +227,8 @@ test('zmiana kąta skrawania G od razu obraca płytki; grupa obraca się wokół
 });
 
 test('kąt bezwzględny płytki (90° = pion) i osobny punkt bazowy każdej płytki', () => {
-  assert.equal(G.absAngle(-80), 10); assert.equal(G.absAngle(0), 90); assert.equal(G.relAngle(170), 80); assert.equal(G.relAngle(90), 0);
+  // kąt względem krawędzi skrawającej: G = 67° → obrót grupy −23°; płytka pozioma (obrót −90°) = −67°, w linii z krawędzią = 0°
+  assert.equal(G.absAngle(-23, -23), 0); assert.equal(G.absAngle(-90, -23), -67); assert.equal(G.relAngle(-67, -23), -90); assert.equal(G.absAngle(0, 0), 0); assert.equal(G.relAngle(0, G.plateTilt({}, 67)), -23);
   const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
   const t = { productCode: 'P1', columnD: 'fre', columnE: 'pal', columnP: 'X', columnF: '50', columnJ: '80', columnM: 'ABS063', columnG: '' };
   const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-250_0;250_0;250_770;-250_770', insertContours: [{ code: 'A', contour: plate }, { code: 'A', contour: plate }] } } }, null);

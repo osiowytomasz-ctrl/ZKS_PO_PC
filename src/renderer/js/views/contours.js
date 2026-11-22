@@ -547,6 +547,8 @@ export function mountContours(el, ctx) {
   const ownPlates = (t) => { const codes = plateCodes().map((c) => String(c).trim().toLowerCase()), l = (insertSetup(t).plates || []).filter((p) => codes.includes(String(p.code).trim().toLowerCase())); return l.length ? l : null; };
   /** Układ płytek tak, jak jest rysowany (z tabeli: kąt G, rzędy plunger / jeż; własny układ ma pierwszeństwo). */
   const effectiveSpecs = (opts) => { const stt = st.tool && st.index ? st.index.stackTool(st.tool, { pswt: paramsOf(st.tool), ...(opts || {}) }) : null; return stt ? specsFromPlates(stt.plates) : []; };
+  /** Obrót grupy płytek z kąta skrawania G narzędzia (G − 90°; bez G – 0): odniesienie kąta płytki frezu – krawędź skrawająca narzędzia. */
+  const tiltOf = (t) => { const pw = t ? paramsOf(t) : null; return G.plateTilt(t, pw ? pw.G : t && t.columnG); };
   const layoutNow = () => effectiveSpecs();
   const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi } : { dx: 0, dz: 0, ang: 0, phi: 0 }; };
   // pierwsza zmiana tworzy własny układ z faktycznego stanu (z kątem z tabeli i rzędami), nie z pustego układu katalogu – pochylenie nie znika
@@ -574,7 +576,7 @@ export function mountContours(el, ctx) {
     const t = st.tool; if (!t || !st.index) { toast('Najpierw wybierz narzędzie.', true); return; }
     if (platePanel) platePanel.remove();
     const codes = plateCodes(), set = insertSetup(t);
-    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central, absAngle: String(t.columnD ?? '').trim().toLowerCase() === 'fre',   // do wyboru tylko płytki przypisane do narzędzia
+    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central, angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? () => tiltOf(t) : null,   // do wyboru tylko płytki przypisane do narzędzia
       onChange: (list) => { saveInsertSetup(t, { plates: list }); drawPreview(); },
       onSelect: (j) => { pv.insSel = j; pv.ptEdit = null; drawPreview(); },
       onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); },
@@ -589,7 +591,7 @@ export function mountContours(el, ctx) {
     if (!q || !t || !st.index) return;
     const path = st.index.insertContour(q.code) || '';
     const cur = layoutNow()[j] || {}, set0 = insertSetup(t);
-    openPlateEditor({ code: q.code, path, tool: t.productCode, base: cur.base || plateBase(q.code), absAngle: String(t.columnD ?? '').trim().toLowerCase() === 'fre', edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
+    openPlateEditor({ code: q.code, path, tool: t.productCode, base: cur.base || plateBase(q.code), angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? tiltOf(t) : null, edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
       onApply: ({ path: np, setup, plate, base, edge }) => {
         saveInsertSetup(t, setup); savePlateEdge(q.code, edge);
@@ -657,7 +659,7 @@ export function mountContours(el, ctx) {
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.autoBase || q.auto[0])} → po korekcie ${mm(q.base || q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
-        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang) : a.ang, (v) => Number.isFinite(v) && set({ ang: fre ? G.relAngle(v) : v })), fre ? '° (90° = pion)' : '°'),
+        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set({ ang: fre ? G.relAngle(v, tiltOf(st.tool)) : v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
         h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, h('span', { style: { width: '78px' }, title: 'Punkt płytki, względem którego liczone jest położenie (zielony celownik na rysunku); obrót korekty też jest wokół niego' }, 'Punkt bazowy'), baseSel),

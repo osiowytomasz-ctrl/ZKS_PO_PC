@@ -24,11 +24,12 @@ export function mountPlateLayout(o) {
   const apply = () => o.onChange(normPlates(rows));
   const choose = (j) => { sel = j; markSel(); o.onSelect(j); };
   const markSel = () => [...tbody.children].forEach((tr, k) => { tr.style.outline = k === sel ? '2px solid #e00000' : ''; tr.style.background = k === sel ? '#ffecec' : ''; });
-  const shown = (key, v) => (key === 'ang' && o.absAngle ? v + 90 : v);   // frezy: kąt bezwzględny (90° = płytka w pionie)
+  const off = () => (o.angOffset ? o.angOffset() : 0);
+  const shown = (key, v) => (key === 'ang' && o.angOffset ? Math.round((v - off()) * 1000) / 1000 || 0 : v);   // frezy: kąt względem krawędzi skrawającej narzędzia (0° = krawędź płytki w jej linii)
   const field = (j, key, w = '44px') => {
     const inp = h('input', { type: 'text', value: comma(shown(key, rows[j][key])), style: { width: w, padding: '1px 3px' },
       onfocus: () => choose(j),
-      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate(withManual(rows[j], { [key]: key === 'z' ? Math.round(v) : key === 'ang' && o.absAngle ? v - 90 : v })); apply(); },
+      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate(withManual(rows[j], { [key]: key === 'z' ? Math.round(v) : key === 'ang' && o.angOffset ? v + off() : v })); apply(); },
       onchange: () => { const v = num(inp.value); if (!Number.isFinite(v)) inp.value = comma(shown(key, rows[j][key])); } });
     return inp;
   };
@@ -51,8 +52,8 @@ export function mountPlateLayout(o) {
     h('style', {}, '.plate-panel th, .plate-panel td { padding: 2px 3px !important; } .plate-panel .btn.small { padding: 1px 5px; }'),
     h('div', { class: 'row' }, h('b', { style: { flex: 1 } }, `Płytki – ${o.tool}`), h('button', { class: 'btn small', onclick: () => o.onClose() }, 'Zamknij')),
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Do wyboru tylko płytki przypisane do narzędzia. Rodzaj: centralna – jedna na osi (wiertła ISCAR / AMEC), obwodowa – para przy krawędzi, nieregularna – jedna w dowolnym miejscu (np. Komet). '
-      + 'ΔX, ΔZ w mm (ΔZ w górę osi), obrót w ° (frezy: kąt bezwzględny, 90° = płytka w pionie), φ – kąt pierwszej płytki na obwodzie (3D), z – liczba kopii (0 – wg narzędzia). Zmiany widać od razu na rysunku; wybrana płytka ma czerwony kontur.'),
-    h('div', { class: 'table-wrap', style: { overflow: 'auto' } }, h('table', { class: 't', style: { width: 'auto', fontSize: '11px' } }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka', 'Rodzaj', 'ΔX', 'ΔZ', o.absAngle ? 'Kąt' : 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
+      + 'ΔX, ΔZ w mm (ΔZ w górę osi), obrót w ° (frezy: kąt względem krawędzi skrawającej narzędzia, 0° = krawędź płytki w jej linii), φ – kąt pierwszej płytki na obwodzie (3D), z – liczba kopii (0 – wg narzędzia). Zmiany widać od razu na rysunku; wybrana płytka ma czerwony kontur.'),
+    h('div', { class: 'table-wrap', style: { overflow: 'auto' } }, h('table', { class: 't', style: { width: 'auto', fontSize: '11px' } }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka', 'Rodzaj', 'ΔX', 'ΔZ', o.angOffset ? 'Kąt' : 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
     h('div', { class: 'row', style: { gap: '6px' } },
       h('button', { class: 'btn small', onclick: add, title: 'Dodaj kolejną płytkę (wiele płytek na narzędziu)' }, '+ Dodaj płytkę'),
       h('button', { class: 'btn small', onclick: () => { rows = (o.autoPlates || []).map((p) => normPlate(p)); sel = null; o.onSelect(null); o.onChange(null); draw(); }, title: 'Płytki z katalogu narzędzia, bez własnych ustawień' }, 'Układ automatyczny')));
