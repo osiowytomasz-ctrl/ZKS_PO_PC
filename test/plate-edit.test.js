@@ -188,3 +188,20 @@ test('obrót i skala konturu płytki wokół punktu bazowego: punkt bazowy zosta
   assert.deepEqual(P.scale(sq, 50, base)[2], { x: 4, y: 2 });
   assert.notDeepEqual(P.rotate(sq, 90)[2], { x: 4, y: 2 }, 'bez punktu – wokół środka');
 });
+
+test('dodatkowe punkty bazowe łuków: środek promienia i przecięcie stycznych (zaokrąglone naroża)', async () => {
+  const P = await import('../src/renderer/js/logic/plateEdit.js');
+  const near = (a, b) => Math.abs(a - b) < 1e-3;
+  const find = (pts, id) => P.basePresets(pts).find((x) => x.id === id);
+  let pts = P.parsePlate('M 0 0 L 8 0 A 2 2 0 0 1 10 2 L 10 10 A 2 2 0 0 1 8 12 L 0 12 Z').pts;
+  assert.ok(near(find(pts, 'ac1').pt.x, 8) && near(find(pts, 'ac1').pt.y, 2)); assert.ok(near(find(pts, 'at1').pt.x, 10) && near(find(pts, 'at1').pt.y, 0));
+  assert.ok(near(find(pts, 'ac3').pt.x, 8) && near(find(pts, 'ac3').pt.y, 10)); assert.ok(near(find(pts, 'at3').pt.x, 10) && near(find(pts, 'at3').pt.y, 12));
+  // przeciwny kierunek obiegu (sweep = 0)
+  pts = P.parsePlate('M 0 12 L 8 12 A 2 2 0 0 0 10 10 L 10 2 A 2 2 0 0 0 8 0 L 0 0 Z').pts;
+  assert.ok(near(find(pts, 'ac1').pt.x, 8) && near(find(pts, 'ac1').pt.y, 10)); assert.ok(near(find(pts, 'at1').pt.x, 10) && near(find(pts, 'at1').pt.y, 12));
+  // łuk duży (270°): środek w (0, 0), styczne równoległe? (z (2,0) i (0,2) – prostopadłe, przecięcie (2, 2))
+  pts = P.parsePlate('M 2 0 A 2 2 0 1 0 0 2 L 5 5 Z').pts;
+  assert.ok(near(find(pts, 'ac0').pt.x, 0) && near(find(pts, 'ac0').pt.y, 0));
+  // płytka bez łuków – bez nowych punktów
+  assert.equal(P.basePresets(P.parsePlate('M 0 0 L 6 0 L 6 8 L 0 8 Z').pts).filter((x) => /^a[ct]/.test(x.id)).length, 0);
+});

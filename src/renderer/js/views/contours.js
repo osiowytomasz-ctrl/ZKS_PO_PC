@@ -656,7 +656,7 @@ export function mountContours(el, ctx) {
       polys.push(poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })));
       const ed = cur.plates[j] && cur.plates[j].edge, ea = ed && G.placedPoint(path, poly, ed.a), eb = ed && G.placedPoint(path, poly, ed.b);
       if (ea && eb) lines.push({ a: { x: ea.x / 10, y: ea.y / 10 }, b: { x: eb.x / 10, y: eb.y / 10 }, color: '#e00000', w: 3 });   // zaznaczona krawędź tnąca (czerwona)
-      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${n}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
+      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${n}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : /^ac\d/.test(pr.id) ? 'arcc' : /^at\d/.test(pr.id) ? 'tang' : 'box' }); });
       const own = (specs[j] && specs[j].base) || plateBase(pm.code), mp = own && G.placedPoint(path, poly, own);
       if (mp) marks.push({ x: mp.x / 10, y: mp.y / 10 });
     });
@@ -684,7 +684,7 @@ export function mountContours(el, ctx) {
     rows.forEach(({ pm, j }) => {
       const poly = last(pm), path = (cur.plates[j] && cur.plates[j].path) || '', raw = G.parseInsertPath(path);
       polys.push(poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })));
-      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${rows.findIndex((e) => e.j === j) + 1}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
+      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${rows.findIndex((e) => e.j === j) + 1}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : /^ac\d/.test(pr.id) ? 'arcc' : /^at\d/.test(pr.id) ? 'tang' : 'box' }); });
     });
     const bbox = (pls) => { const xs = pls.flat().map((v) => v.x / 10), ys = pls.flat().map((v) => v.y / 10); return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; };
     const names = ['lewy górny', 'prawy górny', 'prawy dolny', 'lewy dolny'], corners4 = (b) => [{ x: b.x0, y: b.y0 }, { x: b.x1, y: b.y0 }, { x: b.x1, y: b.y1 }, { x: b.x0, y: b.y1 }];
@@ -808,7 +808,7 @@ export function mountContours(el, ctx) {
       const gdat = pv.basePick === j && pv.baseGroup ? groupBaseData() : null;
       if (pv.basePick === j && pv.baseGroup && gdat) {   // grupa płytek (jeż / frez płytkowy): w jednym oknie wszystkie płytki z punktami, wybrany punkt dostają wszystkie płytki grupy
         cornerBox(closeBtn(() => cancelPicks()), h('b', {}, 'Punkt bazowy – grupa płytek'), ...groupPicker({ polys: gdat.polys, dots: gdat.dots, lines: gdat.lines, rect: [], corners: [], marks: gdat.marks, markColor: '#2e7d32', hintPrefix: 'Punkt bazowy', curLabel: gdat.marks.length ? 'wybrany (zielone ⊕)' : 'domyślny (pierwszy punkt konturu)',
-          legend: '■ środki i rogi obwiedni · ● punkty konturu · zielone ⊕ – punkt bazowy każdej płytki. Wybrany punkt dostają wszystkie płytki grupy (ten sam punkt każdej płytki). Klikaj do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.', defTitle: 'Bez własnego punktu bazowego: pierwszy punkt konturu każdej płytki',
+          legend: '■ środki i rogi obwiedni · ● punkty konturu · ◉ środki promieni · ✕ przecięcia stycznych · zielone ⊕ – punkt bazowy każdej płytki. Wybrany punkt dostają wszystkie płytki grupy (ten sam punkt każdej płytki). Klikaj do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.', defTitle: 'Bez własnego punktu bazowego: pierwszy punkt konturu każdej płytki',
           onPick: (e) => pickBaseGroup(e, gdat), onDefault: () => { let list = ownPlates(st.tool) || normPlates(effectiveSpecs()); gdat.rows.forEach((r) => { list = patchPlate(list, plateCodes(), r.j, { base: null }); savePlateBase(r.code, null); }); saveInsertSetup(st.tool, { plates: list }); drawPreview(); },
           onDone: () => { pv.basePick = null; pv.baseGroup = false; drawPreview(); }, onCancel: () => cancelPicks() }));
         preview.lastChild.style.width = '362px';

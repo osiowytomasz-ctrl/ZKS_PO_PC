@@ -192,14 +192,41 @@ export function previewPoly(pts) { const b = plateBounds(pts); return flatten(pt
 // ---------- punkt bazowy płytki: punkt odniesienia do liczenia położenia (współrzędne, obrót korekty, ● na rysunku) ----------
 /** Środek ciężkości wielokąta (średnia wierzchołków). */
 const meanPt = (pts) => ({ x: r3(pts.reduce((s, p) => s + p.x, 0) / (pts.length || 1)), y: r3(pts.reduce((s, p) => s + p.y, 0) / (pts.length || 1)) });
-/** Propozycje punktu bazowego dla płytki o punktach [pts] (mm, y w dół): [{ id, label, pt }] – środki i narożniki obwiedni, środek ciężkości, każdy punkt konturu. */
-export function basePresets(pts) {
+/**
+ * Środek okręgu łuku odcinka [p0] → [p1] ([arc] – { r, sweep, large } jak w SVG) i punkt przecięcia stycznych łuku w jego końcach (wierzchołek „ostrego” naroża przed zaokrągleniem);
+ * null, gdy promień jest za mały albo styczne są równoległe (półokrąg). Współrzędne jak punkty płytki (mm).
+ */
+export function arcCenterTangent(p0, p1, arc) {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y, d = Math.hypot(dx, dy);
+  if (!arc || !(d > 1e-9)) return null;
+  const r = Math.max(Number(arc.r), d / 2), k = Math.sqrt(Math.max(0, r * r - (d / 2) * (d / 2))), side = (arc.sweep ? 1 : -1) * (arc.large ? -1 : 1);   // środek po lewej stronie kierunku biegu (sweep = 1, łuk mały), przeciwnie dla łuku dużego / sweep = 0
+  const center = { x: (p0.x + p1.x) / 2 + (side * k * -dy) / d, y: (p0.y + p1.y) / 2 + (side * k * dx) / d };
+  // styczne: przez p0 i p1, prostopadłe do promieni
+  const t0 = { x: -(p0.y - center.y), y: p0.x - center.x }, t1 = { x: -(p1.y - center.y), y: p1.x - center.x }, den = t0.x * t1.y - t0.y * t1.x;
+  if (Math.abs(den) < 1e-9) return { center, tangent: null };
+  const s = ((p1.x - p0.x) * t1.y - (p1.y - p0.y) * t1.x) / den;
+  return { center, tangent: { x: p0.x + s * t0.x, y: p0.y + s * t0.y } };
+}
+function basePresets0(pts) {
   const b = plateBounds(pts), out = [['c', 'środek obwiedni', b.cx, b.cy], ['tl', 'lewy górny róg obwiedni', b.minX, b.minY], ['tc', 'górny środek obwiedni', b.cx, b.minY], ['tr', 'prawy górny róg obwiedni', b.maxX, b.minY],
     ['lc', 'lewy środek obwiedni', b.minX, b.cy], ['rc', 'prawy środek obwiedni', b.maxX, b.cy], ['bl', 'lewy dolny róg obwiedni', b.minX, b.maxY], ['bc', 'dolny środek obwiedni', b.cx, b.maxY], ['br', 'prawy dolny róg obwiedni', b.maxX, b.maxY]];
   const m = meanPt(pts || []);
   out.push(['m', 'środek ciężkości (średnia punktów)', m.x, m.y]);
   (pts || []).forEach((p, i) => out.push(['p' + i, `punkt ${i + 1} konturu`, p.x, p.y]));
   return out.map(([id, label, x, y]) => ({ id, label, pt: { x: r3(x), y: r3(y) } }));
+}
+/** Propozycje punktu bazowego dla płytki o punktach [pts] (mm, y w dół): [{ id, label, pt }] – środki i narożniki obwiedni, środek ciężkości, każdy punkt konturu oraz dla każdego łuku: środek promienia (ac) i przecięcie stycznych (at). */
+export function basePresets(pts) {
+  const out = basePresets0(pts), n = (pts || []).length;
+  (pts || []).forEach((p, i) => {
+    if (!p.arc) return;
+    const ct = arcCenterTangent(p, pts[(i + 1) % n], p.arc);
+    if (!ct) return;
+    const rr = String(Math.round(Number(p.arc.r) * 1000) / 1000).replace('.', ','), seg = `${i + 1}→${(i + 1) % n + 1}`;
+    out.push({ id: 'ac' + i, label: `środek promienia R${rr} (łuk ${seg})`, pt: { x: r3(ct.center.x), y: r3(ct.center.y) } });
+    if (ct.tangent) out.push({ id: 'at' + i, label: `przecięcie stycznych łuku R${rr} (łuk ${seg})`, pt: { x: r3(ct.tangent.x), y: r3(ct.tangent.y) } });
+  });
+  return out;
 }
 /** Punkt bazowy po przekształceniu konturu: [op] – mirrorX | mirrorY | rotate (arg °) | scale (arg %) | origin; [pts] – kontur PRZED przekształceniem. Bez punktu bazowego – null. */
 export function mapBase(op, base, pts, arg = 0, pivot = null) {

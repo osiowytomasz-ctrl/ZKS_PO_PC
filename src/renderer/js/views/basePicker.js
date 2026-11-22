@@ -4,7 +4,10 @@
 import { h } from '../ui.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
-const isVertex = (id) => /^p\d/.test(id), isCorner = (id) => String(id).startsWith('k_');
+const isVertex = (id) => /^p\d/.test(id), isCorner = (id) => String(id).startsWith('k_'), isArcC = (id) => /^ac\d/.test(id), isTang = (id) => /^at\d/.test(id);
+/** Znacznik środka promienia łuku (kółko z kropką) i przecięcia stycznych (krzyżyk) – kolor turkusowy. */
+const arcMark = (cx, cy) => `<circle cx="${cx}" cy="${cy}" r="5" fill="#fff" stroke="#00838f" stroke-width="1.6"/><circle cx="${cx}" cy="${cy}" r="1.6" fill="#00838f"/>`;
+const tangMark = (cx, cy) => `<path d="M${cx - 5} ${cy - 5}L${cx + 5} ${cy + 5}M${cx + 5} ${cy - 5}L${cx - 5} ${cy + 5}" stroke="#00838f" stroke-width="2.2" stroke-linecap="round"/>`;
 
 // ---------- powiększanie rysunku punktów: kółko myszy (wokół kursora), przyciski + / − / Dopasuj, przeciąganie tłem przesuwa widok ----------
 const zoomStates = new Map();
@@ -67,11 +70,11 @@ export function basePicker(o) {
   const key = 'base:' + (inTool ? 'tool' : 'std');
   const zh = zoomHolder(key, W, Hh, (zx, zy) => {
     const X = (v) => zx(X0(v)), Y = (v) => zy(Y0(v));
-  const order = [...pts.filter((e) => !isVertex(e.pr.id) && !isCorner(e.pr.id)), ...pts.filter((e) => isVertex(e.pr.id)), ...pts.filter((e) => isCorner(e.pr.id))];
+  const order = [...pts.filter((e) => !isVertex(e.pr.id) && !isCorner(e.pr.id) && !isArcC(e.pr.id) && !isTang(e.pr.id)), ...pts.filter((e) => isArcC(e.pr.id) || isTang(e.pr.id)), ...pts.filter((e) => isVertex(e.pr.id)), ...pts.filter((e) => isCorner(e.pr.id))];
   const dots = order.map((e) => {
     const cx = X(e.x), cy = Y(e.y), on = same(e.pr), k = isCorner(e.pr.id), v = isVertex(e.pr.id);
     const mark = on ? `<circle cx="${cx}" cy="${cy}" r="7" fill="#fff" stroke="#2e7d32" stroke-width="2"/><path d="M${cx - 10} ${cy}H${cx + 10}M${cx} ${cy - 10}V${cy + 10}" stroke="#2e7d32" stroke-width="2"/>`
-      : k ? `<path d="M${cx} ${cy - 5}L${cx + 5} ${cy}L${cx} ${cy + 5}L${cx - 5} ${cy}Z" fill="#ef6c00" stroke="#fff" stroke-width="1"/>` : v ? `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#1565c0" stroke="#fff" stroke-width="1"/>` : `<rect x="${cx - 3.5}" y="${cy - 3.5}" width="7" height="7" fill="#fff" stroke="#607d8b" stroke-width="1.5"/>`;
+      : isArcC(e.pr.id) ? arcMark(cx, cy) : isTang(e.pr.id) ? tangMark(cx, cy) : k ? `<path d="M${cx} ${cy - 5}L${cx + 5} ${cy}L${cx} ${cy + 5}L${cx - 5} ${cy}Z" fill="#ef6c00" stroke="#fff" stroke-width="1"/>` : v ? `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#1565c0" stroke="#fff" stroke-width="1"/>` : `<rect x="${cx - 3.5}" y="${cy - 3.5}" width="7" height="7" fill="#fff" stroke="#607d8b" stroke-width="1.5"/>`;
     return `<g data-id="${e.pr.id}" style="cursor:pointer">${mark}<circle cx="${cx}" cy="${cy}" r="9" fill="transparent"/></g>`;
   }).join('');
     const edgeSvg = edge ? `<line x1="${X(edge.a.x)}" y1="${Y(edge.a.y)}" x2="${X(edge.b.x)}" y2="${Y(edge.b.y)}" stroke="#e00000" stroke-width="3" stroke-linecap="round" pointer-events="none"/>` : '';
@@ -86,7 +89,7 @@ export function basePicker(o) {
   return [
     h('div', { class: 'row', style: { gap: '4px', margin: '4px 0' } }, modeBtn('tool', 'Na narzędziu', 'Płytka tak, jak leży na narzędziu (obrót, kąt, odbicie)'), modeBtn('std', 'Standardowo', 'Płytka w pozycji standardowej (bez transformacji na narzędziu); rogi skrajne – już z transformacją')),
     zh.ctrl, holder, hint,
-    h('div', { class: 'muted', style: { fontSize: '10px' } }, '■ środki i rogi obwiedni · ● punkty konturu · ◆ rogi skrajne (zawsze z transformacją na narzędziu) · ⊕ wybrany · czerwona linia – krawędź tnąca. Klikaj punkty do skutku – wybór zmienia się na bieżąco; „Zatwierdź” zamyka okno, Esc cofa wszystko. Wokół punktu bazowego płytka się obraca.'),
+    h('div', { class: 'muted', style: { fontSize: '10px' } }, '■ środki i rogi obwiedni · ● punkty konturu · ◆ rogi skrajne (zawsze z transformacją na narzędziu) · ◉ środek promienia łuku · ✕ przecięcie stycznych łuku · ⊕ wybrany · czerwona linia – krawędź tnąca. Klikaj punkty do skutku – wybór zmienia się na bieżąco; „Zatwierdź” zamyka okno, Esc cofa wszystko. Wokół punktu bazowego płytka się obraca.'),
     h('div', { class: 'row', style: { gap: '4px', marginTop: '4px', flexWrap: 'wrap' } }, h('button', { class: 'btn small primary', title: 'Zatwierdź wybrany punkt i zamknij okno', onclick: () => o.onDone() }, 'Zatwierdź'),
       h('button', { class: 'btn small', title: o.defLabel, onclick: () => o.onPick(null) }, 'Domyślny'), h('button', { class: 'btn small', title: 'Cofnij wszystkie zmiany i wróć do pierwotnego wyboru (Esc)', onclick: () => o.onCancel() }, 'Cofnij (Esc)')),
   ];
@@ -116,7 +119,7 @@ export function groupPicker(o) {
   const pg = (poly) => poly.map((v) => `${X(v.x)},${Y(v.y)}`).join(' ');
   const dot = (e, kind) => {
     const cx = X(e.x), cy = Y(e.y);
-    const mark = kind === 'cut' ? `<circle cx="${cx}" cy="${cy}" r="6" fill="#fff" stroke="#e65100" stroke-width="2"/><path d="M${cx - 4} ${cy - 4}L${cx + 4} ${cy + 4}M${cx + 4} ${cy - 4}L${cx - 4} ${cy + 4}" stroke="#e65100" stroke-width="2"/>`
+    const mark = kind === 'arcc' ? arcMark(cx, cy) : kind === 'tang' ? tangMark(cx, cy) : kind === 'cut' ? `<circle cx="${cx}" cy="${cy}" r="6" fill="#fff" stroke="#e65100" stroke-width="2"/><path d="M${cx - 4} ${cy - 4}L${cx + 4} ${cy + 4}M${cx + 4} ${cy - 4}L${cx - 4} ${cy + 4}" stroke="#e65100" stroke-width="2"/>`
       : kind === 'corner' ? `<path d="M${cx} ${cy - 6}L${cx + 6} ${cy}L${cx} ${cy + 6}L${cx - 6} ${cy}Z" fill="#7b1fa2" stroke="#fff" stroke-width="1"/>` : kind === 'vertex' ? `<circle cx="${cx}" cy="${cy}" r="3" fill="#1565c0" stroke="#fff" stroke-width="1"/>`
       : `<rect x="${cx - 3}" y="${cy - 3}" width="6" height="6" fill="#fff" stroke="#607d8b" stroke-width="1.3"/>`;
     return `<g data-id="${e.id}" style="cursor:pointer">${mark}<circle cx="${cx}" cy="${cy}" r="8" fill="transparent"/></g>`;
@@ -137,7 +140,7 @@ export function groupPicker(o) {
     o.mode === undefined ? null : h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, modeBtn('cur', 'Aktualny układ', 'Prostokąt nieobrócony wokół płytek w bieżącym ułożeniu (płytki obrócone w grupie i lokalnie), dowolny kąt skrawania'),
       modeBtn('main', 'Układ główny', 'Prostokąt wokół układu przy kącie 90° (teoretyczne położenie początkowe), obrócony o kąt skrawania')),
     zh.ctrl, holder, hint,
-    h('div', { class: 'muted', style: { fontSize: '10px' } }, o.legend || '■ środki i rogi obwiedni płytek · ● punkty konturów · ◆ skrajne punkty grupy (prostokąt) · ◎ przecięcie najwyższej stycznej poziomej z krawędzią tnącą · czerwona linia – zaznaczona krawędź tnąca płytek · czerwony ⊕ – punkt obrotu grupy. Klikaj punkty do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.'),
+    h('div', { class: 'muted', style: { fontSize: '10px' } }, o.legend || '■ środki i rogi obwiedni płytek · ● punkty konturów · ◉ środki promieni · ✕ przecięcia stycznych · ◆ skrajne punkty grupy (prostokąt) · ◎ przecięcie najwyższej stycznej poziomej z krawędzią tnącą · czerwona linia – zaznaczona krawędź tnąca płytek · czerwony ⊕ – punkt obrotu grupy. Klikaj punkty do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.'),
     h('div', { class: 'row', style: { gap: '4px', marginTop: '4px', flexWrap: 'wrap' } }, h('button', { class: 'btn small primary', onclick: () => o.onDone() }, 'Zatwierdź'),
       h('button', { class: 'btn small', title: o.defTitle || 'Bez własnego punktu: grupa obraca się wokół punktu odniesienia pierwszej płytki', onclick: () => o.onDefault() }, 'Domyślny'), h('button', { class: 'btn small', title: 'Cofnij wszystkie zmiany i wróć do pierwotnego wyboru (Esc)', onclick: () => o.onCancel() }, 'Cofnij (Esc)')),
   ].filter(Boolean);
