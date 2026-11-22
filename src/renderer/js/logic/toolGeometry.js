@@ -328,6 +328,19 @@ export function plateCorners(path, { kind = 'edge', ang = 0 } = {}) {
   const m = lay && lay.layers[0].plates[0];
   return m ? m.corners || [] : [];
 }
+/** Frez płytkowy „plunger” (fre / plu). */
+export const isPlunger = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && String((t && t.columnE) ?? '').trim().toLowerCase() === 'plu';
+const plungerMemo = new Map();
+/**
+ * Domyślny punkt bazowy płytek plungera, gdy dla płytki nie wybrano innego: „róg skrajny płytki na narzędziu – prawy górny” (prawy górny róg prostokąta opisanego na pochylonej
+ * płytce). Nie jest zapisywany – wybór użytkownika (zapisany dla kodu płytki) ma zawsze pierwszeństwo. [p] – płytka układu ({ path, kind, ang }).
+ */
+export function plungerBase(p) {
+  if (!p || !p.path) return null;
+  const key = `${p.path}|${p.kind || 'edge'}|${Number(p.ang) || 0}`;
+  if (!plungerMemo.has(key)) { const c = plateCorners(p.path, { kind: p.kind || 'edge', ang: p.ang || 0 }).find((q) => q.id === 'k_tr'); plungerMemo.set(key, c ? c.pt : null); if (plungerMemo.size > 400) plungerMemo.delete(plungerMemo.keys().next().value); }
+  return plungerMemo.get(key);
+}
 /** Punkt bazowy płytki ([base] – { x, y } mm we współrzędnych konturu płytki) w układzie narysowanego wielokąta [poly] (odpowiada wierzchołkom [raw] 1:1); null – brak. */
 export function basePlaced(raw, poly, base) {
   if (!base || !Number.isFinite(base.x) || !Number.isFinite(base.y)) return null;
@@ -410,6 +423,7 @@ export function buildMini(tool, details, plateLookup = null) {
     const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || (plateLookup && plateLookup(code)) || '';
     let plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
     if (rowMill && plates.length) plates = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path })), details && details.pswt).map((p) => ({ ...p, base: plateBaseOf(p.code) }));
+    if (isPlunger(tool)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślny punkt bazowy jak w podglądzie
     const lay = buildStack([{ code: tool.productCode, contour: points, plates, inserts: plates.map((p) => p.path), diameter, length, angle: num(tool.columnG), chamfer: false, central: isCentralTool(tool), drill: isWiePly }], true, false);
     polygons = lay ? lay.layers[0].inserts.map((poly) => poly.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + p.y * scale))) : [];
   } else for (const ins of toRender) {
@@ -517,6 +531,7 @@ export function toolIndex(catalog, overrides = null) {
         plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) }));
         if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       }
+      if (!tre && isPlunger(t)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślnie róg skrajny prawy górny (wybór użytkownika ma pierwszeństwo)
       const contour = parseContour(d && d.columnAY);
       return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: plateLength(t), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM, fitM: String(t.columnD ?? '').trim().toLowerCase() === 'fre' && freL2(t.columnM) ? t.columnM : '' };
     },

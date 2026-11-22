@@ -147,3 +147,21 @@ test('punkty bazowe płytki pochylonej: cztery rogi prostokąta opisanego w ukł
     assert.equal(m.corners.length, 4);
   } finally { G.setPlateSetupProvider(null); G.setPlateBaseProvider(null); }
 });
+
+test('plunger (fre / plu): domyślny punkt bazowy płytek = róg skrajny prawy górny; wybór użytkownika ma pierwszeństwo', () => {
+  const plate = 'M 0 0 L 8 0 L 8 4 L 0 4 Z';
+  const mk = (E) => ({ productCode: 'P1', columnD: 'fre', columnE: E, columnP: 'X', columnF: '100', columnJ: '80', columnM: 'ABS063', columnG: '' });
+  const ix = (t) => G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  try {
+    const tp = mk('plu'), st = ix(tp).stackTool(tp), m = G.buildStack([st], true, false).layers[0].plates[0], poly = m.polys[1];
+    assert.ok(st.plates[0].base, 'plunger bez wyboru dostaje domyślny punkt bazowy');
+    // prawa płytka pary: punkt bazowy = prawy górny róg prostokąta opisanego (max X, min Y rysunku)
+    assert.ok(Math.abs(m.bases[1].x - Math.max(...poly.map((q) => q.x))) < 0.01 && Math.abs(m.bases[1].y - Math.min(...poly.map((q) => q.y))) < 0.01);
+    // inne frezy – bez domyślnego punktu
+    const tj = mk('jez'); assert.equal(ix(tj).stackTool(tj).plates[0].base, null);
+    // wybór zapisany wcześniej (inny punkt bazowy) nie jest zastępowany
+    G.setPlateBaseProvider(() => ({ x: 4, y: 2 }));
+    assert.deepEqual(ix(tp).stackTool(tp).plates[0].base, { x: 4, y: 2 });
+  } finally { G.setPlateBaseProvider(null); }
+  assert.equal(G.isPlunger(mk('plu')), true); assert.equal(G.isPlunger(mk('pal')), false);
+});

@@ -617,7 +617,7 @@ export function mountContours(el, ctx) {
       const cs = q.single ? Math.cos(((a.phi || 0) * Math.PI) / 180) : 1;   // rzut X płytki pojedynczej obróconej wokół osi
       const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = plateBase(q.code);   // + 4 rogi skrajne płytki pochylonej
       const baseSel = h('select', { style: { maxWidth: '150px' }, title: 'Wybór punktu bazowego płytki (wspólny dla wszystkich narzędzi z tą płytką)', onchange: () => { const pr = presets.find((x) => x.id === baseSel.value); savePlateBase(q.code, pr ? pr.pt : null); drawPreview(); } },
-        h('option', { value: '' }, 'pierwszy punkt konturu'), ...presets.map((pr) => h('option', { value: pr.id, selected: !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6 }, pr.label)));
+        h('option', { value: '' }, G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu'), ...presets.map((pr) => h('option', { value: pr.id, selected: !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6 }, pr.label)));
       if (cur && !presets.some((pr) => Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6)) baseSel.append(h('option', { value: 'own', selected: true }, `własny (${round3(cur.x)}; ${round3(cur.y)})`));
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.autoBase || q.auto[0])} → po korekcie ${mm(q.base || q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
