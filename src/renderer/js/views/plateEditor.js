@@ -4,6 +4,7 @@
 import { h, clear, toast, modal } from '../ui.js';
 import * as P from '../logic/plateEdit.js';
 import { view3d } from './toolViews.js';
+import * as G from '../logic/toolGeometry.js';
 
 const DEFAULT_PLATE = [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }];
 const STEPS = [['0', 'bez siatki'], ['0.01', '0,01 mm'], ['0.02', '0,02 mm'], ['0.05', '0,05 mm'], ['0.1', '0,1 mm'], ['0.2', '0,2 mm'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['custom', 'własny…']];
@@ -146,7 +147,8 @@ export function openPlateEditor(o) {
   const baseBox = h('div', { style: { border: '1px solid #0a7d2c', padding: '6px', margin: '6px 0', fontSize: '12px' } });
   function paintBase() {
     clear(baseBox);
-    const presets = P.basePresets(st.pts), same = (a, b) => a && b && Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
+    const kindNow = st.plate && st.plate.mode === 'irregular' ? 'irregular' : isCentral() ? 'central' : 'edge';
+    const presets = [...P.basePresets(st.pts), ...(P.plateToPath(st.pts) ? G.plateCorners(P.plateToPath(st.pts), { kind: kindNow, ang: st.plate ? st.plate.ang : 0 }) : [])], same = (a, b) => a && b && Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
     const sel = h('select', { style: { maxWidth: '190px' }, onchange: () => { const pr = presets.find((x) => x.id === sel.value); push(); st.base = pr ? { ...pr.pt } : sel.value === 'own' ? st.base : null; drawTable(); drawCanvas(); } },
       h('option', { value: '' }, 'brak (pierwszy punkt konturu)'), ...presets.map((pr) => h('option', { value: pr.id, selected: same(pr.pt, st.base) }, pr.label)),
       st.base && !presets.some((pr) => same(pr.pt, st.base)) ? h('option', { value: 'own', selected: true }, 'własny') : null);
@@ -177,7 +179,7 @@ export function openPlateEditor(o) {
       field('Grubość płytki', st.setup.thickness, (v) => { st.setup.thickness = Math.max(0, Math.min(30, v)); }, 'mm (0 – auto)'));
   }
   const place = st.plate ? h('div', { style: { border: '1px solid #ddd', padding: '6px', margin: '6px 0' } }, h('b', {}, 'Położenie w narzędziu' + (o.tool ? ` (${o.tool})` : '')),
-    field('Korekta ΔX', st.plate.dx, (v) => { st.plate.dx = v; }, 'mm'), field('Korekta ΔZ', st.plate.dz, (v) => { st.plate.dz = v; }, 'mm (wzdłuż osi, w górę)'), field('Obrót płytki', st.plate.ang, (v) => { st.plate.ang = v; }, '°'),
+    field('Korekta ΔX', st.plate.dx, (v) => { st.plate.dx = v; }, 'mm'), field('Korekta ΔZ', st.plate.dz, (v) => { st.plate.dz = v; }, 'mm (wzdłuż osi, w górę)'), field('Obrót płytki', st.plate.ang, (v) => { st.plate.ang = v; paintBase(); }, '°'),
     field('Kąt na obwodzie φ', st.plate.phi, (v) => { st.plate.phi = v; }, '° (obrót wokół osi narzędzia, 3D)')) : null;
   paintNote(); paintParams();
 

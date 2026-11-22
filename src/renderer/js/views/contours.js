@@ -547,7 +547,7 @@ export function mountContours(el, ctx) {
     return stack.layers[0].plates.map((pm, j) => {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
       const pb = (m) => { const b = m.bases && m.bases[m.single ? 0 : m.bases.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt bazowy płytki (null – nie wybrany: pierwszy punkt konturu)
-      return { code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z };
+      return { code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [] };
     });
   }
   /** Panel „Płytki” po lewej stronie rysunku (poza rejonem kreślenia): rodzaj płytki, wiele płytek, położenie; zmiany od razu na rysunku. */
@@ -615,7 +615,7 @@ export function mountContours(el, ctx) {
       const set = (patch) => { setPlate(j, patch); drawPreview(); };
       const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
       const cs = q.single ? Math.cos(((a.phi || 0) * Math.PI) / 180) : 1;   // rzut X płytki pojedynczej obróconej wokół osi
-      const presets = basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), cur = plateBase(q.code);
+      const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = plateBase(q.code);   // + 4 rogi skrajne płytki pochylonej
       const baseSel = h('select', { style: { maxWidth: '150px' }, title: 'Wybór punktu bazowego płytki (wspólny dla wszystkich narzędzi z tą płytką)', onchange: () => { const pr = presets.find((x) => x.id === baseSel.value); savePlateBase(q.code, pr ? pr.pt : null); drawPreview(); } },
         h('option', { value: '' }, 'pierwszy punkt konturu'), ...presets.map((pr) => h('option', { value: pr.id, selected: !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6 }, pr.label)));
       if (cur && !presets.some((pr) => Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6)) baseSel.append(h('option', { value: 'own', selected: true }, `własny (${round3(cur.x)}; ${round3(cur.y)})`));

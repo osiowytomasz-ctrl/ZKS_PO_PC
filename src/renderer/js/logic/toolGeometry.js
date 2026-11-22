@@ -259,7 +259,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       // (φ = 180° – lustrzane odbicie względem osi, ostrze po drugiej stronie), dzięki czemu dwie płytki nie nachodzą na siebie; src – położenie przed obrotem (dla 3D)
       const phi = pl.phi || 0, single = polys.length === 1, cs = Math.abs(phi % 360) < 1e-9 ? 1 : Math.round(Math.cos((phi * Math.PI) / 180) * 1e9) / 1e9;
       const shown = single && cs !== 1 ? polys.map((q) => q.map((p) => pt(p.x * cs, p.y))) : polys;
-      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
+      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)), corners: placedCorners(raw, shown[single ? 0 : shown.length - 1], flip) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
     }
     // frez nasadzany na trzpień FRExxx osadza się dolną płaszczyzną na czole oprawki (trzpień wchodzi w otwór na głębokość L2): kolejne narzędzie (oprawka) leży o L2 wyżej niż koniec trzpienia, niezależnie od tego, jak głęboko sięga kontur frezu
     offsetY += tool.fitM && index < tools.length - 1 ? (b.maxY - b.minY) - freL2(tool.fitM) * 10 : b.r;
@@ -304,6 +304,29 @@ export function affineFit(raw, poly) {
   if (i2 < 0) return null;
   const vx = raw[i2].x - r0.x, vy = raw[i2].y - r0.y, det = ux * vy - vx * uy, q0 = poly[0], q1 = poly[i1], q2 = poly[i2];
   return (p) => { const dx = p.x - r0.x, dy = p.y - r0.y, s2 = (dx * vy - dy * vx) / det, t = (ux * dy - uy * dx) / det; return pt(q0.x + s2 * (q1.x - q0.x) + t * (q2.x - q0.x), q0.y + s2 * (q1.y - q0.y) + t * (q2.y - q0.y)); };
+}
+/**
+ * Cztery punkty bazowe płytki pochylonej (lub nie): rogi prostokąta opisanego na płytce w układzie narzędzia (linie skrajne konturu: górna, dolna, lewa, prawa) –
+ * punkty „w powietrzu”, których płytki trygonalne czy pochylone nie mają w żadnym wierzchołku. [raw] – wierzchołki płytki (jak parseInsertPath), [poly] – te same wierzchołki
+ * po ułożeniu na narzędziu (obrót, odbicie), [flip] – kontur odwrócony w pionie. Wynik: [{ id, label, pt }] we współrzędnych konturu płytki (mm, jak w edytorze) – punkt
+ * jest związany z płytką, więc po zmianie pochylenia przestaje leżeć na linii skrajnej (wybierz ponownie).
+ */
+export function placedCorners(raw, poly, flip = false) {
+  const inv = affineFit(poly, raw);
+  if (!inv || !poly.length) return [];
+  const xs = poly.map((p) => p.x), ys = poly.map((p) => p.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const r3 = (v) => Math.round(v * 1000) / 1000 || 0;
+  return [['k_tl', 'lewy górny', x0, y0], ['k_tr', 'prawy górny', x1, y0], ['k_bl', 'lewy dolny', x0, y1], ['k_br', 'prawy dolny', x1, y1]].map(([id, side, x, y]) => {
+    const q = inv(pt(x, y));
+    return { id, label: `róg skrajny płytki na narzędziu – ${side}`, pt: { x: r3(q.x / 10), y: r3(flip ? -q.y / 10 : q.y / 10) } };
+  });
+}
+/** Rogi skrajne płytki o ścieżce [path] ułożonej jako [kind] (edge / central / irregular) i pochylonej o [ang]° – do listy punktów bazowych w edytorze płytki. */
+export function plateCorners(path, { kind = 'edge', ang = 0 } = {}) {
+  const contour = [pt(-500, 0), pt(500, 0), pt(500, 1000), pt(-500, 1000)];
+  const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(ang) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
+  const m = lay && lay.layers[0].plates[0];
+  return m ? m.corners || [] : [];
 }
 /** Punkt bazowy płytki ([base] – { x, y } mm we współrzędnych konturu płytki) w układzie narysowanego wielokąta [poly] (odpowiada wierzchołkom [raw] 1:1); null – brak. */
 export function basePlaced(raw, poly, base) {

@@ -124,3 +124,26 @@ test('punkt bazowy płytki: propozycje, przekształcenia, położenie na narzęd
     assert.notDeepEqual(rot.polys[1], flat.polys[1]);
   } finally { G.setPlateBaseProvider(null); }
 });
+
+test('punkty bazowe płytki pochylonej: cztery rogi prostokąta opisanego w układzie narzędzia (linie skrajne konturu)', () => {
+  const plate = 'M 0 0 L 8 0 L 8 4 L 0 4 Z';   // prostokąt 8 × 4 mm
+  const c0 = G.plateCorners(plate, { kind: 'edge', ang: 0 }), by = (c, id) => c.find((q) => q.id === id).pt;
+  assert.equal(c0.length, 4);
+  // bez pochylenia rogi opisane = narożniki płytki (płytka obwodowa prawa jest odbita w X)
+  assert.deepEqual(c0.map((q) => [q.pt.x, q.pt.y]).sort(), [[0, 0], [0, 4], [8, 0], [8, 4]].sort());
+  // po pochyleniu o 30° prostokąt opisany jest większy, a jego rogi leżą POZA płytką (w powietrzu): każdy róg jest poza wielokątem
+  const c30 = G.plateCorners(plate, { kind: 'central', ang: 30 }), poly = [[0, 0], [8, 0], [8, 4], [0, 4]];
+  const inside = (p) => p.x >= -1e-9 && p.x <= 8 + 1e-9 && p.y >= -1e-9 && p.y <= 4 + 1e-9;
+  assert.equal(c30.length, 4); assert.ok(c30.every((q) => !inside(q.pt)), 'rogi skrajne pochylonej płytki leżą poza konturem'); void poly;
+  // punkt wybrany jako bazowy leży po ułożeniu na linii skrajnej: położenie w narzędziu = róg prostokąta opisanego na płytce
+  const t = { productCode: 'T1', columnD: 'wie', columnE: 'ply', columnP: 'AMEC', columnF: '10', columnJ: '50', columnG: '' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { T1: { columnAY: '-50_-650;50_-650;50_500;-50_500', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  try {
+    G.setPlateSetupProvider(() => [{ code: 'A', mode: 'central', ang: 30 }]);
+    const corner = by(c30, 'k_tl'); G.setPlateBaseProvider(() => corner);
+    const m = G.buildStack([idx.stackTool(t)], true, false).layers[0].plates[0], poly2 = m.polys[0], b = m.bases[0];
+    assert.ok(Math.abs(b.x - Math.min(...poly2.map((p) => p.x))) < 0.01 && Math.abs(b.y - Math.min(...poly2.map((p) => p.y))) < 0.01,   // z dokładnością zaokrąglenia do 0,001 mm
+     'lewy górny róg skrajny = (min X, min Y) płytki na narzędziu');
+    assert.equal(m.corners.length, 4);
+  } finally { G.setPlateSetupProvider(null); G.setPlateBaseProvider(null); }
+});
