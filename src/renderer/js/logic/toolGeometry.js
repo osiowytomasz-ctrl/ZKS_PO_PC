@@ -162,8 +162,17 @@ export function dimsExtent(dims, charW = 55) {
 export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
 /** Frez palcowy / jeżowy / płytkowy (fre / pal, jez, plu) zamocowany na chwycie Weldon (M = WELxxx): kontur leży niżej o głębokość chwytu. */
 export const isWeldonMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['pal', 'jez', 'plu'].includes(String((t && t.columnE) ?? '').trim().toLowerCase()) && weldonDepth(t && t.columnM) > 0;
-/** Frez płytkowy (fre / plu) albo jeżowy (fre / jez): płytki w rzędach równomiernie na długości roboczej, pod kątem G. */
-export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['plu', 'jez'].includes(String((t && t.columnE) ?? '').trim().toLowerCase());
+/**
+ * Obrót płytek frezu (°) wynikający z kąta skrawania G (PSWT): płytki skrawające mają normalne położenie dla 90° (kąt 0 / brak / ≥ 90° – bez obrotu); frez płytkowy (plu) i jeżowy (jez) –
+ * stałe pochylenie G (≈ 10°), pozostałe frezy (faz …) – obrót o 90° − G.
+ */
+export function plateTilt(tool, g) {
+  const k = num(g);
+  if (!(k > 0) || k >= 90) return 0;
+  return ['plu', 'jez'].includes(String((tool && tool.columnE) ?? '').trim().toLowerCase()) ? k : 90 - k;
+}
+/** Frez płytkowy (plu), jeżowy (jez) albo fazowy (faz): płytki w rzędach równomiernie na długości roboczej (fazowy – wzdłuż linii fazy, wymaga krawędzi skrawającej). */
+export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['plu', 'jez', 'faz'].includes(String((t && t.columnE) ?? '').trim().toLowerCase());
 /**
  * Rzędy płytek frezu płytkowego / jeżowego: [catalog] – płytki katalogu [{ code, path }], [pswt] – parametry PSWT (K – długość robocza, G – kąt płytek ≈ 10°, H – liczba rzędów jeża).
  * Liczba rzędów: jeż – kolumna H (całkowita ≥ 1), frez płytkowy – liczba płytek katalogu; płytki rozmieszczone równomiernie na długości roboczej K (pierwszy rząd na wysokości J,
@@ -171,13 +180,24 @@ export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCas
  */
 export function millRows(tool, catalog, pswt) {
   if (!catalog.length) return [];
-  const jez = String(tool.columnE ?? '').trim().toLowerCase() === 'jez', hv = num(pswt && pswt.H), K = num(pswt && pswt.K), ang = num(pswt && pswt.G) || 0;
-  const n = jez && hv >= 1 ? Math.min(60, Math.round(hv)) : catalog.length;
+  const E = String(tool.columnE ?? '').trim().toLowerCase(), jez = E === 'jez', faz = E === 'faz', hv = num(pswt && pswt.H), K = num(pswt && pswt.K), G = num(pswt && pswt.G) || num(tool.columnG);
+  const ang = plateTilt(tool, G), n = jez && hv >= 1 ? Math.min(60, Math.round(hv)) : catalog.length;
+  if (faz) {   // fazownik: płytki krawędzią skrawającą w jednej linii pod kątem (linia fazy od Ø mniejszej do większej) – wymaga zaznaczonej krawędzi skrawającej płytki
+    const I = num(pswt && pswt.I), F = num(tool.columnF) || num(pswt && pswt.F), zTop = plateLength(tool);
+    if (!catalog.some((c) => c.edge) || !(I > F) || !(G > 0 && G < 90)) return null;
+    const small = F / 2, big = I / 2, hc = (big - small) / Math.tan((G * Math.PI) / 180), rows = [];
+    for (let i = 0; i < n; i++) {
+      const c = catalog[i % catalog.length], t = (i + 1) / n;
+      rows.push({ code: c.code, path: c.path, edge: c.edge || null, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: 0, dz: 0, ang: 0, phi: 0, z: 0, custom: false, row: true,
+        anchor: { r: Math.round((small + (big - small) * t) * 1000) / 1000, z: Math.round((zTop - hc * t) * 1000) / 1000 }, align: { dx: big - small, dy: hc } });   // linia fazy: (Ø mniejsza, J) → (Ø większa, J − h)
+    }
+    return rows;
+  }
   const height = (path) => { const r = parseInsertPath(path); return r.length ? (Math.max(...r.map((p) => p.y)) - Math.min(...r.map((p) => p.y))) / 10 : 0; };
   const rows = [];
   for (let i = 0; i < n; i++) {
     const c = catalog[i % catalog.length], step = n > 1 && K > 0 ? Math.max(0, (K - height(c.path)) / (n - 1)) : 0;
-    rows.push({ code: c.code, path: c.path, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: 0, dz: Math.round(-i * step * 1000) / 1000 || 0, ang, phi: 0, z: 0, custom: false, row: true });
+    rows.push({ code: c.code, path: c.path, edge: c.edge || null, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: 0, dz: Math.round(-i * step * 1000) / 1000 || 0, ang, phi: 0, z: 0, custom: false, row: true });
   }
   return rows;
 }
@@ -297,8 +317,8 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       const raw = parseInsertPath(pl0.path);
       if (raw.length < 2) continue;
       // punkt bazowy płytki (współrzędne konturu z arkusza); gdy konturem płytki odwrócono w pionie (cały pod osią) – razem z nim
-      const rawN = pl0.base ? parseInsertPath(pl0.path, { absY: false }) : null, flip = !!rawN && rawN.length > 0 && Math.abs(rawN[0].y) > 1e-9 && Math.abs(raw[0].y + rawN[0].y) < 1e-9;
-      const pl = flip ? { ...pl0, base: { x: pl0.base.x, y: -pl0.base.y } } : pl0;
+      const rawN = pl0.base || pl0.edge ? parseInsertPath(pl0.path, { absY: false }) : null, flip = !!rawN && rawN.length > 0 && Math.abs(rawN[0].y) > 1e-9 && Math.abs(raw[0].y + rawN[0].y) < 1e-9;
+      const pl = flip ? { ...pl0, ...(pl0.base ? { base: { x: pl0.base.x, y: -pl0.base.y } } : {}), ...(pl0.edge ? { edge: { a: { x: pl0.edge.a.x, y: -pl0.edge.a.y }, b: { x: pl0.edge.b.x, y: -pl0.edge.b.y } } } : {}) } : pl0;
       const kind = pl.kind || (pl.central ? 'central' : 'edge');   // centralna: jedna na osi; nieregularna: jedna w dowolnym miejscu; obwodowa: para lewa / prawa
       const polys = kind === 'central' ? [placeCentral(raw, apexBase(b, offsetY, tool), pl)]
         : kind === 'irregular' ? [tool.drill ? placeCentral(raw, apexBase(b, offsetY, tool), pl) : placeInsert(raw, b, offsetY, tool, true, rotateChamfer, pl)]
@@ -407,8 +427,28 @@ function placeCentral(raw, base, pl) {
   return adjustPoly(poly0, pl ? pl.dx : 0, pl ? pl.dz : 0, pl ? pl.ang : 0, pl && pl.base ? basePlaced(raw, poly0, pl.base) : null);
 }
 /** Płytka obwodowa (przy krawędzi): prawa ([mirror]) z korektą położenia płytki [pl], lewa – jej odbicie (dX i obrót z przeciwnym znakiem). */
+/**
+ * Płytka frezu ustawiona według krawędzi skrawającej (zaznaczonej w edytorze płytki): punkt skrawający – dalszy od osi koniec krawędzi – leży na zadanym promieniu i wysokości
+ * (domyślnie Ø/2 i czoło narzędzia, plus korekta ΔX / ΔZ), a płytka jest obrócona wokół niego o [pl.ang] albo – przy zadanej linii [pl.align] (fazownik) – tak, aby krawędź
+ * skrawająca leżała na tej linii. [mirror] – prawa płytka pary (lewa – odbicie).
+ */
+function placeByEdge(raw, out, b, offsetY, tool, mirror, pl) {
+  const f = affineFit(raw, out), A0 = f && f(pt(pl.edge.a.x * 10, pl.edge.a.y * 10)), B0 = f && f(pt(pl.edge.b.x * 10, pl.edge.b.y * 10));
+  if (!f || !A0 || !B0) return null;
+  const [cp, other] = Math.abs(A0.x) >= Math.abs(B0.x) ? [A0, B0] : [B0, A0], sign = mirror ? 1 : -1;
+  let ang = mirror ? pl.ang : -pl.ang;
+  if (pl.align) {   // krawędź skrawająca na linii (fazownik): kierunek od końca wewnętrznego do punktu skrawającego = kierunek linii (na zewnątrz i w dół)
+    const want = Math.atan2(pl.align.dy, sign * pl.align.dx), have = Math.atan2(cp.y - other.y, cp.x - other.x);
+    ang = ((want - have) * 180) / Math.PI;
+  }
+  const rot = ang ? out.map((p) => rotateAround(p, cp, ang)) : out;
+  const r = (pl.anchor && pl.anchor.r != null ? pl.anchor.r : tool.diameter / 2) * 10, z = pl.anchor && pl.anchor.z != null ? pl.anchor.z : tool.length;
+  const tx = sign * r + (mirror ? pl.dx : -pl.dx) * 10, ty = offsetY + (b.maxY - z * 10) - (pl.dz || 0) * 10;
+  return rot.map((p) => pt(p.x + tx - cp.x, p.y + ty - cp.y));
+}
 function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl) {
   const out = placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer);
+  if (pl && pl.edge && pl.edge.a && pl.edge.b) { const e = placeByEdge(raw, out, b, offsetY, tool, mirror, pl); if (e) return e; }   // krawędź skrawająca ma pierwszeństwo
   return pl ? adjustPoly(out, mirror ? pl.dx : -pl.dx, pl.dz, mirror ? pl.ang : -pl.ang, pl.base ? basePlaced(raw, out, pl.base) : null) : out;
 }
 function placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer) {
@@ -466,12 +506,15 @@ export function buildMini(tool, details, plateLookup = null) {
   let polygons = [];
   const custom = group === 'tre' ? null : plateSetup(tool);
   const kometDrill = isWiePly && company.includes('komet') && !company.includes('iscar') && !company.includes('amec');   // płytki Komet nie są centralne – układ jak w podglądzie
-  const rowMill = group === 'fre' && isRowMill(tool) && !custom;   // frez płytkowy / jeżowy: rzędy płytek jak w podglądzie
+  const edgeAny = group === 'fre' && inserts.some((i) => plateEdgeOf(i.code)), Em = String(tool.columnE ?? '').trim().toLowerCase();
+  // frez płytkowy / jeżowy (fazowy – z krawędzią skrawającą), frez z krawędzią skrawającą albo z kątem skrawania < 90°: układ płytek jak w podglądzie (miniatura = podgląd)
+  const rowMill = group === 'fre' && !custom && ((isRowMill(tool) && (Em !== 'faz' || edgeAny)) || edgeAny || (Em !== 'faz' && plateTilt(tool, (details && details.pswt && details.pswt.G) || tool.columnG) !== 0));
   if (group !== 'tre' && (custom || kometDrill || rowMill)) {   // własny układ płytek albo wiertło Komet: to samo rozmieszczenie co w podglądzie (miniatura = podgląd) (stos jednego narzędzia: y rysunku = offsetY + maxY − Z), przeliczone na miniaturę
     const catalog = inserts.filter((i) => String(i.contour ?? '').trim());
     const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || (plateLookup && plateLookup(code)) || '';
-    let plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
-    if (rowMill && plates.length) plates = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path })), details && details.pswt).map((p) => ({ ...p, base: plateBaseOf(p.code) }));
+    let plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code), ...(group === 'fre' ? { edge: plateEdgeOf(p.code) } : {}) })).filter((p) => p.path);
+    if (rowMill && plates.length && isRowMill(tool)) { const rows = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path, edge: p.edge })), details && details.pswt); if (rows) plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) })); }
+    else if (group === 'fre' && !custom && plates.length) { const tilt = plateTilt(tool, (details && details.pswt && details.pswt.G) || tool.columnG); if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt })); }
     if (isPlunger(tool)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślny punkt bazowy jak w podglądzie
     const lay = buildStack([{ code: tool.productCode, contour: points, plates, inserts: plates.map((p) => p.path), diameter, length, angle: num(tool.columnG), chamfer: false, central: isCentralTool(tool), drill: isWiePly }], true, false);
     polygons = lay ? lay.layers[0].inserts.map((poly) => poly.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + p.y * scale))) : [];
@@ -506,6 +549,9 @@ export function buildMini(tool, details, plateLookup = null) {
 // ---------- układ płytek na narzędziu: własny układ (rodzaj, wiele płytek, położenie) dostarcza program (zapis na tym komputerze) ----------
 let plateSetup = () => null;
 /** Dostawca własnego układu płytek narzędzia: (narzędzie) → lista płytek (logic/plateLayout.js) albo null. Ustawia warstwa widoków. */
+let plateEdgeOf = () => null;
+/** Dostawca krawędzi skrawającej płytki: (kod płytki) → { a: { x, y }, b: { x, y } } mm we współrzędnych konturu płytki albo null. Ustawia warstwa widoków. */
+export const setPlateEdgeProvider = (fn) => { plateEdgeOf = typeof fn === 'function' ? fn : () => null; };
 let plateBaseOf = () => null;
 /** Dostawca punktu bazowego płytki: (kod płytki) → { x, y } mm we współrzędnych konturu płytki albo null. Ustawia warstwa widoków. */
 export const setPlateBaseProvider = (fn) => { plateBaseOf = typeof fn === 'function' ? fn : () => null; };
@@ -574,11 +620,18 @@ export function toolIndex(catalog, overrides = null) {
       const own = (list) => { const l = Array.isArray(list) ? list.filter((p) => catalog.some((i) => normCode(i.code) === normCode(p.code))) : null; return l && l.length ? l : null; };
       let plates = resolvePlates(opts.layout === false ? null : own(plateSetup(t)), catalog.map((i) => i.code), isCentralTool(t));
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
-      plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
-      if (!tre && isRowMill(t) && !own(opts.layout === false ? null : plateSetup(t)) && plates.length) {   // frez płytkowy / jeżowy: rzędy równomiernie na długości roboczej, pod kątem G
-        const rows = millRows(t, plates.map((p) => ({ code: p.code, path: p.path })), d && d.pswt);
-        plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) }));
-        if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
+      const mill = !tre && String(t.columnD ?? '').trim().toLowerCase() === 'fre';
+      plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code), ...(mill ? { edge: plateEdgeOf(p.code) } : {}) })).filter((p) => p.path);   // frez: krawędź skrawająca z edytora płytki
+      const custom = !!own(opts.layout === false ? null : plateSetup(t)), pswtG = d && d.pswt && d.pswt.G;
+      if (!tre && isRowMill(t) && !custom && plates.length) {   // frez płytkowy / jeżowy / fazowy: rzędy równomiernie na długości roboczej (fazowy – krawędzią skrawającą w jednej linii pod kątem)
+        const rows = millRows(t, plates.map((p) => ({ code: p.code, path: p.path, edge: p.edge })), d && d.pswt);
+        if (rows) {
+          plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) }));
+          if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
+        }
+      } else if (mill && !custom && opts.adj !== false) {   // pozostałe frezy: płytki obrócone o kąt skrawania G (normalne położenie – 90°, bez obrotu); własny układ i korekty mają pierwszeństwo
+        const tilt = plateTilt(t, pswtG || t.columnG);
+        if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt }));
       }
       if (!tre && isPlunger(t)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślnie róg skrajny prawy górny (wybór użytkownika ma pierwszeństwo)
       const contour = parseContour(d && d.columnAY);

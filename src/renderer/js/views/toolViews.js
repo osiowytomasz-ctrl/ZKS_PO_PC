@@ -7,7 +7,7 @@ import * as T from '../logic/tooltrack.js';
 import * as G from '../logic/toolGeometry.js';
 import * as B from '../logic/builder.js';
 import { normPlates } from '../logic/plateLayout.js';
-import { normBase } from '../logic/plateEdit.js';
+import { normBase, normEdge } from '../logic/plateEdit.js';
 import { view3dGl } from './tool3d.js';
 
 // ---------- kolory lokalizacji z kolorów stanowisk (Ustawienia programu) i wygląd ramki ----------
@@ -197,6 +197,18 @@ export function savePlateBase(code, base) {
   try { localStorage.setItem(BASE_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
 }
 G.setPlateBaseProvider((code) => plateBase(code));
+// ---------- krawędź skrawająca płytki (zaznaczana w edytorze płytki; do niej w pierwszej kolejności odnosi się układ płytek na narzędziu) ----------
+const EDGE_KEY = 'zks.plates.edge';
+const edgeStore = () => { try { return JSON.parse(localStorage.getItem(EDGE_KEY) || '{}') || {}; } catch { return {}; } };
+/** Krawędź skrawająca płytki o kodzie [code]: { a, b } (mm, współrzędne konturu płytki) albo null. */
+export function plateEdge(code) { return normEdge(edgeStore()[String(code ?? '').trim().toLowerCase()]); }
+/** Zapis krawędzi skrawającej płytki; null – usuwa. */
+export function savePlateEdge(code, edge) {
+  const all = edgeStore(), k = String(code ?? '').trim().toLowerCase(), e = normEdge(edge);
+  if (e) all[k] = e; else delete all[k];
+  try { localStorage.setItem(EDGE_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
+}
+G.setPlateEdgeProvider((code) => plateEdge(code));
 let GL_OK = null;
 function webglOk() { if (GL_OK == null) { try { GL_OK = !!document.createElement('canvas').getContext('webgl2'); } catch { GL_OK = false; } } return GL_OK; }
 

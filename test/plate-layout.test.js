@@ -162,3 +162,41 @@ test('pierwsza zmiana układu płytek (np. punkt bazowy, φ) nie kasuje pochylen
   // układ zapisany jako własny rysuje się tak samo (bez zmiany pochylenia)
   try { G.setPlateSetupProvider(() => next); assert.deepEqual(idx.stackTool(t).plates.map((p) => p.ang), [10, 10]); } finally { G.setPlateSetupProvider(null); }
 });
+
+test('kąt skrawania G: 90° – bez obrotu płytek; plu / jez – pochylenie G; pozostałe frezy – obrót o 90° − G; zapisany kąt w układzie płytek narzędzia', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  assert.deepEqual([G.plateTilt({ columnE: 'plu' }, 10), G.plateTilt({ columnE: 'jez' }, 10), G.plateTilt({ columnE: 'faz' }, 45), G.plateTilt({ columnE: 'faz' }, 60), G.plateTilt({ columnE: 'tar' }, 90), G.plateTilt({ columnE: 'faz' }, 0), G.plateTilt({ columnE: 'faz' }, 120)], [10, 10, 45, 30, 0, 0, 0]);
+  const mk = (E, g) => ({ productCode: 'T1', columnD: 'fre', columnE: E, columnP: 'X', columnF: '50', columnJ: '60', columnM: 'ABS063', columnG: String(g) });
+  const idx = (t) => G.toolIndex({ tools: [t], detailsMap: { T1: { columnAY: '-250_0;250_0;250_590;-250_590', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const t90 = mk('tar', 90), t60 = mk('tar', 60);
+  assert.equal(idx(t90).stackTool(t90).plates[0].ang, 0, 'kąt 90° – płytka w normalnym położeniu'); assert.equal(idx(t60).stackTool(t60).plates[0].ang, 30, 'kąt skrawania 60° → obrót płytki o 30°');
+  // zapisany własny układ (kąt w właściwościach płytki) ma pierwszeństwo
+  try { G.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge', ang: 5 }]); assert.equal(idx(t60).stackTool(t60).plates[0].ang, 5); } finally { G.setPlateSetupProvider(null); }
+});
+
+test('krawędź skrawająca płytki: koniec dalszy od osi na Ø narzędzia; fazownik – krawędzie płytek na jednej linii pod kątem', () => {
+  const plate = 'M 0 0 L 10 0 L 10 4 L 0 4 Z';   // 10 × 4 mm; krawędź skrawająca: górna (0,0) → (10,0)
+  const edge = { a: { x: 0, y: 0 }, b: { x: 10, y: 0 } };
+  const cut = { productCode: 'T1', columnD: 'fre', columnE: 'pal', columnP: 'X', columnF: '50', columnJ: '60', columnM: 'ABS063', columnG: '' };
+  const ix = (t, extra = {}) => G.toolIndex({ tools: [t], detailsMap: { T1: { columnAY: '-250_0;250_0;250_590;-250_590', insertContours: [{ code: 'A', contour: plate }] } } }, extra.ov || null);
+  try {
+    G.setPlateEdgeProvider(() => edge);
+    const m = G.buildStack([ix(cut).stackTool(cut)], true, false).layers[0].plates[0], right = m.polys[1];
+    // punkt skrawający (dalszy od osi koniec krawędzi) na promieniu Ø/2 = 250 i na wysokości czoła (J = 60 mm → y = maxY − 600 = −10)
+    const cp = right.filter((q) => Math.abs(q.y - Math.min(...right.map((r) => r.y))) < 1e-6).sort((a, b) => b.x - a.x)[0];
+    assert.ok(Math.abs(cp.x - 250) < 1e-6, 'punkt skrawający na Ø/2'); assert.ok(Math.abs(cp.y - -10) < 1e-6, 'na wysokości czoła');
+    // fazownik: Ø mniejsza 40, większa 80, kąt G = 45 → linia fazy; trzy płytki (katalog) z krawędziami na tej linii
+    const faz = { ...cut, columnE: 'faz', columnF: '40', columnG: '45' }, ov = new Map(); ov.params = new Map([['t1', { D: 'fre', E: 'faz', F: '40', G: '45', I: '80', K: '30' }]]); ov.regions = new Map(); ov.generated = new Set(); ov.blade = new Map();
+    const stF = ix(faz, { ov }).stackTool(faz);
+    assert.equal(stF.plates.length, 1, 'jedna płytka w katalogu – jeden rząd'); assert.ok(stF.plates[0].align && stF.plates[0].anchor);
+    const mf = G.buildStack([stF], true, false).layers[0].plates[0], rp = mf.polys[1];
+    const top = rp.filter((q) => Math.abs(q.y - Math.min(...rp.map((r) => r.y))) < 1e-3);
+    void top;
+    // krawędź skrawająca (górna po obrocie) leży wzdłuż linii fazy: kąt nachylenia 45° od poziomu
+    const e = rp.slice().sort((a, b) => a.y - b.y).slice(0, 2), ang = Math.abs(Math.atan2(e[1].y - e[0].y, e[1].x - e[0].x) * 180 / Math.PI);
+    assert.ok(Math.abs(ang - 45) < 1 || Math.abs(ang - 135) < 1, 'krawędź skrawająca pod kątem fazy');
+    // bez zaznaczonej krawędzi fazownik zachowuje dotychczasowy układ
+    G.setPlateEdgeProvider(null);
+    assert.ok(!ix(faz, { ov }).stackTool(faz).plates[0].align);
+  } finally { G.setPlateEdgeProvider(null); }
+});

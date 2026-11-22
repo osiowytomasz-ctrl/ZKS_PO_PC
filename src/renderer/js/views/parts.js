@@ -1,12 +1,14 @@
 // Narzędziownia → Części: kontury płytek skrawających (arkusz PL_kontur, kolumna G – ścieżki SVG w mm) w kafelkach:
 // kod, stan / zapas / dostępne (kolor braku jak w arkuszu), rysunek płytki i narzędzia, w których jest używana.
 // Kliknięcie kafelka – duży rysunek, wymiary, kontur źródłowy (do skopiowania) i lista narzędzi.
-import { h, clear, toast, modal } from '../ui.js';
+import { h, clear, toast, modal, api } from '../ui.js';
 import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as G from '../logic/toolGeometry.js';
 import { parseSheetColor } from '../logic/common.js';
 import { naturalCompare } from '../logic/common.js';
-import { lazyFill, contrast, view3d } from './toolViews.js';
+import { lazyFill, contrast, plateBase, savePlateBase, plateEdge, savePlateEdge } from './toolViews.js';
+import { openPlateEditor } from './plateEditor.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -16,8 +18,8 @@ export function insertSvg(path, { w = 150, hgt = 120, dims = false } = {}) {
   if (pts.length < 2) return h('div', { class: 'muted', style: { width: w + 'px', height: hgt + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' } }, 'brak konturu');
   const b = G.bounds(pts), pad = 8, bw = Math.max(b.maxX - b.minX, 1), bh = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((w - 2 * pad) / bw, (hgt - 2 * pad - (dims ? 14 : 0)) / bh);
-  const ox = (w - bw * s) / 2 - b.minX * s, oy = pad - b.minY * s;
-  const poly = pts.map((p) => `${(ox + p.x * s).toFixed(1)},${(oy + p.y * s).toFixed(1)}`).join(' ');
+  const ox = (w - bw * s) / 2 - b.minX * s, oy = pad + b.maxY * s;   // rysunek odwrócony w pionie (Y w górę) – tak jak w podglądzie 3D i na narzędziu
+  const poly = pts.map((p) => `${(ox + p.x * s).toFixed(1)},${(oy - p.y * s).toFixed(1)}`).join(' ');
   const el = h('div', { style: { width: w + 'px', height: hgt + 'px' } });
   el.innerHTML = `<svg width="${w}" height="${hgt}" viewBox="0 0 ${w} ${hgt}"><polygon points="${poly}" fill="#c8a400" fill-opacity="0.85" stroke="#5d4a00" stroke-width="1"/>`
     + (dims ? `<text x="${w / 2}" y="${hgt - 3}" font-size="11" text-anchor="middle" fill="#444">${(bw / 10).toFixed(2)} × ${(bh / 10).toFixed(2)} mm</text>` : '') + '</svg>';
@@ -25,6 +27,7 @@ export function insertSvg(path, { w = 150, hgt = 120, dims = false } = {}) {
 }
 
 export function mountParts(el, ctx) {
+  const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
   const st = { index: null, parts: [], q: '', onlyContour: true, company: '', stopFill: null };
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' } });
   const info = h('span', { class: 'muted' });
@@ -57,22 +60,21 @@ export function mountParts(el, ctx) {
         `W narzędziach (${p.uses.length}): ` + p.uses.map((u) => u.toolCode).join(', ')));
   }
 
+  /**
+   * Kliknięcie kafelka otwiera edytor płytki (ten sam co w Konturach): kontur z łukami, punkt bazowy, krawędź skrawająca, parametry 3D, podgląd 3D, kopiowanie i zapis SVG
+   * (MASTER / GOD – do arkusza PL_kontur). Nad edytorem – stan magazynowy i narzędzia, w których płytka jest używana.
+   */
   function detail(p) {
-    const t = p.tool;
-    const m = modal(String(p.code).toUpperCase(), h('div', {},
-      h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '14px' } },
-        h('div', { style: { border: '1px solid #ddd', borderRadius: '0' } }, insertSvg(p.contour, { w: 380, hgt: 300, dims: true })),
-        p.contour && G.parseInsertPath(p.contour).length >= 3 ? h('div', { style: { border: '1px solid #ddd', borderRadius: '0', width: '380px', height: '300px' } }, view3d(null, [{ poly: G.parseInsertPath(p.contour), z: 1, draft: 7, alone: true }])) : null,
-        h('div', { style: { minWidth: '220px' } },
-          t ? h('div', { style: { fontWeight: 600 } }, [t.columnP, t.name, t.columnO].filter((x) => String(x || '').trim()).join(' | ')) : null,
-          h('div', { style: { margin: '6px 0' } }, stockLine(t)),
-          h('div', { class: 'muted', style: { fontSize: '12px' } }, `Używana w narzędziach (${p.uses.length}):`),
-          h('div', { style: { maxHeight: '180px', overflow: 'auto', fontSize: '13px' } }, ...p.uses.map((u) => h('div', {}, h('b', {}, u.toolCode), u.role === 'accessory' ? ' (akcesorium)' : ''))))),
-      p.contour ? h('div', { style: { marginTop: '8px' } }, h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Kontur (SVG, mm – arkusz PL_kontur, kolumna G):'),
-        h('pre', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f4f4f4', padding: '6px', fontSize: '11px', maxHeight: '120px', overflow: 'auto', userSelect: 'text' } }, p.contour)) : null,
-      h('div', { class: 'actions' },
-        p.contour ? h('button', { class: 'btn', onclick: async () => { try { await (window.zks.copyText ? window.zks.copyText(p.contour) : navigator.clipboard.writeText(p.contour)); toast('Skopiowano'); } catch (e) { toast(e.message, true); } } }, 'Kopiuj kontur') : null,
-        h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+    const t = p.tool, path = st.index.insertContour(p.code) || p.contour || '';
+    const info = [t ? [t.columnP, t.name, t.columnO].filter((x) => String(x || '').trim()).join(' | ') : '', stockLine(t), `Używana w narzędziach (${p.uses.length}): ` + p.uses.map((u) => u.toolCode + (u.role === 'accessory' ? ' (akcesorium)' : '')).join(', ')].filter(Boolean).join(' · ');
+    openPlateEditor({ code: p.code, path, tool: '', info, setup: { z: 2, draft: 7, thickness: 0 }, plate: null, base: plateBase(p.code), edge: plateEdge(p.code), autoCentral: false, canSave,
+      save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
+      onApply: ({ path: np, base, edge }) => {
+        savePlateBase(p.code, base); savePlateEdge(p.code, edge);
+        if (np && np !== path) { st.index.setInsertContour(p.code, np); p.contour = np; }
+        draw();
+        toast(`Płytka ${String(p.code).toUpperCase()}: zastosowano zmiany${np !== path ? ' (kontur – do odświeżenia katalogu)' : ''}.`);
+      } });
   }
 
   function draw() {

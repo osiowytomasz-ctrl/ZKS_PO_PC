@@ -12,7 +12,7 @@ import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPlateEditor } from './plateEditor.js';
 import { mountPlateLayout } from './plateLayout.js';
 import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
-import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase, dimsSvg, dimsOn, dimsToggle } from './toolViews.js';
+import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase, plateEdge, savePlateEdge, dimsSvg, dimsOn, dimsToggle } from './toolViews.js';
 import { basePresets, parsePlate } from '../logic/plateEdit.js';
 import * as B from '../logic/builder.js';
 
@@ -28,7 +28,7 @@ export function parseRegions(text) {
     .map((m) => ({ role: m[1].toLowerCase(), z1: Number(m[2].replace(',', '.')), z2: Number(m[3].replace(',', '.')) }));
 }
 
-const PARAMS = [['D', 'Grupa narzędzi'], ['E', 'Rodzaj narzędzia'], ['F', 'Fi_mniejsze'], ['G', 'Pochylenie płytki'], ['H', 'Promień'], ['I', 'Fi_większe'],
+const PARAMS = [['D', 'Grupa narzędzi'], ['E', 'Rodzaj narzędzia'], ['F', 'Fi_mniejsze'], ['G', 'Kąt skrawania'], ['H', 'Promień'], ['I', 'Fi_większe'],
   ['J', 'Długość 1'], ['K', 'Długość robocza'], ['L', 'Ząb / num. gwint. / zbieżność / ap'], ['M', 'Mocowanie początkowe'], ['N', 'Mocowanie końcowe']];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -588,10 +588,10 @@ export function mountContours(el, ctx) {
     if (!q || !t || !st.index) return;
     const path = st.index.insertContour(q.code) || '';
     const cur = layoutNow()[j] || {}, set0 = insertSetup(t);
-    openPlateEditor({ code: q.code, path, tool: t.productCode, base: plateBase(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
+    openPlateEditor({ code: q.code, path, tool: t.productCode, base: plateBase(q.code), edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
-      onApply: ({ path: np, setup, plate, base }) => {
-        saveInsertSetup(t, setup); savePlateBase(q.code, base);
+      onApply: ({ path: np, setup, plate, base, edge }) => {
+        saveInsertSetup(t, setup); savePlateBase(q.code, base); savePlateEdge(q.code, edge);
         if (plate) setPlate(j, plate);
         if (np && np !== path) st.index.setInsertContour(q.code, np);
         pv.insSel = null; drawPreview();

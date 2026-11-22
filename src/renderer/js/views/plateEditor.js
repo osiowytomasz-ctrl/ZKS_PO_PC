@@ -20,7 +20,7 @@ const num = (t) => Number(String(t).replace(',', '.'));
 export function openPlateEditor(o) {
   const orig = P.parsePlate(o.path);
   const st = { pts: orig.pts.length >= 3 ? orig.pts : DEFAULT_PLATE.map((p) => ({ ...p })), sel: 0, step: 0.1, hist: [], zoom: 1, pan: { x: 0, y: 0 }, view: null, drag: null,
-    base: P.normBase(o.base), rel: false,
+    base: P.normBase(o.base), edge: P.normEdge(o.edge), rel: false,
     setup: { z: 2, draft: 7, thickness: 0, ...(o.setup || {}) }, plate: o.plate ? { mode: 'auto', dx: 0, dz: 0, ang: 0, phi: 0, z: 0, ...o.plate } : null, busy: false };
   const isCentral = () => (st.plate ? (st.plate.mode === 'central' ? true : st.plate.mode === 'edge' || st.plate.mode === 'irregular' ? false : !!o.autoCentral) : !!o.autoCentral);
   const status = h('div', { class: 'status-line', style: { minHeight: '18px' } });
@@ -60,6 +60,7 @@ export function openPlateEditor(o) {
       if (a.arc && a.arc.r > 0) { const m = P.arcMid(a, b); out += `<circle data-a="${i}" cx="${f2(X(m.x))}" cy="${f2(Y(m.y))}" r="5" fill="#fff" stroke="#0a7d2c" stroke-width="2" style="cursor:move"><title>Łuk R ${comma(a.arc.r)} mm – przeciągnij, aby zmienić promień (blisko cięciwy – odcinek prosty)</title></circle>`; }
       else { const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; out += `<rect data-s="${i}" x="${f2(X(mx) - 4)}" y="${f2(Y(my) - 4)}" width="8" height="8" fill="#fff" stroke="#1565c0" stroke-width="1" style="cursor:copy"><title>Klik – nowy punkt w środku odcinka · przeciągnięcie – łuk</title></rect>`; }
     }
+    if (st.edge) out += `<g pointer-events="none"><line x1="${f2(X(st.edge.a.x))}" y1="${f2(Y(st.edge.a.y))}" x2="${f2(X(st.edge.b.x))}" y2="${f2(Y(st.edge.b.y))}" stroke="#d50000" stroke-width="4" stroke-linecap="round"/><circle cx="${f2(X(st.edge.b.x))}" cy="${f2(Y(st.edge.b.y))}" r="5" fill="#d50000"/></g>`;   // krawędź skrawająca (czerwona; kółko – koniec)
     if (st.base) out += `<g pointer-events="none"><circle cx="${f2(X(st.base.x))}" cy="${f2(Y(st.base.y))}" r="7" fill="none" stroke="#0a7d2c" stroke-width="1.8"/><line x1="${f2(X(st.base.x) - 11)}" y1="${f2(Y(st.base.y))}" x2="${f2(X(st.base.x) + 11)}" y2="${f2(Y(st.base.y))}" stroke="#0a7d2c" stroke-width="1.4"/><line x1="${f2(X(st.base.x))}" y1="${f2(Y(st.base.y) - 11)}" x2="${f2(X(st.base.x))}" y2="${f2(Y(st.base.y) + 11)}" stroke="#0a7d2c" stroke-width="1.4"/></g>`;
     for (let i = 0; i < n; i++) {
       const p = st.pts[i], on = i === st.sel;
@@ -77,7 +78,7 @@ export function openPlateEditor(o) {
   };
   const toMm = (e) => { const r = svgPoint(e); return r ? { x: (r.m.x - st.view.ox) / st.view.s, y: (r.m.y - st.view.oy) / st.view.s } : null; };
   const snapPt = (p) => ({ x: P.snap(p.x, st.step), y: P.snap(p.y, st.step) });
-  const push = () => { st.hist.push(JSON.stringify({ pts: st.pts, base: st.base })); if (st.hist.length > 100) st.hist.shift(); };
+  const push = () => { st.hist.push(JSON.stringify({ pts: st.pts, base: st.base, edge: st.edge })); if (st.hist.length > 100) st.hist.shift(); };
   canvas.addEventListener('pointerdown', (e) => {
     const t = e.target.closest ? e.target : null, pi = t && t.closest('[data-i]'), si = t && t.closest('[data-s]'), ai = t && t.closest('[data-a]');
     if (pi) { st.sel = Number(pi.dataset.i); push(); st.drag = { kind: 'pt' }; }
@@ -115,7 +116,7 @@ export function openPlateEditor(o) {
   // ---------- tabela punktów ----------
   const tbody = h('tbody', {});
   const inputs = [];
-  function drawTable() { drawTable0(); paintBase(); }
+  function drawTable() { drawTable0(); paintBase(); paintEdge(); }
   function drawTable0() {
     clear(tbody); inputs.length = 0;
     st.pts.forEach((p, i) => {
@@ -137,8 +138,8 @@ export function openPlateEditor(o) {
   }
   const markRows = () => tbody.querySelectorAll('tr').forEach((tr) => { tr.style.background = Number(tr.dataset.row) === st.sel ? '#fff3e0' : ''; });
   const fillRow = (i) => { const r = inputs[i]; if (r) { const o = (k) => (st.rel && st.base ? st.base[k] : 0); r.x.value = comma(st.pts[i].x - o('x')); r.y.value = comma(st.pts[i].y - o('y')); } };
-  const act = (fn, op, arg) => () => { push(); st.base = P.mapBase(op, st.base, st.pts, arg); st.pts = fn(st.pts); st.view = null; drawTable(); drawCanvas(); schedule3d(); check(); };
-  const undo = () => { const last = st.hist.pop(); if (!last) return; const h0 = JSON.parse(last); st.pts = h0.pts; st.base = h0.base; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); };
+  const act = (fn, op, arg) => () => { push(); st.base = P.mapBase(op, st.base, st.pts, arg); st.edge = P.mapEdge(op, st.edge, st.pts, arg); st.pts = fn(st.pts); st.view = null; drawTable(); drawCanvas(); schedule3d(); check(); };
+  const undo = () => { const last = st.hist.pop(); if (!last) return; const h0 = JSON.parse(last); st.pts = h0.pts; st.base = h0.base; st.edge = h0.edge || null; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); };
   const rotI = h('input', { type: 'text', value: '90', style: { width: '48px', padding: '1px 4px' } }), scaleI = h('input', { type: 'text', value: '100', style: { width: '48px', padding: '1px 4px' } });
   const customStep = h('input', { type: 'text', value: '0,03', title: 'Własny krok siatki i przyciągania, mm', style: { width: '56px', display: 'none', padding: '1px 4px' }, oninput: () => { const v = num(customStep.value); if (v > 0) { st.step = v; drawCanvas(); } } });
   const stepSel = h('select', { onchange: () => { const c = stepSel.value === 'custom'; customStep.style.display = c ? '' : 'none'; st.step = c ? (num(customStep.value) > 0 ? num(customStep.value) : 0.03) : Number(stepSel.value); drawCanvas(); } },
@@ -160,6 +161,18 @@ export function openPlateEditor(o) {
         h('button', { class: 'btn small', onclick: () => { push(); st.base = null; st.rel = false; drawTable(); drawCanvas(); } }, 'Usuń')),
       h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, 'X', bx, 'Y', by, h('span', { class: 'muted' }, 'mm (jak w tabeli punktów)')),
       st.base ? h('label', { class: 'row', style: { gap: '4px', alignItems: 'center' } }, h('input', { type: 'checkbox', checked: st.rel, onchange: (e) => { st.rel = e.target.checked; drawTable(); } }), 'współrzędne punktów względem punktu bazowego') : null);
+  }
+  // ---------- krawędź skrawająca: odcinek konturu, do którego w pierwszej kolejności odnosi się układ płytek na narzędziu (frez: punkt skrawający na Ø, fazownik: linia pod kątem) ----------
+  const edgeBox = h('div', { style: { border: '1px solid #d50000', padding: '6px', margin: '6px 0', fontSize: '12px' } });
+  function paintEdge() {
+    clear(edgeBox);
+    const n = st.pts.length, i = Math.min(st.sel, n - 1), j = (i + 1) % n, p = st.pts[i], q = st.pts[j];
+    edgeBox.append(h('b', {}, 'Krawędź skrawająca'),
+      h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Odcinek konturu płytki, którym płytka skrawa (czerwona linia na rysunku). ToolBuilder ustawia płytkę w pierwszej kolejności względem niego: koniec dalszy od osi leży na średnicy narzędzia, a w fazownikach krawędzie wszystkich płytek leżą na jednej linii pod kątem.'),
+      h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', flexWrap: 'wrap', alignItems: 'center' } },
+        h('button', { class: 'btn small', title: 'Krawędź od zaznaczonego punktu (pomarańczowy) do następnego', onclick: () => { push(); st.edge = P.normEdge({ a: { x: p.x, y: p.y }, b: { x: q.x, y: q.y } }); drawTable(); drawCanvas(); } }, `Ustaw: punkt ${i + 1} → ${j + 1}`),
+        h('button', { class: 'btn small', onclick: () => { push(); st.edge = null; drawTable(); drawCanvas(); } }, 'Usuń'),
+        h('span', { class: 'muted' }, st.edge ? `ustawiona: (${comma(st.edge.a.x)}; ${comma(st.edge.a.y)}) → (${comma(st.edge.b.x)}; ${comma(st.edge.b.y)}) mm` : 'nie wybrano')));
   }
   const warn = h('div', { style: { fontSize: '12px', color: '#b26a00', minHeight: '16px' } });
   const check = () => { const t = []; if (orig.lossy && !st.arcOk) t.push('Kontur z arkusza miał krzywe albo łuki eliptyczne – w edytorze są przybliżone kołem / odcinkami (zapis je zastąpi).'); if (P.selfIntersects(st.pts)) t.push('Kontur przecina sam siebie – bryła 3D może być nieprawidłowa.'); warn.textContent = t.join(' '); };
@@ -194,7 +207,7 @@ export function openPlateEditor(o) {
   function schedule3d() { clearTimeout(t3); t3 = setTimeout(render3d, 300); check(); }
 
   // ---------- zapis ----------
-  const result = () => ({ path: P.plateToPath(st.pts), setup: { z: st.setup.z, draft: st.setup.draft, thickness: st.setup.thickness }, plate: st.plate ? { ...st.plate } : null, base: st.base ? { ...st.base } : null });
+  const result = () => ({ path: P.plateToPath(st.pts), setup: { z: st.setup.z, draft: st.setup.draft, thickness: st.setup.thickness }, plate: st.plate ? { ...st.plate } : null, base: st.base ? { ...st.base } : null, edge: st.edge ? { a: { ...st.edge.a }, b: { ...st.edge.b } } : null });
   const copy = async () => { try { const t = P.plateToPath(st.pts); await (window.zks && window.zks.copyText ? window.zks.copyText(t) : navigator.clipboard.writeText(t)); toast('Skopiowano kontur płytki (SVG)'); } catch (e) { toast(e.message, true); } };
   const apply = () => { o.onApply(result()); m.close(); };
   const saveBtn = o.save ? h('button', { class: 'btn primary', disabled: !o.canSave, title: o.canSave ? 'Zapisuje kontur do arkusza PL_kontur (kolumna G) – dla wszystkich użytkowników' : 'Zapis do arkusza – poziom MASTER lub GOD', onclick: async () => {
@@ -211,6 +224,7 @@ export function openPlateEditor(o) {
   const content = h('div', { class: 'fs-dialog' },
     h('div', { class: 'row', style: { marginBottom: '6px' } }, h('h3', { style: { margin: 0, flex: 1 } }, `Edytor płytki – ${o.code}`), h('span', { class: 'muted', style: { fontSize: '12px' } }, 'Ctrl+Z – cofnij'),
       h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij')),
+    o.info ? h('div', { class: 'muted', style: { fontSize: '12px', marginBottom: '6px' } }, o.info) : null,
     h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(380px, 440px) minmax(360px, 1fr) minmax(280px, 360px)', gap: '10px', flex: 1, minHeight: 0 } },
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'auto' } },
         h('b', {}, 'Punkty konturu (mm)'), h('div', { class: 'muted', style: { fontSize: '12px' } }, 'X w prawo, Y w dół (jak w arkuszu PL_kontur, kolumna G).'),
@@ -222,7 +236,7 @@ export function openPlateEditor(o) {
         h('div', { class: 'row', style: { gap: '4px', margin: '4px 0', alignItems: 'center' } }, h('button', { class: 'btn small', onclick: () => { const v = num(rotI.value); if (Number.isFinite(v)) act((p) => P.rotate(p, v), 'rotate', v)(); } }, 'Obróć o'), rotI, '°',
           h('button', { class: 'btn small', onclick: () => { const v = num(scaleI.value); if (v > 0) act((p) => P.scale(p, v), 'scale', v)(); } }, 'Skaluj'), scaleI, '%'),
         h('div', { class: 'row', style: { gap: '4px', margin: '4px 0', alignItems: 'center' } }, h('span', {}, 'Krok siatki / przyciągania:'), stepSel, customStep),
-        warn, baseBox, params, place, status,
+        warn, edgeBox, baseBox, params, place, status,
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } }, saveBtn, h('button', { class: 'btn' + (saveBtn ? '' : ' primary'), onclick: apply, title: 'Używa konturu i parametrów w podglądach programu (kontur tylko na tym komputerze do odświeżenia katalogu)' }, 'Zastosuj'),
           h('button', { class: 'btn', onclick: copy }, 'Kopiuj SVG'), h('button', { class: 'btn', onclick: () => { push(); st.pts = P.parsePlate(o.path).pts; if (st.pts.length < 3) st.pts = DEFAULT_PLATE.map((p) => ({ ...p })); st.view = null; drawTable(); drawCanvas(); schedule3d(); } }, 'Przywróć z arkusza'))),
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted', style: { fontSize: '12px' } }, 'Rysunek: przeciągnij punkt · kwadrat na odcinku: klik – nowy punkt, przeciągnięcie – łuk · zielone kółko na łuku – promień · kółko myszy – powiększenie · tło – przesuwanie'), canvas),

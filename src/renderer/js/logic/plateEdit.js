@@ -159,5 +159,12 @@ export function mapBase(op, base, pts, arg = 0) {
   if (op === 'origin') return { x: r3(base.x - b.minX), y: r3(base.y - b.minY) };
   return base;
 }
+/** Krawędź skrawająca płytki: { a: { x, y }, b: { x, y } } (mm, współrzędne konturu płytki) albo null; punkty identyczne albo nieliczbowe – null. */
+export function normEdge(e) {
+  const a = e && normBase(e.a), b = e && normBase(e.b);
+  return a && b && (Math.abs(a.x - b.x) > 1e-9 || Math.abs(a.y - b.y) > 1e-9) ? { a, b } : null;
+}
+/** Krawędź po przekształceniu konturu (jak [mapBase] dla obu końców). */
+export const mapEdge = (op, edge, pts, arg = 0) => (edge ? { a: mapBase(op, edge.a, pts, arg), b: mapBase(op, edge.b, pts, arg) } : null);
 /** Punkt bazowy zapisany jako { x, y } (mm) albo null; wartości nieliczbowe – null. */
 export const normBase = (b) => (b && Number.isFinite(Number(b.x)) && Number.isFinite(Number(b.y)) && b.x !== '' && b.y !== '' ? { x: r3(Number(b.x)), y: r3(Number(b.y)) } : null);
