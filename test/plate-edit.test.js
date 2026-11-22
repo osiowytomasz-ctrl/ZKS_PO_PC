@@ -215,3 +215,14 @@ test('Do (0,0) z punktem bazowym: punkt bazowy w (0,0), płytka i krawędź prze
   assert.deepEqual(P.mapEdge('origin', edge, sq, 0, base), { a: { x: -6, y: -8 }, b: { x: 0, y: -8 } });
   assert.deepEqual(P.toOrigin(sq).map((p) => [p.x, p.y]), [[0, 0], [6, 0], [6, 8], [0, 8]], 'bez punktu bazowego jak dotąd');
 });
+
+test('widok „na narzędziu” w edytorze płytki: orientacja edytora (bez odbić X / Y z ułożenia), obrót o kąt; punkty zgodne z konturem edytora', async () => {
+  const P = await import('../src/renderer/js/logic/plateEdit.js'), G = await import('../src/renderer/js/logic/toolGeometry.js');
+  for (const path of ['M 0 0 L 8 0 L 8 -12 L 0 -12 L 0 -3 Z', 'M 0 0 L 8 0 L 8 12 L 0 12 L 0 3 Z']) {
+    const on = G.plateOnTool(path, { kind: 'edge', ang: 0 }), std = P.parsePlate(path).pts;
+    for (const pr of P.basePresets(std)) { const q = on.view.point(pr.pt); assert.ok(Math.abs(q.x - pr.pt.x) < 1e-3 && Math.abs(q.y - pr.pt.y) < 1e-3, `bez obrotu punkt „${pr.label}” w tym samym miejscu co w edytorze`); }
+    const r = G.plateOnTool(path, { kind: 'edge', ang: 30 });
+    const d0 = Math.hypot(std[0].x - std[1].x, std[0].y - std[1].y), q0 = r.view.point(std[0]), q1 = r.view.point(std[1]);
+    assert.ok(Math.abs(Math.hypot(q0.x - q1.x, q0.y - q1.y) - d0) < 1e-3, 'obrót nie zmienia wymiarów');
+  }
+});

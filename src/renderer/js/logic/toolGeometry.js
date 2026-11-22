@@ -435,9 +435,18 @@ export function placedPoint(path, poly, base) {
 /** Płytka o ścieżce [path] ułożona na narzędziu jako [kind] i obrócona o [ang]° (jak w [plateCorners]): { raw, poly } (0,1 mm; poly 1:1 z raw – do [basePlaced]) albo null. */
 export function plateOnTool(path, { kind = 'edge', ang = 0 } = {}) {
   const contour = [pt(-500, 0), pt(500, 0), pt(500, 1000), pt(-500, 1000)];
-  const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(ang) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
-  const m = lay && lay.layers[0].plates[0], raw = parseInsertPath(path);
-  return m && m.polys.length ? { raw, poly: m.single ? m.polys[0] : m.polys[m.polys.length - 1], place: (b) => placedPoint(path, m.single ? m.polys[0] : m.polys[m.polys.length - 1], b) } : null;
+  const polyAt = (a) => {
+    const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(a) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
+    const m = lay && lay.layers[0].plates[0];
+    return m && m.polys.length ? (m.single ? m.polys[0] : m.polys[m.polys.length - 1]) : null;
+  };
+  const poly = polyAt(ang), raw = parseInsertPath(path);
+  if (!poly) return null;
+  // widok w orientacji edytora: odbicia z ułożenia na narzędziu (prawa płytka – odbicie X, kontur odwrócony w pionie – odbicie Y) są cofnięte, zostaje obrót o kąt płytki;
+  // g – odwzorowanie położenia bez obrotu z powrotem na kontur arkusza
+  const g = affineFit(ang ? polyAt(0) || poly : poly, raw), fl = pathFlip(path);
+  const toEd = (p) => { const r = g ? g(p) : p; return { x: r.x / 10, y: (fl ? -r.y : r.y) / 10 }; };
+  return { raw, poly, place: (b) => placedPoint(path, poly, b), view: { poly: poly.map(toEd), point: (b) => { const q = placedPoint(path, poly, b); return q ? toEd(q) : null; } } };
 }
 /** Frez płytkowy „plunger” (fre / plu). */
 export const isPlunger = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && String((t && t.columnE) ?? '').trim().toLowerCase() === 'plu';

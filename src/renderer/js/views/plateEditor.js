@@ -160,7 +160,7 @@ export function openPlateEditor(o) {
     if (st.basePick) {   // ten sam wybór punktu, co w oknie danych płytki w ToolBuilderze: rysunek płytki, tryb „na narzędziu” / „standardowo”
       const on = path ? G.plateOnTool(path, { kind: kindNow, ang: angNow }) : null;
       baseBox.append(...basePicker({ mode: st.baseMode, onMode: (m2) => { st.baseMode = m2; paintBase(); }, presets, stdPts: st.pts, edge: st.edge,
-        toolPoly: on ? on.poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })) : null, toolPoint: (pt) => { const b = on && on.place(pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; },
+        toolPoly: on ? on.view.poly : null, toolPoint: (pt) => (on ? on.view.point(pt) : null),   // w edytorze „na narzędziu” = orientacja edytora + obrót o kąt płytki (bez odbić z ułożenia na narzędziu)
         cur: st.base, defLabel, onPick: (b) => { st.base = b ? { ...b } : null; if (!b) st.rel = false; drawTable(); drawCanvas(); paintBase(); },   // wybór wielokrotny: okno zostaje do „Zatwierdź”
         onDone: () => { st.basePick = false; paintBase(); }, onCancel: () => cancelBase() }));
       return;
@@ -243,7 +243,8 @@ export function openPlateEditor(o) {
         h('div', { class: 'table-wrap', style: { maxHeight: '220px', margin: '4px 0', flex: 'none' } }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, 'Lp'), h('th', {}, 'X'), h('th', {}, 'Y'), h('th', {}, 'R łuku'), h('th', {}, ''))), tbody)),
         h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap' } },
           h('button', { class: 'btn small', onclick: act(P.mirrorX, 'mirrorX') }, 'Odbij X'), h('button', { class: 'btn small', onclick: act(P.mirrorY, 'mirrorY') }, 'Odbij Y'),
-          h('button', { class: 'btn small', onclick: () => act((p) => P.toOrigin(p, st.base), 'origin')(), title: 'Punkt bazowy w (0, 0) – cała płytka przesuwa się razem z nim (położenie względem punktu bazowego bez zmian); bez punktu bazowego – lewy górny róg obwiedni w (0, 0)' }, 'Do (0,0)'),
+          h('button', { class: 'btn small', onclick: () => { const b0 = st.base ? { ...st.base } : null; act((p) => P.toOrigin(p, b0), 'origin')(); },   // punkt bazowy zapamiętany przed zmianą (act przesuwa go pierwszy)
+           title: 'Punkt bazowy w (0, 0) – cała płytka przesuwa się razem z nim (położenie względem punktu bazowego bez zmian); bez punktu bazowego – lewy górny róg obwiedni w (0, 0)' }, 'Do (0,0)'),
           h('button', { class: 'btn small', title: 'Zamienia ciągi drobnych odcinków leżących na jednym okręgu na pojedyncze łuki (kontur przestaje być „poszatkowany”, łuk edytujesz promieniem)', onclick: () => {
             const r = P.smoothArcs(st.pts); if (!r.merged) { say('Nie znaleziono odcinków do zamiany na łuki.', 'neutral'); return; }
             push(); st.pts = r.pts; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); say(`Zamieniono odcinki na łuki – usunięto ${r.merged} pkt.`);
