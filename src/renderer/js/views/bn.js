@@ -64,7 +64,7 @@ export function mountBn(el, ctx) {
     let content;
     if (!st.index) content = h('p', {}, st.indexError ? 'Brak danych narzędzi: ' + st.indexError : 'Ładowanie danych narzędzi…');
     else if (view === 'parts') content = partsTable(st.index.partRows(codes));
-    else if (view === 'd2') { const s = G.buildStack(codes.map((c) => st.index.stackTool(c)).filter(Boolean), true, false); content = s ? stackSvg(s, { labels: true, width: 900, height: 900 }) : h('p', {}, 'Brak danych konturu 2D.'); }
+    else if (view === 'd2') { const s = G.buildStack(codes.map((c) => st.index.stackTool(c)).filter(Boolean), true, false); content = s ? stackSvg(s, { labels: true, dims: true, width: 900, height: 900 }) : h('p', {}, 'Brak danych konturu 2D.'); }
     else content = toolView3d(st.index, codes);
     fullScreen(title, content);
   }

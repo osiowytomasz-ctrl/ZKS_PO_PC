@@ -65,9 +65,31 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   return box;
 }
 
+/** Linie wymiarowe (strzałki na końcach), linie pomocnicze i teksty (SVG); [dims] z G.layerDims, [s] – skala, [ox] / [oy] – przesunięcie rysunku. */
+export function dimsSvg(dims, s, ox, oy) {
+  const X = (x) => ox + x * s, Y = (y) => oy + y * s, f = (v) => v.toFixed(1), K = '#1b1f24', EXT = '#6b7280';
+  const arrow = (x, y, dx, dy) => { const a = 5, w = 2; const nx = -dy, ny = dx; return `<polygon points="${f(x)},${f(y)} ${f(x - dx * a + nx * w)},${f(y - dy * a + ny * w)} ${f(x - dx * a - nx * w)},${f(y - dy * a - ny * w)}" fill="${K}"/>`; };
+  const text = (x, y, t, { rot = 0, anchor = 'middle' } = {}) => `<text x="${f(x)}" y="${f(y)}" font-size="10" text-anchor="${anchor}" fill="${K}" stroke="#fff" stroke-width="3" paint-order="stroke" ${rot ? `transform="rotate(${rot} ${f(x)} ${f(y)})"` : ''}>${esc(t)}</text>`;
+  let out = '<g class="dims" font-family="Arial, sans-serif">';
+  for (const d of dims) {
+    if (d.t === 'v') {
+      const x = X(d.x), y1 = Y(d.y1), y2 = Y(d.y2), up = y1 < y2 ? 1 : -1;
+      for (const [fx, yy] of [[d.f1, y1], [d.f2, y2]]) if (fx != null) out += `<line x1="${f(X(Math.sign(d.x) * Math.abs(fx)))}" y1="${f(yy)}" x2="${f(x + Math.sign(d.x) * 4)}" y2="${f(yy)}" stroke="${EXT}" stroke-width="0.6"/>`;   // linie pomocnicze
+      out += `<line x1="${f(x)}" y1="${f(y1)}" x2="${f(x)}" y2="${f(y2)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x, y1, 0, up) + arrow(x, y2, 0, -up) + text(x - 3, (y1 + y2) / 2, d.text, { rot: -90 });
+    } else if (d.t === 'h') {
+      const y = Y(d.y), x1 = X(d.x1), x2 = X(d.x2);
+      for (const [fy, xx] of [[d.f1, x1], [d.f2, x2]]) if (fy != null) out += `<line x1="${f(xx)}" y1="${f(Y(fy))}" x2="${f(xx)}" y2="${f(y - 4)}" stroke="${EXT}" stroke-width="0.6"/>`;
+      out += `<line x1="${f(x1)}" y1="${f(y)}" x2="${f(x2)}" y2="${f(y)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x1, y, 1, 0) + arrow(x2, y, -1, 0) + text((x1 + x2) / 2, y - 3, d.text);
+    } else out += text(X(d.x) + (d.anchor === 'end' ? -2 : 2), Y(d.y), d.text, { anchor: d.anchor || 'start' });
+  }
+  return out + '</g>';
+}
+
 /** Zestaw narzędzi 2D (SVG, dopasowany do pola): obrysy w kolorach narzędzi, płytki złote; [labels] – kody i poziomy „Y=…”. */
-export function stackSvg(stack, { labels = false, pad = 24, width = 600, height = 600 } = {}) {
-  const b = stack.bounds, bw = Math.max(b.maxX - b.minX, 1), bh = Math.max(b.maxY - b.minY, 1);
+export function stackSvg(stack, { labels = false, pad = 24, width = 600, height = 600, dims = false } = {}) {
+  let b = stack.bounds;
+  if (dims) { const de = G.dimsExtent(stack.layers.flatMap((l) => l.dims || [])); if (de) b = { minX: Math.min(b.minX, de.minX), maxX: Math.max(b.maxX, de.maxX), minY: Math.min(b.minY, de.minY), maxY: Math.max(b.maxY, de.maxY) }; }   // miejsce na wymiary
+  const bw = Math.max(b.maxX - b.minX, 1), bh = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((width - 2 * pad) / bw, (height - 2 * pad) / bh);
   const ox = width / 2 - ((b.minX + b.maxX) / 2) * s, oy = pad - b.minY * s;
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background:#fff">`;
@@ -91,6 +113,7 @@ export function stackSvg(stack, { labels = false, pad = 24, width = 600, height 
     }
     if (l.slits) svg += l.slits.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="0.8"/>`).join('');   // szczeliny wzdłużne tulejki ER
     if (l.hole) svg += l.hole.map((q) => `<polyline points="${poly(q, s, ox, oy)}" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="5 4"/>`).join('');   // otwór pod gwintownik – niewidoczny
+    if (dims && l.dims && l.dims.length) svg += dimsSvg(l.dims, s, ox, oy);
     if (labels) {
       const top = Math.min(...l.outline.map((p) => p.y)), ry = oy + l.referenceY * s;
       svg += `<text x="4" y="${(oy + top * s + 12).toFixed(1)}" font-size="11">${esc(l.code)}</text>`;

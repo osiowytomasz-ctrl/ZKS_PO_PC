@@ -110,6 +110,50 @@ export function rotateAround(p, pivot, angleDeg) {
 
 // ---------- zestaw narzędzi jeden pod drugim (widok 2D) ----------
 
+/**
+ * Wymiary narzędzia na rysunku 2D zestawu (jednostki rysunku, 0,1 mm; [yOf] – Z w mm → y rysunku): linie wymiarowe z liniami pomocniczymi i tekstem oraz opisy.
+ * Typy: { t: 'v', x, y1, y2, f1, f2, text } – pionowy (linia wymiarowa na x, linie pomocnicze od x cechy f1 / f2), { t: 'h', y, x1, x2, f1, f2, text } – poziomy
+ * (linia na y, linie pomocnicze od y cechy f; f = null – wymiar wewnątrz bryły), { t: 'note', x, y, text, anchor } – opis. Wymiaruje: długość L (J), średnicę Φ,
+ * średnice walców, długość ostrza, końcówkę ponad czołem (np. trzpień FRE), długość chwytu / zagłębienia mocowania Ms (z konturu poniżej Z = 0 – głębokość z reguł mocowań:
+ * Weldon, ER, MK, ABS, FRE …), oraz opisy Ms, Mk, r/α z tabeli narzędzi.
+ */
+export function layerDims(tool, b, y0) {
+  // czoło narzędzia (wierzchołek płytki) leży na Z = tip: J, a dla frezów z chwytem Weldon / trzpieniem FRExxx J − chwyt (reszta długości J to chwyt poniżej Z = 0)
+  const out = [], yOf = (z) => y0 + (b.maxY - z * 10), J = tool.length > 0 ? tool.length : tool.nominalLength || 0, total = tool.nominalLength || J, maxR = Math.max(Math.abs(b.minX), b.maxX);
+  const R = (z) => radiusAtY(tool.contour, z * 10) || maxR, fm = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
+  const mount = String(tool.startM || '').trim(), endN = String(tool.mountN || '').trim();
+  if (J > 0) out.push({ t: 'v', x: maxR + 120, y1: yOf(J), y2: yOf(J - total), f1: tool.diameter > 0 ? tool.diameter * 5 : R(J), f2: radiusAtY(tool.contour, (J - total) * 10) || R(0), text: `L ${fm(total)}` });   // długość narzędzia J: od czoła do końca chwytu (holder – od Z = 0)
+  if (tool.diameter > 0 && J > 0) out.push({ t: 'h', y: yOf(J) - 130, x1: -tool.diameter * 5, x2: tool.diameter * 5, f1: yOf(J), f2: yOf(J), text: `Ø${fm(tool.diameter)}` });   // średnica robocza
+  const shank = -b.minY / 10;
+  if (shank > 0.05) out.push({ t: 'v', x: -(maxR + 120), y1: yOf(0), y2: yOf(-shank), f1: R(0), f2: radiusAtY(tool.contour, b.minY) || maxR, text: `${mount ? mount + ' ' : ''}chwyt ${fm(shank)}` });   // chwyt / zagłębienie w oprawce
+  const top = b.maxY / 10;
+  if (J > 0 && top > J + 0.05) out.push({ t: 'v', x: maxR + 360, y1: yOf(top), y2: yOf(J), f1: radiusAtY(tool.contour, b.maxY - 1) || maxR, f2: R(J), text: `${endN ? endN + ' ' : ''}wysięg ${fm(top - J)}` });   // końcówka ponad czołem (np. trzpień FRExxx)
+  for (const g of (tool.regions || [])) if (g.role === 'ostrze' && g.z2 > g.z1 && !tool.trepan) out.push({ t: 'v', x: maxR + 240, y1: yOf(g.z2), y2: yOf(g.z1), f1: R(g.z2), f2: R(g.z1), text: `ostrze ${fm(g.z2 - g.z1)}` });
+  // średnice walców (odcinki obrysu o stałym promieniu, ≥ 3 mm) – wymiar wewnątrz bryły
+  const rows = halfFromContour(tool.contour).map((q) => ({ r: Number(q.r), z: Number(q.z) })), seen = new Set();
+  for (let i = 0; i + 1 < rows.length; i++) {
+    const a = rows[i], c = rows[i + 1], key = Math.round(a.r * 100);
+    if (a.r > 0.5 && Math.abs(a.r - c.r) < 1e-6 && Math.abs(c.z - a.z) >= 3 && !seen.has(key) && !(tool.diameter > 0 && Math.abs(2 * a.r - tool.diameter) < 0.01 && Math.abs((a.z + c.z) / 2 - J) < 6)) {
+      seen.add(key); out.push({ t: 'h', y: yOf((a.z + c.z) / 2), x1: -a.r * 10, x2: a.r * 10, f1: null, f2: null, text: `Ø${fm(2 * a.r)}` });
+    }
+  }
+  if (mount) out.push({ t: 'note', x: -maxR, y: yOf(0) - 40, text: `Ms ${mount}`, anchor: 'end' });
+  if (endN) out.push({ t: 'note', x: maxR, y: yOf(top > J ? top : J) - 60, text: `Mk ${endN}`, anchor: 'start' });
+  if (tool.rAlpha) out.push({ t: 'note', x: maxR, y: yOf(J) + 120, text: `r/α ${tool.rAlpha}`, anchor: 'start' });
+  return out;
+}
+/** Zasięg wymiarów (jednostki rysunku) do dopasowania rysunku: [dims] z layerDims; [charW] – szerokość znaku tekstu w jednostkach rysunku. */
+export function dimsExtent(dims, charW = 55) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  const add = (x, y) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
+  for (const d of dims || []) {
+    const w = String(d.text || '').length * charW;
+    if (d.t === 'v') { add(d.x - 90, d.y1); add(d.x + 90 + w * 0.2, d.y2); }
+    else if (d.t === 'h') { add(d.x1, d.y - 100); add(d.x2, d.y + 40); }
+    else { add(d.anchor === 'end' ? d.x - w : d.x, d.y - 40); add(d.anchor === 'end' ? d.x : d.x + w, d.y + 20); }
+  }
+  return x0 === Infinity ? null : { minX: x0, maxX: x1, minY: y0, maxY: y1 };
+}
 /** Frez z mocowaniem FRExxx (nasadzany na trzpień, grupa „fre”). */
 export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
 /** Frez palcowy / jeżowy / płytkowy (fre / pal, jez, plu) zamocowany na chwycie Weldon (M = WELxxx): kontur leży niżej o głębokość chwytu. */
@@ -265,7 +309,8 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     offsetY += tool.fitM && index < tools.length - 1 ? (b.maxY - b.minY) - freL2(tool.fitM) * 10 : b.r;
     if (index === tools.length - 1) offsetY += b.m;
     const fitD = tool.fitM ? fitDrawingFor(tool.fitM, tool.contour) : null, fitH = fitD ? fitD.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null;   // gniazdo frezu nasadzanego (FRExxx)
-    layers.push({ code: tool.code, outline, inserts: placed, plates, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    const dims = tool.dims !== false && tool.nominalLength ? layerDims(tool, b, offsetY0) : [];   // wymiary (rysowane na życzenie przez stackSvg)
+    layers.push({ code: tool.code, outline, inserts: placed, plates, dims, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -533,7 +578,8 @@ export function toolIndex(catalog, overrides = null) {
       }
       if (!tre && isPlunger(t)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślnie róg skrajny prawy górny (wybór użytkownika ma pierwszeństwo)
       const contour = parseContour(d && d.columnAY);
-      return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: plateLength(t), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM, fitM: String(t.columnD ?? '').trim().toLowerCase() === 'fre' && freL2(t.columnM) ? t.columnM : '' };
+      const ra = num(t.columnG) !== 0 ? num(t.columnG) : num(t.columnH);
+      return { code: t.productCode, nominalLength: num(t.columnJ), mountN: String(t.columnN ?? '').trim(), rAlpha: ra !== 0 ? ra.toFixed(2) : '', contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: plateLength(t), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM, fitM: String(t.columnD ?? '').trim().toLowerCase() === 'fre' && freL2(t.columnM) ? t.columnM : '' };
     },
     dxfTool(t) { const d = det(t.productCode); return { code: t.productCode, contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [], diameter: num(t.columnF), length: num(t.columnJ) }; },
     coordinatesTool(t) { const d = det(t.productCode); return { code: t.productCode, company: t.columnP || '', diameter: t.columnF || '', length: t.columnJ || '', angle: num(t.columnG), contour: parseContour(d && d.columnAY), inserts: (d && d.insertContours) || [] }; },

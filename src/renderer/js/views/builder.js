@@ -312,7 +312,7 @@ export function mountBuilder(el, ctx) {
         h('div', { class: 'row', style: { marginTop: '8px' } }, save, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj')),
         h('button', { class: 'btn', style: { marginTop: '8px', width: '100%' }, onclick: () => coordinates(sel) }, 'Współrzędne')),
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 2D'),
-        h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, stack ? stackSvg(stack) : h('p', { class: 'muted' }, 'Brak danych konturu 2D.'))),
+        h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, stack ? stackSvg(stack, { dims: true }) : h('p', { class: 'muted' }, 'Brak danych konturu 2D.'))),
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 3D'),
         h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, toolView3d(st.index, sel)))));
     komis.focus();

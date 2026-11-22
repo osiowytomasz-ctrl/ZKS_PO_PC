@@ -390,3 +390,18 @@ test('frezy płytkowe (fre / plu) i jeżowe: korpus 97,5% Ø, długość korpusu
   try { G2.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge' }]); assert.equal(ixp.stackTool(tp).plates.length, 1); } finally { G2.setPlateSetupProvider(null); }
   assert.equal(G2.buildMini(tp, ixp.details('F')).inserts.length, 4, 'miniatura: dwa rzędy po dwie płytki (prawa i lewa)');
 });
+
+test('wymiary na rysunku 2D: długość L, średnica Ø, średnice walców, chwyt (głębokość mocowania z reguł), opisy Ms / Mk / r/α, ostrze', async () => {
+  const GEN = await import('../src/renderer/js/logic/contourGen.js');
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  const mill = { productCode: 'FP1', columnD: 'fre', columnE: 'pal', columnP: 'X', columnF: '12', columnJ: '80', columnM: 'WEL012', columnN: '', columnG: '2', columnH: '', name: '' };
+  const pm = { D: 'fre', E: 'pal', F: '12', I: '12', J: '80', K: '30', L: '0', M: 'WEL012', N: '' };
+  const idx = G2.toolIndex({ tools: [mill], detailsMap: { FP1: { columnAY: GEN.fullContour(pm, {}), insertContours: [], regions: [{ role: 'oprawka', z1: -45, z2: 5 }, { role: 'ostrze', z1: 5, z2: 35 }] } } }, null);
+  const lay = G2.buildStack([idx.stackTool(mill)], true, false).layers[0], texts = lay.dims.map((d) => d.text);
+  assert.ok(texts.includes('L 80'), 'długość całkowita J = 80 (czoło → koniec chwytu)'); assert.ok(texts.includes('Ø12'), 'średnica robocza');
+  assert.ok(texts.some((t) => /chwyt 45/.test(t) && /WEL012/.test(t)), 'chwyt Weldon 45 mm (ukryty w regule mocowania)'); assert.ok(texts.includes('ostrze 30'));
+  assert.ok(texts.includes('Ms WEL012') && texts.includes('r/α 2.00'));
+  const L = lay.dims.find((d) => d.text === 'L 80'), tip = Math.min(...lay.outline.map((p) => p.y)), bottom = Math.max(...lay.outline.map((p) => p.y));
+  assert.ok(Math.abs(Math.abs(L.y2 - L.y1) - 800) < 1e-6, 'wymiar L obejmuje 80 mm'); assert.ok(L.y2 > tip && L.y2 <= bottom + 1e-6);
+  const ext = G2.dimsExtent(lay.dims); assert.ok(ext && ext.maxX > 0 && ext.minX < 0);
+});
