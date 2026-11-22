@@ -46,15 +46,26 @@ export function mountPlateLayout(o) {
     });
     if (!rows.length) tbody.append(h('tr', {}, h('td', { colspan: 9, class: 'muted' }, 'Brak płytek – dodaj płytkę albo wróć do układu automatycznego.')));
     markSel();
+    refreshG();
     pivotBtn.style.display = o.onPivot && (!o.canPivot || o.canPivot()) && rows.length > 1 ? '' : 'none';
   }
   const add = () => { const used = new Set(rows.map((r) => r.code)), code = (o.allCodes || []).find((c) => !used.has(c)) || (o.allCodes || [])[0] || ''; if (!code) return; rows.push(normPlate({ code, mode: rows.length ? 'edge' : 'auto' })); apply(); draw(); choose(rows.length - 1); };
   const pivotBtn = h('button', { class: 'btn small', title: 'Punkt, wokół którego obraca się cała grupa płytek (kąt skrawania): wybierany spośród punktów wszystkich płytek i czterech skrajnych punktów grupy', onclick: () => o.onPivot && o.onPivot() }, '⊕ Punkt obrotu grupy…');
+  const gx = h('input', { type: 'text', style: { width: '62px', padding: '1px 3px' }, title: 'X punktu obrotu grupy od osi narzędzia, mm' }), gz = h('input', { type: 'text', style: { width: '62px', padding: '1px 3px' }, title: 'Z punktu obrotu grupy od Z = 0, mm' });
+  const gRow = h('div', { class: 'row', style: { gap: '4px', alignItems: 'center', flexWrap: 'wrap', display: 'none' } }, h('span', { title: 'Wpisz, gdzie ma leżeć czerwony punkt obrotu grupy – cała grupa płytek przesunie się razem. Można też przeciągnąć czerwony punkt na rysunku albo płytkę z klawiszem Shift.' }, 'Przesuń grupę – punkt obrotu: X'), gx, 'Z', gz, h('span', { class: 'muted' }, 'mm'));
+  const applyG = () => { const x = num(gx.value), z = num(gz.value); if (Number.isFinite(x) && Number.isFinite(z) && o.setPivotPos) o.setPivotPos(x, z); };
+  gx.onchange = applyG; gz.onchange = applyG;
+  const refreshG = () => {
+    const p = o.pivotPos && o.pivotPos(), show = !!p && o.onPivot && (!o.canPivot || o.canPivot()) && rows.length > 1;
+    gRow.style.display = show ? '' : 'none';
+    if (show && document.activeElement !== gx && document.activeElement !== gz) { gx.value = comma(p.x); gz.value = comma(p.z); }
+  };
   const root = h('div', { class: 'plate-panel', style: { width: '520px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '6px', background: '#fff', border: '1px solid #c8a400', padding: '6px 8px', fontSize: '12px', overflow: 'auto', minHeight: 0 } },
     h('style', {}, '.plate-panel th, .plate-panel td { padding: 2px 3px !important; } .plate-panel .btn.small { padding: 1px 5px; }'),
     h('div', { class: 'row' }, h('b', { style: { flex: 1 } }, `Płytki – ${o.tool}`), h('button', { class: 'btn small', onclick: () => o.onClose() }, 'Zamknij')),
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Do wyboru tylko płytki przypisane do narzędzia. Rodzaj: centralna – jedna na osi (wiertła ISCAR / AMEC), obwodowa – para przy krawędzi, nieregularna – jedna w dowolnym miejscu (np. Komet). '
       + 'ΔX, ΔZ w mm (ΔZ w górę osi), obrót w ° (frezy: kąt względem krawędzi skrawającej narzędzia, 0° = krawędź płytki w jej linii), φ – kąt pierwszej płytki na obwodzie (3D), z – liczba kopii (0 – wg narzędzia). Grupa płytek w rzędach (jeż, frez płytkowy) obraca się wokół czerwonego punktu na rysunku – punktu bazowego pierwszej płytki. Zmiany widać od razu na rysunku; wybrana płytka ma czerwony kontur.'),
+    gRow,
     h('div', { class: 'table-wrap', style: { overflow: 'auto' } }, h('table', { class: 't', style: { width: 'auto', fontSize: '11px' } }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka', 'Rodzaj', 'ΔX', 'ΔZ', o.angOffset ? 'Kąt' : 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
     h('div', { class: 'row', style: { gap: '6px' } },
       h('button', { class: 'btn small', onclick: add, title: 'Dodaj kolejną płytkę (wiele płytek na narzędziu)' }, '+ Dodaj płytkę'),
@@ -63,6 +74,7 @@ export function mountPlateLayout(o) {
   /** Odświeżenie z zewnątrz (nie przeszkadza w pisaniu w tabeli). */
   root.sync = (plates, selected) => {
     sel = selected == null ? null : selected;
+    refreshG();
     const next = (plates || []).map((p) => normPlate(p));
     if (JSON.stringify(next) !== JSON.stringify(rows) && !root.contains(document.activeElement)) { rows = next; draw(); } else markSel();
   };

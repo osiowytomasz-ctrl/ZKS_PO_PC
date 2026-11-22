@@ -444,7 +444,7 @@ export function mountContours(el, ctx) {
     const rowQ = ins.filter((q) => q.row && q.ref);
     if (rowQ.length > 1 && ins.pivotPt) {   // grupa płytek (rzędy jeża / frezu płytkowego) obraca się wokół wspólnego punktu (czerwony): wybrany w oknie „Punkt obrotu grupy” albo punkt odniesienia pierwszego rzędu
       const c = ins.pivotPt, cx = f2(X(c.x)), cy = f2(Y(c.y));
-      out += `<g pointer-events="none"><circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="#e00000" stroke-width="2"/><line x1="${f2(X(c.x) - 11)}" y1="${cy}" x2="${f2(X(c.x) + 11)}" y2="${cy}" stroke="#e00000" stroke-width="1.6"/><line x1="${cx}" y1="${f2(Y(c.y) - 11)}" x2="${cx}" y2="${f2(Y(c.y) + 11)}" stroke="#e00000" stroke-width="1.6"/><title>Punkt obrotu grupy płytek</title></g>`;
+      out += `<g data-gpivot="1" style="cursor:move"><circle cx="${cx}" cy="${cy}" r="12" fill="transparent"/><circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="#e00000" stroke-width="2"/><line x1="${f2(X(c.x) - 11)}" y1="${cy}" x2="${f2(X(c.x) + 11)}" y2="${cy}" stroke="#e00000" stroke-width="1.6"/><line x1="${cx}" y1="${f2(Y(c.y) - 11)}" x2="${cx}" y2="${f2(Y(c.y) + 11)}" stroke="#e00000" stroke-width="1.6"/><title>Punkt obrotu grupy płytek – przeciągnij, aby przesunąć całą grupę</title></g>`;
     }
     if (dimList.length) out += dimsSvg(dimList, sc, X(0), Y(0));   // linie wymiarowe, linie pomocnicze, teksty (niebieskie – edytowalne)
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
@@ -489,7 +489,11 @@ export function mountContours(el, ctx) {
     const dimEl = e.target.closest && e.target.closest('[data-dim]');
     if (dimEl) { pv.dimEdit = dimEl.dataset.dim; pv.ptEdit = null; pv.insSel = null; drawPreview(); e.preventDefault(); return; }   // klik w wymiar – okienko edycji wartości
     const w = world(e); if (!w) return;
-    const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]'), insEl = e.target.closest('[data-ins]');
+    const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]'), insEl = e.target.closest('[data-ins]'), gEl = e.target.closest('[data-gpivot]');
+    if (gEl || (insEl && e.shiftKey && groupMembers())) {   // przesuwanie całej grupy płytek: czerwony punkt obrotu albo Shift + płytka
+      pv.drag = { grp: true, start: w, orig: snapshotGroup(), moved: false };
+      preview.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
     if (insEl) {
       const j = Number(insEl.dataset.ins), a = adjOf(j);
       pv.drag = { ins: j, start: w, orig: { ...a }, moved: false };
@@ -517,6 +521,11 @@ export function mountContours(el, ctx) {
       return;
     }
     const w = world(e); if (!w) return;
+    if (d.grp) {   // przesuwanie grupy: wszystkie płytki razem o ten sam wektor
+      const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
+      applyGroupShift(d.orig, round3(sn((w.x - d.start.x) / 10)), round3(sn((w.y - d.start.y) / 10)));
+      d.moved = true; drawPreview(); return;
+    }
     if (d.ins != null) {   // przesuwanie płytki w całości (bez deformacji); lewa płytka – odbicie
       const sn = (v) => (pv.snap ? Math.round(v / (pv.gridStep || 1)) * (pv.gridStep || 1) : v);
       setPlate(d.ins, { dx: round3(d.orig.dx + sn((w.x - d.start.x) / 10) / ((((preview._ins || [])[d.ins] || {}).single && Math.abs(Math.cos(((d.orig.phi || 0) * Math.PI) / 180)) > 0.1) ? Math.cos(((d.orig.phi || 0) * Math.PI) / 180) : 1)), dz: round3(d.orig.dz + sn((w.y - d.start.y) / 10)) });
@@ -541,6 +550,7 @@ export function mountContours(el, ctx) {
     const d = pv.drag; pv.drag = null;
     if (!d) return;
     if (d.click) { if (d.panning) return; pv.ptEdit = null; pv.insSel = null; pickRegion(d.click.y / 10); return; }
+    if (d.grp) { drawPreview(); return; }
     if (d.ins != null) { pv.insSel = d.ins; pv.ptEdit = null; drawPreview(); return; }   // kliknięcie w płytkę – tylko wybór (okienko z danymi w rogu rysunku); pełny edytor – przycisk w okienku albo w tabeli płytek
     if (d.moved) { drawTable(); drawPreview(); return; }
     if (d.idx && d.idx.length === 1) { pv.ptEdit = d.idx[0]; pv.insSel = null; drawPreview(); }   // kliknięcie w punkt – okienko z parametrami
@@ -586,7 +596,7 @@ export function mountContours(el, ctx) {
     const t = st.tool; if (!t || !st.index) { toast('Najpierw wybierz narzędzie.', true); return; }
     if (platePanel) platePanel.remove();
     const codes = plateCodes(), set = insertSetup(t);
-    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central, angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? () => tiltOf(t) : null, canPivot: () => G.isRowMill(t) && layoutNow().length > 1, onPivot: () => openPivotPicker(),   // do wyboru tylko płytki przypisane do narzędzia
+    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central, angOffset: String(t.columnD ?? '').trim().toLowerCase() === 'fre' ? () => tiltOf(t) : null, canPivot: () => G.isRowMill(t) && layoutNow().length > 1, onPivot: () => openPivotPicker(), pivotPos: () => groupPos(), setPivotPos: (x, z) => setGroupPos(x, z),   // do wyboru tylko płytki przypisane do narzędzia
       onChange: (list) => { saveInsertSetup(t, { plates: list }); drawPreview(); },
       onSelect: (j) => { pv.insSel = j; pv.ptEdit = null; drawPreview(); },
       onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); },
@@ -610,6 +620,25 @@ export function mountContours(el, ctx) {
         pv.insSel = null; drawPreview();
         status.set(`Płytka ${q.code}: zastosowano zmiany w podglądzie${np !== path ? ' (kontur płytki – do odświeżenia katalogu)' : ''}.`, 'neutral');
       } });
+  }
+  /** Grupa płytek rzędów (jeż, frez płytkowy) – ≥ 2 płytki. */
+  const groupMembers = () => !!st.tool && G.isRowMill(st.tool) && (preview._ins || []).length > 1;
+  /** Stan grupy do przesuwania: układ płytek i punkt obrotu (głęboka kopia). */
+  const snapshotGroup = () => ({ list0: JSON.parse(JSON.stringify(ownPlates(st.tool) || normPlates(effectiveSpecs()) || [])), pivot: G.normPivot(insertSetup(st.tool).pivot) });
+  /** Przesunięcie całej grupy o ([dx], [dz]) mm względem stanu [orig] (dz – w górę osi): płytki w rzędach (automatyczne położenie) – przez stałe miejsce punktu obrotu Q, płytki z ręcznym położeniem – przez ΔX / ΔZ. */
+  function applyGroupShift(orig, dx, dz) {
+    const p0 = orig.pivot || { px: 0, py: 0, qx: 0, qy: 0 }, anyAuto = orig.list0.some((p) => p.autoPos), anyManual = orig.list0.some((p) => !p.autoPos);
+    const patch = {};
+    if (anyManual) patch.plates = orig.list0.map((p) => (p.autoPos ? p : { ...p, dx: round3(p.dx + dx), dz: round3(p.dz + dz) }));
+    if (anyAuto) patch.pivot = { ...p0, qx: round3(p0.qx + dx), qy: round3(p0.qy - dz) };
+    saveInsertSetup(st.tool, patch);
+  }
+  /** Położenie czerwonego punktu obrotu grupy (X od osi, Z od Z = 0, mm) albo null. */
+  const groupPos = () => { const p = (preview._ins || []).pivotPt; return p ? { x: round3(p.x / 10), z: round3(p.y / 10) } : null; };
+  /** Wpisanie współrzędnych punktu obrotu grupy: cała grupa przesuwa się tak, aby punkt leżał w (x, z). */
+  function setGroupPos(x, z) {
+    const c = groupPos(); if (!c || !Number.isFinite(x) || !Number.isFinite(z)) return;
+    applyGroupShift(snapshotGroup(), round3(x - c.x), round3(z - c.z)); drawPreview();
   }
   /** Grupa płytek frezu jeżowego / płytkowego: dane okna wyboru punktu bazowego (kontury wszystkich płytek, ich punkty i zaznaczone punkty bazowe), mm w układzie rysunku stosu (y w dół). */
   function groupBaseData() {
