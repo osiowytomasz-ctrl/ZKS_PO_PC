@@ -44,6 +44,7 @@ function triad2d(x, y) {
 export function mountContours(el, ctx) {
   const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
   const st = { filters: B.emptyFilters(), stopFill: null, tools: [], details: new Map(), v: {}, mounts: {}, params: {}, q: '', only: '', tool: null, rows: [], dirty: false, full: null, fullLabel: '' };
+  const emb = !!ctx.embedded;   // okno Kontur otwarte z ToolBuildera: narzędzie już wybrane – bez filtrów, listy i komunikatu o wczytaniu
   const status = statusLine();
   const listBox = h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0, border: '1px solid #ccc', background: '#fff' } });
   const editBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0, overflow: 'auto' } });
@@ -160,7 +161,7 @@ export function mountContours(el, ctx) {
         : tp.length >= 3 ? [tp, 'kolumna T'] : g ? [g, 'dane D:N', g.halfSvg] : null;
     setFull(src && src[0], src && src[1], src && src[2]);
     if (!st.rows.length) st.rows = [{ z: '0', r: '', rad: '' }, { z: '', r: '', rad: '' }];
-    status.set(src ? `Wczytano kontur (${src[1]}).` : 'Brak konturu – wpisz punkty od początku.', 'neutral');
+    if (!emb) status.set(src ? `Wczytano kontur (${src[1]}).` : 'Brak konturu – wpisz punkty od początku.', 'neutral');
     drawList(); drawEditor();
   }
 
@@ -573,7 +574,7 @@ export function mountContours(el, ctx) {
     const t = st.tool; if (!t || !st.index) { toast('Najpierw wybierz narzędzie.', true); return; }
     if (platePanel) platePanel.remove();
     const codes = plateCodes(), set = insertSetup(t);
-    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central,   // do wyboru tylko płytki przypisane do narzędzia
+    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central, absAngle: String(t.columnD ?? '').trim().toLowerCase() === 'fre',   // do wyboru tylko płytki przypisane do narzędzia
       onChange: (list) => { saveInsertSetup(t, { plates: list }); drawPreview(); },
       onSelect: (j) => { pv.insSel = j; pv.ptEdit = null; drawPreview(); },
       onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); },
@@ -588,11 +589,11 @@ export function mountContours(el, ctx) {
     if (!q || !t || !st.index) return;
     const path = st.index.insertContour(q.code) || '';
     const cur = layoutNow()[j] || {}, set0 = insertSetup(t);
-    openPlateEditor({ code: q.code, path, tool: t.productCode, base: plateBase(q.code), edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
+    openPlateEditor({ code: q.code, path, tool: t.productCode, base: cur.base || plateBase(q.code), absAngle: String(t.columnD ?? '').trim().toLowerCase() === 'fre', edge: plateEdge(q.code), setup: set0, plate: { mode: (set0.plates && set0.plates[j] && set0.plates[j].mode) || 'auto', dx: cur.dx || 0, dz: cur.dz || 0, ang: cur.ang || 0, phi: cur.phi || 0, z: cur.z || 0 }, autoCentral: j === 0 && set0.central, canSave: canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
       onApply: ({ path: np, setup, plate, base, edge }) => {
-        saveInsertSetup(t, setup); savePlateBase(q.code, base); savePlateEdge(q.code, edge);
-        if (plate) setPlate(j, plate);
+        saveInsertSetup(t, setup); savePlateEdge(q.code, edge);
+        if (plate) setPlate(j, { ...plate, base: base || null }); else savePlateBase(q.code, base);
         if (np && np !== path) st.index.setInsertContour(q.code, np);
         pv.insSel = null; drawPreview();
         status.set(`Płytka ${q.code}: zastosowano zmiany w podglądzie${np !== path ? ' (kontur płytki – do odświeżenia katalogu)' : ''}.`, 'neutral');
@@ -647,15 +648,16 @@ export function mountContours(el, ctx) {
       const j = pv.insSel, q = ins[j], a = adjOf(j), pos = at(`[data-ins="${j}"]`) || { x: 20, y: 20 };
       const set = (patch) => { setPlate(j, patch); drawPreview(); };
       const mm = (p) => `X ${round3(p.x / 10)} · Z ${round3(p.y / 10)}`.replace(/\./g, ',');
+      const fre = String(st.tool.columnD ?? '').trim().toLowerCase() === 'fre';   // frezy: kąt bezwzględny (90° = płytka w pionie)
       const cs = q.single ? Math.cos(((a.phi || 0) * Math.PI) / 180) : 1;   // rzut X płytki pojedynczej obróconej wokół osi
-      const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = plateBase(q.code);   // + 4 rogi skrajne płytki pochylonej
-      const baseSel = h('select', { style: { maxWidth: '150px' }, title: 'Wybór punktu bazowego płytki (wspólny dla wszystkich narzędzi z tą płytką)', onchange: () => { const pr = presets.find((x) => x.id === baseSel.value); savePlateBase(q.code, pr ? pr.pt : null); drawPreview(); } },
+      const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = (layoutNow()[j] || {}).base || plateBase(q.code);   // punkt bazowy tej płytki (własny, inaczej zapisany dla kodu); + 4 rogi skrajne płytki pochylonej
+      const baseSel = h('select', { style: { maxWidth: '150px' }, title: 'Wybór punktu bazowego tej płytki (osobny dla każdej płytki na narzędziu)', onchange: () => { const pr = presets.find((x) => x.id === baseSel.value); set({ base: pr ? { x: pr.pt.x, y: pr.pt.y } : null }); } },
         h('option', { value: '' }, G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu'), ...presets.map((pr) => h('option', { value: pr.id, selected: !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6 }, pr.label)));
       if (cur && !presets.some((pr) => Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6)) baseSel.append(h('option', { value: 'own', selected: true }, `własny (${round3(cur.x)}; ${round3(cur.y)})`));
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.autoBase || q.auto[0])} → po korekcie ${mm(q.base || q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
-        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI('Obrót płytki', num(a.ang, (v) => Number.isFinite(v) && set({ ang: v })), '°'),
+        rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang) : a.ang, (v) => Number.isFinite(v) && set({ ang: fre ? G.relAngle(v) : v })), fre ? '° (90° = pion)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
         h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, h('span', { style: { width: '78px' }, title: 'Punkt płytki, względem którego liczone jest położenie (zielony celownik na rysunku); obrót korekty też jest wokół niego' }, 'Punkt bazowy'), baseSel),
@@ -763,9 +765,9 @@ export function mountContours(el, ctx) {
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kontury narzędzi'), h('span', { class: 'grow muted' }, 'Wpisz prawą połowę konturu – zapisywana jest tylko połowa (SVG, mm); podgląd 2D – odbicie lustrzane, 3D – obrót. Zatwierdzony kontur → PSWT BC (zastępuje kolumnę T w całym programie).'),
     canSave ? h('button', { class: 'btn', title: 'Kontury z danych (PSWT D:N) dla wielu narzędzi naraz', onclick: () => bulk() }, 'Z danych hurtem…') : null,
-    h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), filtersBox, status,
-  h('div', { style: { display: 'grid', gridTemplateColumns: '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
-    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
+    h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), emb ? null : filtersBox, status,
+  h('div', { style: { display: 'grid', gridTemplateColumns: emb ? 'minmax(330px, 420px) 1fr' : '260px minmax(330px, 420px) 1fr', gap: '10px', flex: 1, minHeight: 0 } },
+    emb ? null : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', minHeight: 0 } }, search, only, listBox),
     editBox,
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minHeight: 0 } }, previewBar, previewRow, info,
       h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kontur do zapisu – prawa połowa (SVG, mm; zatwierdzenie → PSWT BC, roboczo → ND_CACHE V):'), svgOut,

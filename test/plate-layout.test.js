@@ -156,20 +156,20 @@ test('pierwsza zmiana układu płytek (np. punkt bazowy, φ) nie kasuje pochylen
   const ov = (() => { const o = new Map(); o.params = new Map([['p1', { D: 'fre', E: 'plu', G: '10', K: '50' }]]); o.regions = new Map(); o.generated = new Set(); o.blade = new Map(); return o; })();
   const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] } } }, ov);
   const stt = idx.stackTool(t), specs = L.specsFromPlates(stt.plates);
-  assert.deepEqual(specs.map((p) => [p.code, p.mode, p.ang, p.dz]), [['A', 'edge', 10, 0], ['B', 'edge', 10, -41.362]]);
+  assert.deepEqual(specs.map((p) => [p.code, p.mode, p.ang, p.dz]), [['A', 'edge', -80, 0], ['B', 'edge', -80, -7.293]]);
   const next = L.patchPlate(L.normPlates(specs), ['A', 'B'], 0, { phi: 30 });
-  assert.deepEqual(next.map((p) => [p.ang, p.dz, p.phi]), [[10, 0, 30], [10, -41.362, 0]], 'kąt z tabeli i rzędy zostają po zmianie jednego pola');
+  assert.deepEqual(next.map((p) => [p.ang, p.dz, p.phi]), [[-80, 0, 30], [-80, -7.293, 0]], 'kąt z tabeli i rzędy zostają po zmianie jednego pola');
   // układ zapisany jako własny rysuje się tak samo (bez zmiany pochylenia)
-  try { G.setPlateSetupProvider(() => next); assert.deepEqual(idx.stackTool(t).plates.map((p) => p.ang), [10, 10]); } finally { G.setPlateSetupProvider(null); }
+  try { G.setPlateSetupProvider(() => next); assert.deepEqual(idx.stackTool(t).plates.map((p) => p.ang), [-80, -80]); } finally { G.setPlateSetupProvider(null); }
 });
 
-test('kąt skrawania G: 90° – bez obrotu płytek; plu / jez – pochylenie G; pozostałe frezy – obrót o 90° − G; zapisany kąt w układzie płytek narzędzia', () => {
+test('kąt skrawania G: 90° – bez obrotu płytek; kąt bezwzględny G < 90° – obrót płytek o G − 90° (10° → −80°, 80° → −10°); zapisany kąt w układzie płytek narzędzia', () => {
   const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
-  assert.deepEqual([G.plateTilt({ columnE: 'plu' }, 10), G.plateTilt({ columnE: 'jez' }, 10), G.plateTilt({ columnE: 'faz' }, 45), G.plateTilt({ columnE: 'faz' }, 60), G.plateTilt({ columnE: 'tar' }, 90), G.plateTilt({ columnE: 'faz' }, 0), G.plateTilt({ columnE: 'faz' }, 120)], [10, 10, 45, 30, 0, 0, 0]);
+  assert.deepEqual([G.plateTilt({ columnE: 'plu' }, 10), G.plateTilt({ columnE: 'jez' }, 10), G.plateTilt({ columnE: 'faz' }, 45), G.plateTilt({ columnE: 'faz' }, 60), G.plateTilt({ columnE: 'tar' }, 90), G.plateTilt({ columnE: 'faz' }, 0), G.plateTilt({ columnE: 'faz' }, 120)], [-80, -80, -45, -30, 0, 0, 0]);
   const mk = (E, g) => ({ productCode: 'T1', columnD: 'fre', columnE: E, columnP: 'X', columnF: '50', columnJ: '60', columnM: 'ABS063', columnG: String(g) });
   const idx = (t) => G.toolIndex({ tools: [t], detailsMap: { T1: { columnAY: '-250_0;250_0;250_590;-250_590', insertContours: [{ code: 'A', contour: plate }] } } }, null);
   const t90 = mk('tar', 90), t60 = mk('tar', 60);
-  assert.equal(idx(t90).stackTool(t90).plates[0].ang, 0, 'kąt 90° – płytka w normalnym położeniu'); assert.equal(idx(t60).stackTool(t60).plates[0].ang, 30, 'kąt skrawania 60° → obrót płytki o 30°');
+  assert.equal(idx(t90).stackTool(t90).plates[0].ang, 0, 'kąt 90° – płytka w normalnym położeniu'); assert.equal(idx(t60).stackTool(t60).plates[0].ang, -30, 'kąt skrawania 60° (bezwzględny) → obrót płytki o −30°');
   // zapisany własny układ (kąt w właściwościach płytki) ma pierwszeństwo
   try { G.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge', ang: 5 }]); assert.equal(idx(t60).stackTool(t60).plates[0].ang, 5); } finally { G.setPlateSetupProvider(null); }
 });
@@ -208,20 +208,36 @@ test('zmiana kąta skrawania G od razu obraca płytki; grupa obraca się wokół
   const rows = (g) => idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: g, H: '3', K: '50' } }).plates;
   // G wpisane w Konturach (opts.pswt) zmienia kąt i położenie całej grupy rzędów: pierwszy rząd – punkt wspólny, kolejne obrócone o ten sam kąt wokół niego
   const r10 = rows('10'), r30 = rows('30'), r0 = rows('90');
-  assert.deepEqual(r10.map((p) => p.ang), [10, 10, 10]); assert.deepEqual(r30.map((p) => p.ang), [30, 30, 30]); assert.deepEqual(r0.map((p) => p.ang), [0, 0, 0], '90° – bez obrotu');
+  assert.deepEqual(r10.map((p) => p.ang), [-80, -80, -80]); assert.deepEqual(r30.map((p) => p.ang), [-60, -60, -60]); assert.deepEqual(r0.map((p) => p.ang), [0, 0, 0], '90° – bez obrotu');
   assert.deepEqual([r30[0].dx, r30[0].dz], [0, 0], 'punkt wspólny (czoło pierwszego rzędu) się nie rusza');
   const d1 = Math.hypot(r30[1].dx, r30[1].dz), d2 = Math.hypot(r30[2].dx, r30[2].dz); assert.ok(Math.abs(d2 - 2 * d1) < 1e-2, 'rzędy równomiernie wzdłuż linii');
-  assert.ok(Math.abs(Math.atan2(-r30[1].dx, -r30[1].dz) * 180 / Math.PI - 30) < 0.1, 'linia rzędów nachylona o kąt G od osi');
+  assert.ok(Math.abs(Math.atan2(-r30[1].dx, -r30[1].dz) * 180 / Math.PI + 60) < 0.1, 'linia rzędów wzdłuż kąta bezwzględnego G = 30° (obrót −60°)');
   assert.deepEqual([r0[1].dx, r0[1].dz], [0, r0[1].dz]); assert.ok(r0[1].dz < 0);
   // własny układ z polami automatycznymi (autoAng / autoPos) nadal podąża za G; ręcznie wpisany kąt płytki jest bezwzględny i nie dodaje się do kąta grupy
   const specs = L.normPlates(L.specsFromPlates(r10));
   assert.ok(specs.every((p) => p.autoAng && p.autoPos));
   const edited = L.patchPlate(specs, ['A'], 1, { ang: 55 });   // tylko płytka 2: bezwzględny kąt 55°
-  assert.deepEqual(edited.map((p) => [p.ang, !!p.autoAng, !!p.autoPos]), [[10, true, true], [55, false, true], [10, true, true]]);
+  assert.deepEqual(edited.map((p) => [p.ang, !!p.autoAng, !!p.autoPos]), [[-80, true, true], [55, false, true], [-80, true, true]]);
   try {
     G.setPlateSetupProvider(() => edited);
     const own = idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: '30', H: '3', K: '50' } }).plates;
-    assert.deepEqual(own.map((p) => p.ang), [30, 55, 30], 'grupa podąża za G = 30°, płytka 2 ma własny bezwzględny kąt 55°');
+    assert.deepEqual(own.map((p) => p.ang), [-60, 55, -60], 'grupa podąża za G = 30°, płytka 2 ma własny bezwzględny kąt 55°');
     assert.ok(Math.abs(Math.hypot(own[2].dx, own[2].dz) - d2) < 1e-6, 'położenie nadal automatyczne (rzędy obrócone wokół punktu wspólnego)');
+  } finally { G.setPlateSetupProvider(null); }
+});
+
+test('kąt bezwzględny płytki (90° = pion) i osobny punkt bazowy każdej płytki', () => {
+  assert.equal(G.absAngle(-80), 10); assert.equal(G.absAngle(0), 90); assert.equal(G.relAngle(170), 80); assert.equal(G.relAngle(90), 0);
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'pal', columnP: 'X', columnF: '50', columnJ: '80', columnM: 'ABS063', columnG: '' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-250_0;250_0;250_770;-250_770', insertContours: [{ code: 'A', contour: plate }, { code: 'A', contour: plate }] } } }, null);
+  // własny punkt bazowy zapisany przy jednej płytce nie zmienia drugiej (ten sam kod płytki)
+  const own = L.normPlates([{ code: 'A', mode: 'edge', base: { x: 60, y: 0 } }, { code: 'A', mode: 'edge' }]);
+  assert.deepEqual(own[0].base, { x: 60, y: 0 }); assert.equal(own[1].base, undefined);
+  try {
+    G.setPlateSetupProvider(() => own);
+    const pl = idx.stackTool(t).plates;
+    assert.deepEqual(pl[0].base, { x: 60, y: 0 }); assert.ok(!pl[1].base, 'druga płytka bez własnego punktu bazowego');
+    assert.deepEqual(L.specsFromPlates(pl).map((p) => p.base || null), [{ x: 60, y: 0 }, null]);
   } finally { G.setPlateSetupProvider(null); }
 });

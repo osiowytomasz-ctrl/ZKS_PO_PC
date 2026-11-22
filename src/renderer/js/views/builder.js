@@ -258,7 +258,7 @@ export function mountBuilder(el, ctx) {
       host), { wide: true, sticky: true });
     m.root.classList.add('fs');
     document.addEventListener('keydown', onKey, true);
-    api2 = mountContours(host, ctx);
+    api2 = mountContours(host, { ...ctx, embedded: true });   // okno nad ToolBuilderem: bez filtrów i listy narzędzi (narzędzie już wybrane)
   }
 
   /** Karta narzędzia: kod, lokalizacja i zużycie; duży rysunek 2D, obracany 3D, parametry w kafelkach, części ze stanem; dodanie do zestawu. */

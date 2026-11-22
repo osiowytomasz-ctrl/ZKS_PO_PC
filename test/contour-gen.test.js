@@ -381,12 +381,12 @@ test('frezy płytkowe (fre / plu) i jeżowe: korpus 97,5% Ø, długość korpusu
   const idx = G2.toolIndex({ tools: [t], detailsMap: { F: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }] } } }, ov);
   const st = idx.stackTool(t);
   assert.equal(st.plates.length, 4); const near = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
-  assert.ok(near(st.plates.map((q) => q.dz), [0, -13.787, -27.575, -41.362]), 'rzędy co (K − wysokość płytki) / (n − 1) = 14 mm wzdłuż linii pod kątem G = 10° (grupa obrócona wokół wspólnego punktu – czoła pierwszego rzędu): dz = −d·cos G'); assert.ok(near(st.plates.map((q) => q.dx), [0, -2.431, -4.862, -7.293]), 'dx = −d·sin G'); assert.ok(st.plates.every((q) => q.ang === 10 && q.row));
+  assert.ok(near(st.plates.map((q) => q.dz), [0, -2.431, -4.862, -7.293]), 'rzędy co (K − wysokość płytki) / (n − 1) = 14 mm wzdłuż linii opadającej o G = 10° na zewnątrz (kąt bezwzględny 10°, obrót G − 90° = −80°; grupa obrócona wokół czoła pierwszego rzędu): dz = −d·cos 80°'); assert.ok(near(st.plates.map((q) => q.dx), [0, 13.787, 27.575, 41.362]), 'dx = d·sin 80° (na zewnątrz)'); assert.ok(st.plates.every((q) => q.ang === -80 && q.row));
   const lay = G2.buildStack([st], false, true).layers[0];   // podgląd zapisu pokazuje wszystkie rzędy
   assert.equal(lay.plates.length, 4);
   // frez płytkowy: tyle rzędów, ile płytek w katalogu
   const tp = tl('plu', 'ABS063'), ixp = G2.toolIndex({ tools: [tp], detailsMap: { F: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] } } }, contourOverrides({ f: { D: 'fre', E: 'plu', G: '10', K: '50' } }, {}, { gen: false }));
-  assert.deepEqual(ixp.stackTool(tp).plates.map((q) => q.dz), [0, -41.362]);   // plunger (G = 10°): drugi rząd 42 mm niżej wzdłuż linii pod kątem
+  assert.deepEqual(ixp.stackTool(tp).plates.map((q) => q.dz), [0, -7.293]);   // plunger (G = 10°): drugi rząd 42 mm niżej wzdłuż linii pod kątem
   // własny układ płytek ma pierwszeństwo – bez rzędów
   try { G2.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge' }]); assert.equal(ixp.stackTool(tp).plates.length, 1); } finally { G2.setPlateSetupProvider(null); }
   assert.equal(G2.buildMini(tp, ixp.details('F')).inserts.length, 4, 'miniatura: dwa rzędy po dwie płytki (prawa i lewa)');
