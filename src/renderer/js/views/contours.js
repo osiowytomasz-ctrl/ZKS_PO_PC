@@ -653,16 +653,48 @@ export function mountContours(el, ctx) {
       const fre = String(st.tool.columnD ?? '').trim().toLowerCase() === 'fre';   // frezy: kąt bezwzględny (90° = płytka w pionie)
       const cs = q.single ? Math.cos(((a.phi || 0) * Math.PI) / 180) : 1;   // rzut X płytki pojedynczej obróconej wokół osi
       const presets = [...basePresets(parsePlate((st.index && st.index.insertContour(q.code)) || '').pts), ...(q.corners || [])], cur = (layoutNow()[j] || {}).base || plateBase(q.code);   // punkt bazowy tej płytki (własny, inaczej zapisany dla kodu); + 4 rogi skrajne płytki pochylonej
-      const baseSel = h('select', { style: { maxWidth: '150px' }, title: 'Wybór punktu bazowego tej płytki (osobny dla każdej płytki na narzędziu)', onchange: () => { const pr = presets.find((x) => x.id === baseSel.value); set({ base: pr ? { x: pr.pt.x, y: pr.pt.y } : null }); } },
-        h('option', { value: '' }, G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu'), ...presets.map((pr) => h('option', { value: pr.id, selected: !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6 }, pr.label)));
-      if (cur && !presets.some((pr) => Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6)) baseSel.append(h('option', { value: 'own', selected: true }, `własny (${round3(cur.x)}; ${round3(cur.y)})`));
+      const same = (pr) => !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6;
+      const curPreset = presets.find(same), defLabel = G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu';
+      const curLabel = curPreset ? curPreset.label : cur ? `własny (${round3(cur.x)}; ${round3(cur.y)})` : defLabel;
+      if (pv.basePick !== j) pv.basePick = null;
+      if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki zamiast całego okna danych: tryb „na narzędziu” (z transformacją) albo „standardowo” (pozycja z konturu płytki)
+        const inTool = pv.baseMode !== 'std', plateSrc = (st.index && st.index.insertContour(q.code)) || '';
+        const raw = G.parseInsertPath(plateSrc), stdPts = parsePlate(plateSrc).pts;
+        let poly, pts;
+        if (inTool) { poly = q.right; pts = presets.map((pr) => ({ pr, p: G.basePlaced(raw, q.right, pr.pt) })).filter((x) => x.p).map((x) => ({ pr: x.pr, x: x.p.x / 10, y: x.p.y / 10 })); poly = q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })); }
+        else { poly = stdPts; pts = presets.map((pr) => ({ pr, x: pr.pt.x, y: pr.pt.y })); }
+        const xs = [...poly.map((v) => v.x), ...pts.map((v) => v.x)], ys = [...poly.map((v) => v.y), ...pts.map((v) => v.y)];
+        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), W = 224, Hh = 230, sc = Math.min((W - 24) / Math.max(x1 - x0, 1e-6), (Hh - 24) / Math.max(y1 - y0, 1e-6));
+        const X = (v) => round3(12 + (v - x0) * sc + (W - 24 - (x1 - x0) * sc) / 2), Y = (v) => round3(12 + (v - y0) * sc + (Hh - 24 - (y1 - y0) * sc) / 2);
+        const order = [...pts.filter((e) => !/^p\d/.test(e.pr.id) && !e.pr.id.startsWith('k_')), ...pts.filter((e) => /^p\d/.test(e.pr.id)), ...pts.filter((e) => e.pr.id.startsWith('k_'))];
+        const dots = order.map((e) => {
+          const cx = X(e.x), cy = Y(e.y), on = same(e.pr), k = e.pr.id.startsWith('k_'), v = /^p\d/.test(e.pr.id);
+          const mark = on ? `<circle cx="${cx}" cy="${cy}" r="7" fill="#fff" stroke="#2e7d32" stroke-width="2"/><path d="M${cx - 10} ${cy}H${cx + 10}M${cx} ${cy - 10}V${cy + 10}" stroke="#2e7d32" stroke-width="2"/>`
+            : k ? `<path d="M${cx} ${cy - 5}L${cx + 5} ${cy}L${cx} ${cy + 5}L${cx - 5} ${cy}Z" fill="#ef6c00" stroke="#fff" stroke-width="1"/>` : v ? `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#1565c0" stroke="#fff" stroke-width="1"/>` : `<rect x="${cx - 3.5}" y="${cy - 3.5}" width="7" height="7" fill="#fff" stroke="#607d8b" stroke-width="1.5"/>`;
+          return `<g data-id="${e.pr.id}" style="cursor:pointer">${mark}<circle cx="${cx}" cy="${cy}" r="9" fill="transparent"/></g>`;
+        }).join('');
+        const pg = poly.map((v) => `${X(v.x)},${Y(v.y)}`).join(' ');
+        const holder = h('div', { style: { border: '1px solid #ccc', background: '#fff', lineHeight: 0 } });
+        holder.innerHTML = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg"><polygon points="${pg}" fill="#c8a400" fill-opacity=".55" stroke="#8a6d00" stroke-width="1.5"/>${dots}</svg>`;
+        const hint = h('div', { class: 'muted', style: { fontSize: '11px', minHeight: '28px', lineHeight: '1.3' } }, `Wybrany: ${curLabel}`);
+        holder.addEventListener('pointerover', (ev) => { const g = ev.target.closest && ev.target.closest('[data-id]'); const pr = g && presets.find((x) => x.id === g.getAttribute('data-id')); if (pr) hint.textContent = pr.label; });
+        holder.addEventListener('click', (ev) => { const g = ev.target.closest && ev.target.closest('[data-id]'); const pr = g && presets.find((x) => x.id === g.getAttribute('data-id')); if (pr) { pv.basePick = null; set({ base: { x: pr.pt.x, y: pr.pt.y } }); } });
+        const modeBtn = (id, text, tip) => h('button', { class: 'btn small' + ((pv.baseMode !== 'std') === (id === 'tool') ? ' primary' : ''), title: tip, onclick: () => { pv.baseMode = id; drawPreview(); } }, text);
+        cornerBox(closeBtn(() => { pv.basePick = null; drawPreview(); }), h('b', {}, `Punkt bazowy – płytka ${q.code}`),
+          h('div', { class: 'row', style: { gap: '4px', margin: '4px 0' } }, modeBtn('tool', 'Na narzędziu', 'Płytka tak, jak leży na narzędziu (obrót, kąt, odbicie)'), modeBtn('std', 'Standardowo', 'Płytka w pozycji standardowej (bez transformacji na narzędziu); rogi skrajne – już z transformacją')),
+          holder, hint,
+          h('div', { class: 'muted', style: { fontSize: '10px' } }, '■ środki i rogi obwiedni · ● punkty konturu · ◆ rogi skrajne (zawsze z transformacją na narzędziu) · ⊕ wybrany. Kliknij punkt.'),
+          h('div', { class: 'row', style: { gap: '4px', marginTop: '4px' } }, h('button', { class: 'btn small', title: defLabel, onclick: () => { pv.basePick = null; set({ base: null }); } }, 'Domyślny'), h('button', { class: 'btn small', onclick: () => { pv.basePick = null; drawPreview(); } }, 'Wróć')));
+        if (platePanel) platePanel.sync(layoutNow(), pv.insSel);
+        return;
+      }
       const report = `Narzędzie ${st.tool.productCode}, płytka ${q.code}: korekta ΔX=${a.dx} mm, ΔZ=${a.dz} mm, obrót ${a.ang}° · punkt bazowy z algorytmu ${mm(q.autoBase || q.auto[0])} → po korekcie ${mm(q.base || q.right[0])} (mm)`;
       cornerBox(closeBtn(() => { pv.insSel = null; drawPreview(); }), h('b', {}, `Płytka ${q.code}`),
         h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Prawa – przesuwana (przeciągnij albo wpisz), lewa – odbicie lustrzane.'),
         rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set({ ang: fre ? G.relAngle(v, tiltOf(st.tool)) : v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
-        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, h('span', { style: { width: '78px' }, title: 'Punkt płytki, względem którego liczone jest położenie (zielony celownik na rysunku); obrót korekty też jest wokół niego' }, 'Punkt bazowy'), baseSel),
+        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, (q.base ? 'Punkt bazowy (⊕): ' : 'Punkt bazowy (●, pierwszy punkt konturu): ') + 'z algorytmu ', h('b', {}, mm(q.autoBase || q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.base || q.right[0]))),
         q.base ? h('div', {}, rowI('Bazowy X', num(round3(q.base.x / 10), (v) => { if (Number.isFinite(v) && cs) set({ dx: round3(a.dx + (v - q.base.x / 10) / cs) }); })), rowI('Bazowy Z', num(round3(q.base.y / 10), (v) => { if (Number.isFinite(v)) set({ dz: round3(a.dz + (v - q.base.y / 10)) }); })),
           h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Wpisz, gdzie ma leżeć punkt bazowy (X od osi, Z od Z = 0) – ΔX i ΔZ zostaną przeliczone.')) : null,
