@@ -441,6 +441,11 @@ export function mountContours(el, ctx) {
       out += q.base ? `<g pointer-events="none"><circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="5" fill="none" stroke="#0a7d2c" stroke-width="1.6"/><line x1="${f2(X(bp.x) - 8)}" y1="${f2(Y(bp.y))}" x2="${f2(X(bp.x) + 8)}" y2="${f2(Y(bp.y))}" stroke="#0a7d2c" stroke-width="1.2"/><line x1="${f2(X(bp.x))}" y1="${f2(Y(bp.y) - 8)}" x2="${f2(X(bp.x))}" y2="${f2(Y(bp.y) + 8)}" stroke="#0a7d2c" stroke-width="1.2"/></g>`
         : `<circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
     });
+    const rowQ = ins.filter((q) => q.row && q.ref);
+    if (rowQ.length > 1) {   // grupa płytek (rzędy jeża / frezu płytkowego) obraca się wokół wspólnego punktu – punkt odniesienia pierwszego rzędu (czerwony)
+      const c = rowQ[0].ref, cx = f2(X(c.x)), cy = f2(Y(c.y));
+      out += `<g pointer-events="none"><circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="#e00000" stroke-width="2"/><line x1="${f2(X(c.x) - 11)}" y1="${cy}" x2="${f2(X(c.x) + 11)}" y2="${cy}" stroke="#e00000" stroke-width="1.6"/><line x1="${cx}" y1="${f2(Y(c.y) - 11)}" x2="${cx}" y2="${f2(Y(c.y) + 11)}" stroke="#e00000" stroke-width="1.6"/><title>Punkt obrotu grupy płytek (punkt bazowy pierwszej płytki)</title></g>`;
+    }
     if (dimList.length) out += dimsSvg(dimList, sc, X(0), Y(0));   // linie wymiarowe, linie pomocnicze, teksty (niebieskie – edytowalne)
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
     const hp = st.full ? st.full.map((p) => ({ x: p.x, y: p.y })) : (svg ? E.fullPoints(st.rows).slice(0, st.rows.length).map((p) => ({ x: p.x * 10, y: p.y * 10 })) : []);
@@ -567,7 +572,8 @@ export function mountContours(el, ctx) {
     return stack.layers[0].plates.map((pm, j) => {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
       const pb = (m) => { const b = m.bases && m.bases[m.single ? 0 : m.bases.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt bazowy płytki (null – nie wybrany: pierwszy punkt konturu)
-      return { path: (stt.plates[j] && stt.plates[j].path) || '', code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [] };
+      const pr = (m) => { const b = m.refs && m.refs[m.single ? 0 : m.refs.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt odniesienia płytki rzędu (bazowy albo pierwszy punkt konturu)
+      return { path: (stt.plates[j] && stt.plates[j].path) || '', code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [], row: !!pm.row, ref: pr(pm) };
     });
   }
   /** Panel „Płytki” po lewej stronie rysunku (poza rejonem kreślenia): rodzaj płytki, wiele płytek, położenie; zmiany od razu na rysunku. */

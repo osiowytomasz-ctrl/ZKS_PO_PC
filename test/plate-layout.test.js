@@ -281,3 +281,23 @@ test('obrót płytki wokół wybranego punktu bazowego – także gdy płytka ma
     }
   } finally { G.setPlateEdgeProvider(null); G.setPlateSetupProvider(null); }
 });
+
+test('jeż: punkty odniesienia (bazowe) płytek w rzędach leżą na jednej linii także przy różnych punktach bazowych; płytki równoległe', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'jez', columnP: 'X', columnF: '20', columnJ: '78', columnM: 'ABS063', columnG: '45' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-100_0;100_0;100_770;-100_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const pswt = { D: 'fre', E: 'jez', G: '45', H: '3', K: '25' };
+  const specs = L.normPlates(L.specsFromPlates(idx.stackTool(t, { pswt }).plates));
+  // płytki 1 i 2 z wybranym punktem bazowym (róg), płytka 3 – domyślny (pierwszy punkt konturu)
+  const own = specs.map((p, j) => (j < 2 ? { ...p, base: { x: 6, y: 8 } } : p));
+  try {
+    G.setPlateSetupProvider(() => own);
+    const st = idx.stackTool(t, { pswt }), m = G.buildStack([st], true, false).layers[0].plates;
+    assert.equal(m.length, 3); assert.ok(m.every((p) => p.row));
+    const r = m.map((p) => p.refs[p.refs.length - 1]), d1 = [r[1].x - r[0].x, r[1].y - r[0].y], d2 = [r[2].x - r[1].x, r[2].y - r[1].y];
+    assert.ok(Math.abs(d1[0] - d2[0]) < 0.05 && Math.abs(d1[1] - d2[1]) < 0.05, 'równe odstępy wzdłuż jednej linii');
+    assert.ok(Math.abs(Math.abs(d1[0]) - Math.abs(d1[1])) < 0.05, 'linia pod kątem 45°');
+    const e = (p) => { const q = p.polys[p.polys.length - 1]; return Math.atan2(q[1].y - q[0].y, q[1].x - q[0].x); };
+    assert.ok(Math.abs(e(m[0]) - e(m[2])) < 1e-9, 'płytki równoległe');
+  } finally { G.setPlateSetupProvider(null); }
+});

@@ -178,3 +178,13 @@ test('krzywe Q płytki zamieniają się w łuki, a ciągi drobnych odcinków na 
   assert.equal(s.pts.length, 5); assert.ok(s.merged >= 12); assert.equal(s.pts.filter((p) => p.arc).length, 1); assert.ok(Math.abs(s.pts.find((p) => p.arc).arc.r - 3) < 1e-3);
   assert.equal(P.smoothArcs([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }]).merged, 0, 'prostokąt bez zmian');
 });
+
+test('obrót i skala konturu płytki wokół punktu bazowego: punkt bazowy zostaje w miejscu', async () => {
+  const P = await import('../src/renderer/js/logic/plateEdit.js');
+  const sq = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 }, { x: 0, y: 2 }], base = { x: 4, y: 2 };
+  const r = P.rotate(sq, 90, base);
+  assert.deepEqual(r[2], { x: 4, y: 2 }, 'punkt bazowy się nie rusza');
+  assert.deepEqual(P.mapBase('rotate', base, sq, 90, base), base);
+  assert.deepEqual(P.scale(sq, 50, base)[2], { x: 4, y: 2 });
+  assert.notDeepEqual(P.rotate(sq, 90)[2], { x: 4, y: 2 }, 'bez punktu – wokół środka');
+});

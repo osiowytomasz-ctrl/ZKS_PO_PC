@@ -145,13 +145,13 @@ const reversed = (pts) => { const n = pts.length; return pts.slice().reverse().m
 /** Odbicie względem pionowej osi środka płytki (X) albo poziomej (Y); łuki zostają łukami. */
 export const mirrorX = (pts) => { const b = plateBounds(pts); return reversed(map(pts, (p) => ({ x: 2 * b.cx - p.x, y: p.y }))); };   // odwrócona kolejność – zachowuje kierunek obiegu
 export const mirrorY = (pts) => { const b = plateBounds(pts); return reversed(map(pts, (p) => ({ x: p.x, y: 2 * b.cy - p.y }))); };
-/** Obrót wokół środka płytki o [deg]° (dodatni – zgodnie z ruchem wskazówek zegara na ekranie, bo y rośnie w dół). */
-export function rotate(pts, deg) {
-  const b = plateBounds(pts), a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-  return map(pts, (p) => ({ x: b.cx + (p.x - b.cx) * c - (p.y - b.cy) * s, y: b.cy + (p.x - b.cx) * s + (p.y - b.cy) * c }));
+/** Obrót wokół punktu [pivot] (gdy podany – np. punkt bazowy płytki), inaczej wokół środka płytki, o [deg]° (dodatni – zgodnie z ruchem wskazówek zegara na ekranie, bo y rośnie w dół). */
+export function rotate(pts, deg, pivot = null) {
+  const b = plateBounds(pts), cx = pivot ? pivot.x : b.cx, cy = pivot ? pivot.y : b.cy, a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return map(pts, (p) => ({ x: cx + (p.x - cx) * c - (p.y - cy) * s, y: cy + (p.x - cx) * s + (p.y - cy) * c }));
 }
 /** Skalowanie wokół środka płytki o [percent] % (promienie łuków też). */
-export const scale = (pts, percent) => { const b = plateBounds(pts), k = percent / 100; return map(pts, (p) => ({ x: b.cx + (p.x - b.cx) * k, y: b.cy + (p.y - b.cy) * k }), k); };
+export const scale = (pts, percent, pivot = null) => { const b = plateBounds(pts), k = percent / 100, cx = pivot ? pivot.x : b.cx, cy = pivot ? pivot.y : b.cy; return map(pts, (p) => ({ x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k }), k); };
 /** Przesunięcie tak, aby lewy górny róg obwiedni był w (0, 0). */
 export const toOrigin = (pts) => { const b = plateBounds(pts); return map(pts, (p) => ({ x: p.x - b.minX, y: p.y - b.minY })); };
 /** Wstawienie punktu po punkcie [i]: w środku odcinka, a na łuku – w środku łuku (obie części zostają łukami o tym samym promieniu). */
@@ -202,9 +202,9 @@ export function basePresets(pts) {
   return out.map(([id, label, x, y]) => ({ id, label, pt: { x: r3(x), y: r3(y) } }));
 }
 /** Punkt bazowy po przekształceniu konturu: [op] – mirrorX | mirrorY | rotate (arg °) | scale (arg %) | origin; [pts] – kontur PRZED przekształceniem. Bez punktu bazowego – null. */
-export function mapBase(op, base, pts, arg = 0) {
+export function mapBase(op, base, pts, arg = 0, pivot = null) {
   if (!base) return null;
-  const b = plateBounds(pts);
+  const b = pivot && (op === 'rotate' || op === 'scale') ? { cx: pivot.x, cy: pivot.y } : plateBounds(pts);   // obrót / skala wokół [pivot] (punkt bazowy płytki) – sam punkt bazowy zostaje w miejscu
   if (op === 'mirrorX') return { x: r3(2 * b.cx - base.x), y: base.y };
   if (op === 'mirrorY') return { x: base.x, y: r3(2 * b.cy - base.y) };
   if (op === 'rotate') { const a = (arg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return { x: r3(b.cx + (base.x - b.cx) * c - (base.y - b.cy) * s), y: r3(b.cy + (base.x - b.cx) * s + (base.y - b.cy) * c) }; }
@@ -218,6 +218,6 @@ export function normEdge(e) {
   return a && b && (Math.abs(a.x - b.x) > 1e-9 || Math.abs(a.y - b.y) > 1e-9) ? { a, b } : null;
 }
 /** Krawędź po przekształceniu konturu (jak [mapBase] dla obu końców). */
-export const mapEdge = (op, edge, pts, arg = 0) => (edge ? { a: mapBase(op, edge.a, pts, arg), b: mapBase(op, edge.b, pts, arg) } : null);
+export const mapEdge = (op, edge, pts, arg = 0, pivot = null) => (edge ? { a: mapBase(op, edge.a, pts, arg, pivot), b: mapBase(op, edge.b, pts, arg, pivot) } : null);
 /** Punkt bazowy zapisany jako { x, y } (mm) albo null; wartości nieliczbowe – null. */
 export const normBase = (b) => (b && Number.isFinite(Number(b.x)) && Number.isFinite(Number(b.y)) && b.x !== '' && b.y !== '' ? { x: r3(Number(b.x)), y: r3(Number(b.y)) } : null);

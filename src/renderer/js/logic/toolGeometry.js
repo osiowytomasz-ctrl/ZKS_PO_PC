@@ -319,7 +319,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     // podgląd zapisu (allInserts = false) pokazuje pierwszą płytkę, ale nie gubi płytek, które tworzą układ: własny układ, płytki centralne / nieregularne i wiertła płytkowe (np. Komet z dwiema płytkami)
     const list = tool.plates ? (allInserts ? tool.plates : tool.plates.filter((p, i) => i === 0 || p.custom || (p.kind && p.kind !== 'edge') || p.row || tool.drill))
       : (allInserts ? tool.inserts : tool.inserts.slice(0, 1)).map((path) => ({ path, code: '', kind: tool.central ? 'central' : 'edge', central: !!tool.central, dx: 0, dz: 0, ang: 0, phi: 0, z: 0 }));
-    const placed = [], plates = [];
+    const placed = [], plates = [], rowRef = {};
     for (const pl0 of list) {
       const raw = parseInsertPath(pl0.path);
       if (raw.length < 2) continue;
@@ -327,14 +327,23 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       const rawN = pl0.base || pl0.edge ? parseInsertPath(pl0.path, { absY: false }) : null, flip = !!rawN && rawN.length > 0 && Math.abs(rawN[0].y) > 1e-9 && Math.abs(raw[0].y + rawN[0].y) < 1e-9;
       const pl = flip ? { ...pl0, ...(pl0.base ? { base: { x: pl0.base.x, y: -pl0.base.y } } : {}), ...(pl0.edge ? { edge: { a: { x: pl0.edge.a.x, y: -pl0.edge.a.y }, b: { x: pl0.edge.b.x, y: -pl0.edge.b.y } } } : {}) } : pl0;
       const kind = pl.kind || (pl.central ? 'central' : 'edge');   // centralna: jedna na osi; nieregularna: jedna w dowolnym miejscu; obwodowa: para lewa / prawa
+      // rzędy frezu płytkowego / jeżowego: punkt odniesienia płytki = punkt bazowy (domyślnie pierwszy punkt konturu) – płytki obracają się wokół niego, a punkty odniesienia kolejnych rzędów
+      // leżą na jednej linii (wyrównanie względem pierwszego rzędu), więc płytki o różnych punktach bazowych nie wypadają z linii
+      const rowMode = !!pl.row && kind === 'edge' && !(pl.edge && pl.edge.a && pl.edge.b), effBase = pl.base || (pl.row ? { x: raw[0].x / 10, y: raw[0].y / 10 } : null);
+      const placeSide = (mirror) => {
+        if (!rowMode) return placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl);
+        const own = basePlaced(raw, placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer), effBase);
+        rowRef[mirror] = rowRef[mirror] || own;
+        return placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, { ...pl, base: effBase, shift: own ? pt(rowRef[mirror].x - own.x, rowRef[mirror].y - own.y) : null });
+      };
       const polys = kind === 'central' ? [placeCentral(raw, apexBase(b, offsetY, tool), pl)]
         : kind === 'irregular' ? [tool.drill ? placeCentral(raw, apexBase(b, offsetY, tool), pl) : placeInsert(raw, b, offsetY, tool, true, rotateChamfer, pl)]
-          : [false, true].map((mirror) => placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl));
+          : [false, true].map(placeSide);
       // płytka pojedyncza (centralna / nieregularna) obrócona wokół osi narzędzia o φ: w rzucie z boku jej współrzędne X skaleją się przez cos φ
       // (φ = 180° – lustrzane odbicie względem osi, ostrze po drugiej stronie), dzięki czemu dwie płytki nie nachodzą na siebie; src – położenie przed obrotem (dla 3D)
       const phi = pl.phi || 0, single = polys.length === 1, cs = Math.abs(phi % 360) < 1e-9 ? 1 : Math.round(Math.cos((phi * Math.PI) / 180) * 1e9) / 1e9;
       const shown = single && cs !== 1 ? polys.map((q) => q.map((p) => pt(p.x * cs, p.y))) : polys;
-      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)), corners: placedCorners(raw, shown[single ? 0 : shown.length - 1], flip) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
+      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)), row: !!pl.row, refs: shown.map((q) => basePlaced(raw, q, effBase)), corners: placedCorners(raw, shown[single ? 0 : shown.length - 1], flip) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
     }
     // frez nasadzany na trzpień FRExxx osadza się dolną płaszczyzną na czole oprawki (trzpień wchodzi w otwór na głębokość L2): kolejne narzędzie (oprawka) leży o L2 wyżej niż koniec trzpienia, niezależnie od tego, jak głęboko sięga kontur frezu
     offsetY += tool.fitM && index < tools.length - 1 ? (b.maxY - b.minY) - freL2(tool.fitM) * 10 : b.r;
@@ -468,7 +477,9 @@ function placeByEdge(raw, out, b, offsetY, tool, mirror, pl) {
 function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl) {
   const out = placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer);
   if (pl && pl.edge && pl.edge.a && pl.edge.b) { const e = placeByEdge(raw, out, b, offsetY, tool, mirror, pl); if (e) return e; }   // krawędź skrawająca ma pierwszeństwo
-  return pl ? adjustPoly(out, mirror ? pl.dx : -pl.dx, pl.dz, mirror ? pl.ang : -pl.ang, pl.base ? basePlaced(raw, out, pl.base) : null) : out;
+  if (!pl) return out;
+  const adj = adjustPoly(out, mirror ? pl.dx : -pl.dx, pl.dz, mirror ? pl.ang : -pl.ang, pl.base ? basePlaced(raw, out, pl.base) : null);
+  return pl.shift ? adj.map((p) => pt(p.x + pl.shift.x, p.y + pl.shift.y)) : adj;   // shift – wyrównanie punktu bazowego płytki w rzędzie do punktu bazowego pierwszego rzędu
 }
 function placeInsert0(raw, b, offsetY, tool, mirror, rotateChamfer) {
   const minX = Math.min(...raw.map((p) => p.x)), minY = Math.min(...raw.map((p) => p.y));

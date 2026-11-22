@@ -139,7 +139,8 @@ export function openPlateEditor(o) {
   }
   const markRows = () => tbody.querySelectorAll('tr').forEach((tr) => { tr.style.background = Number(tr.dataset.row) === st.sel ? '#fff3e0' : ''; });
   const fillRow = (i) => { const r = inputs[i]; if (r) { const o = (k) => (st.rel && st.base ? st.base[k] : 0); r.x.value = comma(st.pts[i].x - o('x')); r.y.value = comma(st.pts[i].y - o('y')); } };
-  const act = (fn, op, arg) => () => { push(); st.base = P.mapBase(op, st.base, st.pts, arg); st.edge = P.mapEdge(op, st.edge, st.pts, arg); st.pts = fn(st.pts); st.view = null; drawTable(); drawCanvas(); schedule3d(); check(); };
+  const act = (fn, op, arg) => () => { push(); const pvt = st.base && (op === 'rotate' || op === 'scale') ? st.base : null; st.base = P.mapBase(op, st.base, st.pts, arg, pvt); st.edge = P.mapEdge(op, st.edge, st.pts, arg, pvt);   // obrót i skala wokół punktu bazowego (gdy ustawiony)
+    st.pts = fn(st.pts); st.view = null; drawTable(); drawCanvas(); schedule3d(); check(); };
   const undo = () => { const last = st.hist.pop(); if (!last) return; const h0 = JSON.parse(last); st.pts = h0.pts; st.base = h0.base; st.edge = h0.edge || null; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); };
   const rotI = h('input', { type: 'text', value: '90', style: { width: '48px', padding: '1px 4px' } }), scaleI = h('input', { type: 'text', value: '100', style: { width: '48px', padding: '1px 4px' } });
   const customStep = h('input', { type: 'text', value: '0,03', title: 'Własny krok siatki i przyciągania, mm', style: { width: '56px', display: 'none', padding: '1px 4px' }, oninput: () => { const v = num(customStep.value); if (v > 0) { st.step = v; drawCanvas(); } } });
@@ -244,8 +245,8 @@ export function openPlateEditor(o) {
             push(); st.pts = r.pts; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); say(`Zamieniono odcinki na łuki – usunięto ${r.merged} pkt.`);
           } }, 'Odcinki → łuki'),
           h('button', { class: 'btn small', onclick: undo }, '↶ Cofnij')),
-        h('div', { class: 'row', style: { gap: '4px', margin: '4px 0', alignItems: 'center' } }, h('button', { class: 'btn small', onclick: () => { const v = num(rotI.value); if (Number.isFinite(v)) act((p) => P.rotate(p, v), 'rotate', v)(); } }, 'Obróć o'), rotI, '°',
-          h('button', { class: 'btn small', onclick: () => { const v = num(scaleI.value); if (v > 0) act((p) => P.scale(p, v), 'scale', v)(); } }, 'Skaluj'), scaleI, '%'),
+        h('div', { class: 'row', style: { gap: '4px', margin: '4px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Obrót konturu wokół punktu bazowego (bez punktu bazowego – wokół środka płytki)', onclick: () => { const v = num(rotI.value); if (Number.isFinite(v)) act((p) => P.rotate(p, v, st.base), 'rotate', v)(); } }, 'Obróć o'), rotI, '°',
+          h('button', { class: 'btn small', title: 'Skalowanie konturu wokół punktu bazowego (bez niego – wokół środka płytki)', onclick: () => { const v = num(scaleI.value); if (v > 0) act((p) => P.scale(p, v, st.base), 'scale', v)(); } }, 'Skaluj'), scaleI, '%'),
         h('div', { class: 'row', style: { gap: '4px', margin: '4px 0', alignItems: 'center' } }, h('span', {}, 'Krok siatki / przyciągania:'), stepSel, customStep),
         warn, edgeBox, baseBox, params, place, status,
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } }, saveBtn, h('button', { class: 'btn' + (saveBtn ? '' : ' primary'), onclick: apply, title: 'Używa konturu i parametrów w podglądach programu (kontur tylko na tym komputerze do odświeżenia katalogu)' }, 'Zastosuj'),

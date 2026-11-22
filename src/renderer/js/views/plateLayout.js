@@ -52,7 +52,7 @@ export function mountPlateLayout(o) {
     h('style', {}, '.plate-panel th, .plate-panel td { padding: 2px 3px !important; } .plate-panel .btn.small { padding: 1px 5px; }'),
     h('div', { class: 'row' }, h('b', { style: { flex: 1 } }, `Płytki – ${o.tool}`), h('button', { class: 'btn small', onclick: () => o.onClose() }, 'Zamknij')),
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Do wyboru tylko płytki przypisane do narzędzia. Rodzaj: centralna – jedna na osi (wiertła ISCAR / AMEC), obwodowa – para przy krawędzi, nieregularna – jedna w dowolnym miejscu (np. Komet). '
-      + 'ΔX, ΔZ w mm (ΔZ w górę osi), obrót w ° (frezy: kąt względem krawędzi skrawającej narzędzia, 0° = krawędź płytki w jej linii), φ – kąt pierwszej płytki na obwodzie (3D), z – liczba kopii (0 – wg narzędzia). Zmiany widać od razu na rysunku; wybrana płytka ma czerwony kontur.'),
+      + 'ΔX, ΔZ w mm (ΔZ w górę osi), obrót w ° (frezy: kąt względem krawędzi skrawającej narzędzia, 0° = krawędź płytki w jej linii), φ – kąt pierwszej płytki na obwodzie (3D), z – liczba kopii (0 – wg narzędzia). Grupa płytek w rzędach (jeż, frez płytkowy) obraca się wokół czerwonego punktu na rysunku – punktu bazowego pierwszej płytki. Zmiany widać od razu na rysunku; wybrana płytka ma czerwony kontur.'),
     h('div', { class: 'table-wrap', style: { overflow: 'auto' } }, h('table', { class: 't', style: { width: 'auto', fontSize: '11px' } }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka', 'Rodzaj', 'ΔX', 'ΔZ', o.angOffset ? 'Kąt' : 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
     h('div', { class: 'row', style: { gap: '6px' } },
       h('button', { class: 'btn small', onclick: add, title: 'Dodaj kolejną płytkę (wiele płytek na narzędziu)' }, '+ Dodaj płytkę'),
