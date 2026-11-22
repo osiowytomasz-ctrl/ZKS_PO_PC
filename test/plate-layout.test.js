@@ -149,3 +149,16 @@ test('podgląd zapisu (tylko pierwsza płytka) nie gubi drugiej płytki wiertła
     assert.equal(cnt(mk('Iscar', 'fre', 'wsp')), 2, 'własny układ – wszystkie płytki układu');
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('pierwsza zmiana układu płytek (np. punkt bazowy, φ) nie kasuje pochylenia z tabeli ani rzędów plunger / jeż', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'plu', columnP: 'X', columnF: '100', columnJ: '80', columnM: 'ABS063', columnG: '10' };
+  const ov = (() => { const o = new Map(); o.params = new Map([['p1', { D: 'fre', E: 'plu', G: '10', K: '50' }]]); o.regions = new Map(); o.generated = new Set(); o.blade = new Map(); return o; })();
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] } } }, ov);
+  const stt = idx.stackTool(t), specs = L.specsFromPlates(stt.plates);
+  assert.deepEqual(specs.map((p) => [p.code, p.mode, p.ang, p.dz]), [['A', 'edge', 10, 0], ['B', 'edge', 10, -42]]);
+  const next = L.patchPlate(L.normPlates(specs), ['A', 'B'], 0, { phi: 30 });
+  assert.deepEqual(next.map((p) => [p.ang, p.dz, p.phi]), [[10, 0, 30], [10, -42, 0]], 'kąt z tabeli i rzędy zostają po zmianie jednego pola');
+  // układ zapisany jako własny rysuje się tak samo (bez zmiany pochylenia)
+  try { G.setPlateSetupProvider(() => next); assert.deepEqual(idx.stackTool(t).plates.map((p) => p.ang), [10, 10]); } finally { G.setPlateSetupProvider(null); }
+});

@@ -17,6 +17,11 @@ export function normPlate(p) {
   const o = p || {}, z = Math.round(num(o.z, 0));
   return { code: String(o.code ?? '').trim(), mode: ['central', 'edge', 'irregular'].includes(o.mode) ? o.mode : 'auto', dx: r3(num(o.dx)), dz: r3(num(o.dz)), ang: r3(num(o.ang)), phi: r3(num(o.phi)), z: z >= 1 ? Math.min(60, z) : 0 };
 }
+/**
+ * Układ płytek „jak jest rysowany” (płytki ze stackTool: rodzaj, korekty, kąt, rzędy frezów płytkowych / jeżowych) jako lista układu do edycji. Dzięki temu pierwsza zmiana
+ * w oknie płytki / edytorze zaczyna się od faktycznego stanu (np. pochylenie G z tabeli), a nie od pustego układu z kątem 0°.
+ */
+export const specsFromPlates = (plates) => (plates || []).map((p) => normPlate({ code: p.code, mode: p.kind === 'central' ? 'central' : p.kind === 'irregular' ? 'irregular' : 'edge', dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi, z: p.z }));
 /** Lista płytek znormalizowana albo null (brak własnego układu). Płytki bez kodu są pomijane. */
 export function normPlates(list) {
   if (!Array.isArray(list)) return null;

@@ -11,7 +11,7 @@ import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPlateEditor } from './plateEditor.js';
 import { mountPlateLayout } from './plateLayout.js';
-import { resolvePlates, patchPlate } from '../logic/plateLayout.js';
+import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase } from './toolViews.js';
 import { basePresets, parsePlate } from '../logic/plateEdit.js';
 import * as B from '../logic/builder.js';
@@ -531,9 +531,12 @@ export function mountContours(el, ctx) {
   const plateCodes = () => { const det = (st.tool && st.index && st.index.details(st.tool.productCode)) || {}; return (det.insertContours || []).filter((x) => String(x.contour ?? '').trim()).map((x) => x.code); };
   /** Własny układ płytek ograniczony do płytek przypisanych do narzędzia (spójnie ze stackTool). */
   const ownPlates = (t) => { const codes = plateCodes().map((c) => String(c).trim().toLowerCase()), l = (insertSetup(t).plates || []).filter((p) => codes.includes(String(p.code).trim().toLowerCase())); return l.length ? l : null; };
-  const layoutNow = () => resolvePlates(ownPlates(st.tool), plateCodes(), insertSetup(st.tool).central);
+  /** Układ płytek tak, jak jest rysowany (z tabeli: kąt G, rzędy plunger / jeż; własny układ ma pierwszeństwo). */
+  const effectiveSpecs = (opts) => { const stt = st.tool && st.index ? st.index.stackTool(st.tool, opts) : null; return stt ? specsFromPlates(stt.plates) : []; };
+  const layoutNow = () => effectiveSpecs();
   const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi } : { dx: 0, dz: 0, ang: 0, phi: 0 }; };
-  const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(ownPlates(st.tool), plateCodes(), j, patch) });
+  // pierwsza zmiana tworzy własny układ z faktycznego stanu (z kątem z tabeli i rzędami), nie z pustego układu katalogu – pochylenie nie znika
+  const setPlate = (j, patch) => saveInsertSetup(st.tool, { plates: patchPlate(ownPlates(st.tool) || normPlates(effectiveSpecs()), plateCodes(), j, patch) });
   /** Płytki narzędzia w układzie konturu (0,1 mm): auto – położenie z algorytmu zestawu (bez korekt); right – z korektą (dX, dZ, obrót) i rodzajem płytki; left – odbicie (tylko obwodowe). */
   function insertsOf(t) {
     if (!st.index) return [];
@@ -557,7 +560,7 @@ export function mountContours(el, ctx) {
     const t = st.tool; if (!t || !st.index) { toast('Najpierw wybierz narzędzie.', true); return; }
     if (platePanel) platePanel.remove();
     const codes = plateCodes(), set = insertSetup(t);
-    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: resolvePlates(null, codes, set.central), allCodes: [...new Set(codes)], toolCentral: set.central,   // do wyboru tylko płytki przypisane do narzędzia
+    platePanel = mountPlateLayout({ tool: t.productCode, plates: layoutNow(), autoPlates: effectiveSpecs({ layout: false }), allCodes: [...new Set(codes)], toolCentral: set.central,   // do wyboru tylko płytki przypisane do narzędzia
       onChange: (list) => { saveInsertSetup(t, { plates: list }); drawPreview(); },
       onSelect: (j) => { pv.insSel = j; pv.ptEdit = null; drawPreview(); },
       onEdit: (j) => { pv.insSel = j; drawPreview(); openPlateFor(j); },
