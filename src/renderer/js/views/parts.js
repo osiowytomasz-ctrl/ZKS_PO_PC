@@ -98,7 +98,7 @@ export function mountParts(el, ctx) {
     const shown = p.tools.slice(0, 6);
     return h('div', { class: 'tool-tile click', onclick: () => detail(p), style: { minHeight: '0', background: body } },
       h('div', { class: 'tile-head' }, h('div', { style: { flex: 1, padding: '4px 8px', fontWeight: 800, background: bg, color: warn ? contrast(bg) : '#000' } }, String(p.code).toUpperCase())),
-      h('div', { style: { display: 'flex', justifyContent: 'center', margin: '4px 6px', padding: '4px', border: '2px solid #000', background: 'transparent' } }, insertSvg(p.contour, { w: 200, hgt: 110, dims: true })),   // rejon rysunku płytki w ramce 2 px, kolor kategorii na całym kafelku
+      h('div', { style: { display: 'flex', justifyContent: 'center', margin: '4px 6px', padding: '4px', border: '2px solid #000', background: '#fff' } }, insertSvg(p.contour, { w: 200, hgt: 110, dims: true })),   // rejon rysunku płytki w ramce 2 px, białe tło bez zmian; kolor kategorii na reszcie kafelka
       h('div', { style: { padding: '3px 8px', fontSize: '12px', borderTop: '1px solid rgba(0,0,0,.25)' } }, stockLine(t)),
       h('div', { style: { padding: '0 8px 4px', fontSize: '11px', color: '#333' }, title: p.tools.map((x) => x.code + ' – ' + (V.toolInfoText(x.info) || 'brak danych')).join('\n') },
         h('div', { class: 'muted' }, `W narzędziach (${p.uses.length}):`),
