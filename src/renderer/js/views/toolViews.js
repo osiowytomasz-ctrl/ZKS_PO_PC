@@ -65,21 +65,31 @@ export function miniSvg(mini, { w = 60, hgt = 70, onclick } = {}) {
   return box;
 }
 
+/** Czy rysować wymiary na rysunkach 2D (ustawienie zapamiętane na tym komputerze; domyślnie tak). */
+export function dimsOn() { try { return localStorage.getItem('zks.dims2d') !== '0'; } catch { return true; } }
+export function setDimsOn(v) { try { localStorage.setItem('zks.dims2d', v ? '1' : '0'); } catch { /* bez pamięci */ } }
+/** Przycisk „Wymiary” włączający / wyłączający wymiary na rysunkach 2D; [onChange] – po zmianie (przerysowanie). */
+export function dimsToggle(onChange) {
+  const btn = h('button', { class: 'btn small', title: 'Pokaż / ukryj wymiary na rysunku 2D', onclick: () => { setDimsOn(!dimsOn()); paint(); onChange(); } });
+  const paint = () => { btn.textContent = dimsOn() ? '⟷ Wymiary: wł.' : '⟷ Wymiary: wył.'; btn.classList.toggle('primary', dimsOn()); };
+  paint();
+  return btn;
+}
 /** Linie wymiarowe (strzałki na końcach), linie pomocnicze i teksty (SVG); [dims] z G.layerDims, [s] – skala, [ox] / [oy] – przesunięcie rysunku. */
 export function dimsSvg(dims, s, ox, oy) {
   const X = (x) => ox + x * s, Y = (y) => oy + y * s, f = (v) => v.toFixed(1), K = '#1b1f24', EXT = '#6b7280';
   const arrow = (x, y, dx, dy) => { const a = 5, w = 2; const nx = -dy, ny = dx; return `<polygon points="${f(x)},${f(y)} ${f(x - dx * a + nx * w)},${f(y - dy * a + ny * w)} ${f(x - dx * a - nx * w)},${f(y - dy * a - ny * w)}" fill="${K}"/>`; };
-  const text = (x, y, t, { rot = 0, anchor = 'middle' } = {}) => `<text x="${f(x)}" y="${f(y)}" font-size="10" text-anchor="${anchor}" fill="${K}" stroke="#fff" stroke-width="3" paint-order="stroke" ${rot ? `transform="rotate(${rot} ${f(x)} ${f(y)})"` : ''}>${esc(t)}</text>`;
+  const text = (x, y, t, { rot = 0, anchor = 'middle', id = null } = {}) => `<text x="${f(x)}" y="${f(y)}" font-size="10" text-anchor="${anchor}" fill="${id ? '#0b4fb3' : K}" stroke="#fff" stroke-width="3" paint-order="stroke" ${id ? `data-dim="${id}" style="cursor:pointer"` : ''} ${rot ? `transform="rotate(${rot} ${f(x)} ${f(y)})"` : ''}>${esc(t)}</text>`;   // id – wymiar edytowalny (klik w tekst)
   let out = '<g class="dims" font-family="Arial, sans-serif">';
   for (const d of dims) {
     if (d.t === 'v') {
       const x = X(d.x), y1 = Y(d.y1), y2 = Y(d.y2), up = y1 < y2 ? 1 : -1;
       for (const [fx, yy] of [[d.f1, y1], [d.f2, y2]]) if (fx != null) out += `<line x1="${f(X(Math.sign(d.x) * Math.abs(fx)))}" y1="${f(yy)}" x2="${f(x + Math.sign(d.x) * 4)}" y2="${f(yy)}" stroke="${EXT}" stroke-width="0.6"/>`;   // linie pomocnicze
-      out += `<line x1="${f(x)}" y1="${f(y1)}" x2="${f(x)}" y2="${f(y2)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x, y1, 0, up) + arrow(x, y2, 0, -up) + text(x - 3, (y1 + y2) / 2, d.text, { rot: -90 });
+      out += `<line x1="${f(x)}" y1="${f(y1)}" x2="${f(x)}" y2="${f(y2)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x, y1, 0, up) + arrow(x, y2, 0, -up) + text(x - 3, (y1 + y2) / 2, d.text, { rot: -90, id: d.id });
     } else if (d.t === 'h') {
       const y = Y(d.y), x1 = X(d.x1), x2 = X(d.x2);
       for (const [fy, xx] of [[d.f1, x1], [d.f2, x2]]) if (fy != null) out += `<line x1="${f(xx)}" y1="${f(Y(fy))}" x2="${f(xx)}" y2="${f(y - 4)}" stroke="${EXT}" stroke-width="0.6"/>`;
-      out += `<line x1="${f(x1)}" y1="${f(y)}" x2="${f(x2)}" y2="${f(y)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x1, y, 1, 0) + arrow(x2, y, -1, 0) + text((x1 + x2) / 2, y - 3, d.text);
+      out += `<line x1="${f(x1)}" y1="${f(y)}" x2="${f(x2)}" y2="${f(y)}" stroke="${K}" stroke-width="0.8"/>` + arrow(x1, y, 1, 0) + arrow(x2, y, -1, 0) + text((x1 + x2) / 2, y - 3, d.text, { id: d.id });
     } else out += text(X(d.x) + (d.anchor === 'end' ? -2 : 2), Y(d.y), d.text, { anchor: d.anchor || 'start' });
   }
   return out + '</g>';

@@ -9,7 +9,7 @@ import { fullContour } from '../logic/contourGen.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { multiFilter, toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast } from './toolViews.js';
+import { multiFilter, toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast, dimsOn, dimsToggle } from './toolViews.js';
 import { firebase } from '../fb.js';
 import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
@@ -294,6 +294,8 @@ export function mountBuilder(el, ctx) {
     const ro = (label, value) => h('label', { class: 'f' }, h('span', {}, label), h('input', { type: 'text', value, readonly: true }));
     const komis = h('input', { type: 'text' }), ktk = h('input', { type: 'text' }), op = h('input', { type: 'text' });
     const stack = st.index ? G.buildStack(sel.map((t) => st.index.stackTool(t)), false, true) : null;
+    const pane2d = h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } });
+    const draw2d = () => { clear(pane2d); pane2d.append(stack ? stackSvg(stack, { dims: dimsOn() }) : h('p', { class: 'muted' }, 'Brak danych konturu 2D.')); };   // wymiary można wyłączyć przyciskiem
     const save = h('button', { class: 'btn primary', onclick: async () => {
       const codes = B.codesText(sel), path = B.selectionPath(sel), len = String(B.totalLength(sel));
       if (!codes.trim() || !path.trim() || !len.trim()) { await alertBox('ToolBuilder', 'Wszystkie pola nieedytowalne muszą być wypełnione!'); return; }
@@ -311,10 +313,11 @@ export function mountBuilder(el, ctx) {
         h('label', { class: 'f' }, h('span', {}, 'Komis'), komis), h('label', { class: 'f' }, h('span', {}, 'Nr KTK'), ktk), h('label', { class: 'f' }, h('span', {}, 'Numer operacji'), op),
         h('div', { class: 'row', style: { marginTop: '8px' } }, save, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj')),
         h('button', { class: 'btn', style: { marginTop: '8px', width: '100%' }, onclick: () => coordinates(sel) }, 'Współrzędne')),
-      h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 2D'),
-        h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, stack ? stackSvg(stack, { dims: true }) : h('p', { class: 'muted' }, 'Brak danych konturu 2D.'))),
+      h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'row', style: { gap: '8px' } }, h('span', { class: 'muted' }, 'Podgląd 2D'), dimsToggle(draw2d)),
+        pane2d),
       h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 } }, h('div', { class: 'muted' }, 'Podgląd 3D'),
         h('div', { style: { flex: 1, minHeight: '300px', border: '1px solid #ddd' } }, toolView3d(st.index, sel)))));
+    draw2d();
     komis.focus();
   }
 

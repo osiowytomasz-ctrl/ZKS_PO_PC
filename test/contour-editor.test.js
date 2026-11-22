@@ -105,3 +105,19 @@ test('kontury z wewnętrznego generatora zamiast T (ustawienie), zatwierdzone ma
   assert.equal(v.get('b2'), '0_0;40_0;40_400;0_400;-40_400;-40_0');
   assert.ok(v.regions.has('b2'));   // monolityczne – część robocza wg K
 });
+
+test('wymiary konturu w podglądzie 2D: średnice, długości odcinków, długość całkowita – edycja wartości przesuwa punkty', async () => {
+  const E2 = await import('../src/renderer/js/logic/contourEditor.js');
+  // oprawka: trzpień R 10 (Z −20…0), kołnierz R 25 (Z 0…15), stożek do R 40 (Z 15…30), góra
+  const rows = [{ z: '-20', r: '10' }, { z: '0', r: '10' }, { z: '0', r: '25' }, { z: '15', r: '25' }, { z: '30', r: '40' }, { z: '30', r: '0' }];
+  const dims = E2.rowDims(rows), by = (id) => dims.find((d) => d.id === id);
+  assert.deepEqual(dims.filter((d) => d.t === 'h').map((d) => d.text), ['Ø20', 'Ø50'], 'średnice walców (odcinki o stałym promieniu)');
+  assert.deepEqual(dims.filter((d) => d.t === 'v').map((d) => d.text), ['20', '15', '15', '50'], 'łańcuch odcinków wzdłuż osi + długość całkowita (poziom 0 ma dwa punkty – jeden odcinek)');
+  // zmiana średnicy walca: promień obu punktów
+  by('d0').apply(24); assert.equal(rows[0].r, '12'); assert.equal(rows[1].r, '12'); assert.equal(rows[2].r, '25');
+  // zmiana długości odcinka (kołnierz 15 → 20): punkty powyżej przesuwają się o 5
+  const k = E2.rowDims(rows).find((d) => d.text === '15'); k.apply(20); assert.deepEqual(rows.map((r) => r.z), ['-20', '0', '0', '20', '35', '35']);
+  // zmiana długości całkowitej: szczyt przesuwa się, reszta bez zmian
+  E2.rowDims(rows).find((d) => d.id === 'L').apply(60); assert.deepEqual(rows.map((r) => r.z), ['-20', '0', '0', '20', '40', '40']);
+  assert.deepEqual(E2.rowDims([{ z: '0', r: '5' }]), [], 'za mało punktów – bez wymiarów');
+});

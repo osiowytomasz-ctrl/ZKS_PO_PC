@@ -12,7 +12,7 @@ import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openPlateEditor } from './plateEditor.js';
 import { mountPlateLayout } from './plateLayout.js';
 import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
-import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase } from './toolViews.js';
+import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase, dimsSvg, dimsOn, dimsToggle } from './toolViews.js';
 import { basePresets, parsePlate } from '../logic/plateEdit.js';
 import * as B from '../logic/builder.js';
 
@@ -50,7 +50,7 @@ export function mountContours(el, ctx) {
   const preview = h('div', { style: { flex: 1, minHeight: '320px', background: '#fff', border: '1px solid #ccc', touchAction: 'none', userSelect: 'none' } });
   // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
   let saveVBtn = null, plateBtn = null, platePanel = null;
-  const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null, zoom: 1, pan: { x: 0, y: 0 } };
+  const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null, dims: dimsOn(), dimEdit: null, zoom: 1, pan: { x: 0, y: 0 } };
   const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
   // krok siatki / przyciągania: auto, standardowe oraz drobniejsze (do 0,01 mm) i dowolny wpisany
   const customStep = h('input', { type: 'number', min: 0.001, step: 'any', value: 0.03, title: 'Własny krok siatki i przyciągania, mm', style: { width: '64px', display: 'none' }, oninput: () => { const v = Number(customStep.value); if (v > 0) { pv.step = v; drawPreview(); } } });
@@ -67,7 +67,7 @@ export function mountContours(el, ctx) {
   const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
   const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel, customStep, fitBtn,
-    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), (plateBtn = h('button', { class: 'btn small', style: { background: '#c8a400', color: '#000', borderColor: '#8a6d00', fontWeight: 600 }, title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu – tabela po lewej stronie rysunku', onclick: () => togglePlatePanel() }, 'Płytki…')), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
+    h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), dimsToggle(() => { pv.dims = dimsOn(); pv.dimEdit = null; pv.view = null; drawPreview(); }), (plateBtn = h('button', { class: 'btn small', style: { background: '#c8a400', color: '#000', borderColor: '#8a6d00', fontWeight: 600 }, title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu – tabela po lewej stronie rysunku', onclick: () => togglePlatePanel() }, 'Płytki…')), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję. Kółko myszy – powiększenie, przeciągnięcie tła – przesuwanie widoku.'), regionBar);
   /** Rząd rysunku: po lewej panel płytek (poza rejonem kreślenia), dalej rysunek 2D / 3D. */
   const previewRow = h('div', { style: { display: 'flex', gap: '6px', flex: 1, minHeight: 0, alignItems: 'stretch' } }, preview, prev3d);
@@ -331,6 +331,15 @@ export function mountContours(el, ctx) {
     st.rows = st.full ? E.halfFromContour(st.full) : [];
   }
 
+  // ---------- wymiary konturu: edytowalne (klik w niebieski tekst) + opisy narzędzia ----------
+  /** Wymiary konturu z wierszy tabeli (`E.rowDims`): średnice walców, łańcuch długości odcinków i długość całkowita – edytowalne (klik w niebieski tekst). */
+  const editorDims = () => E.rowDims(st.rows);
+  /** Wszystkie wymiary na rysunku: edytowalne z konturu + opisy narzędzia (długość J, Ø, chwyt, ostrze, wysięg, Ms / Mk / r/α – bez edycji). */
+  function previewDims(t, nPts) {
+    const out = editorDims(), b2 = nPts.length >= 3 ? G.bounds(nPts) : null, stt = st.index && st.index.stackTool(t);
+    if (stt && b2) out.push(...G.layerDims({ ...stt, contour: nPts }, b2, -b2.maxY, { cylinders: false, chain: false }));
+    return out;
+  }
   function drawPreview() {
     const t = st.tool;
     const errs = t && !st.full ? E.validate(st.rows) : [];
@@ -365,7 +374,8 @@ export function mountContours(el, ctx) {
     if (svg) layers.push({ pts: E.svgToContour(svg), stroke: '#1565c0', fill: 'rgba(21,101,192,.18)', dash: '', label: 'nowy kontur' });
     // płytki skrawające: rozmieszczenie jak w zestawie (algorytm ToolBuildera) + korekta prawej płytki (lewa – odbicie lustrzane)
     const ins = t && pv.showIns ? insertsOf(t) : [];
-    const all = [...layers.flatMap((l) => l.pts), ...ins.flatMap((q) => [...q.right, ...(q.left || [])])];
+    const nP0 = svg ? E.svgToContour(svg) : [], dimList = pv.dims && t && nP0.length >= 3 ? previewDims(t, nP0) : [], de = G.dimsExtent(dimList), dimPts = de ? [{ x: de.minX, y: -de.maxY }, { x: de.maxX, y: -de.minY }] : [];   // wymiary mieszczą się w widoku
+    const all = [...layers.flatMap((l) => l.pts), ...ins.flatMap((q) => [...q.right, ...(q.left || [])]), ...dimPts];
     if (!all.length) { preview.innerHTML = '<p class="muted" style="padding:10px">Brak konturu do pokazania.</p>'; info.textContent = ''; drawRegionBar(); return; }
     const W = 600, H = 600, pad = 30;
     // widok zamrożony w czasie przeciągania (żeby rysunek nie „uciekał” spod kursora)
@@ -429,6 +439,7 @@ export function mountContours(el, ctx) {
       out += q.base ? `<g pointer-events="none"><circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="5" fill="none" stroke="#0a7d2c" stroke-width="1.6"/><line x1="${f2(X(bp.x) - 8)}" y1="${f2(Y(bp.y))}" x2="${f2(X(bp.x) + 8)}" y2="${f2(Y(bp.y))}" stroke="#0a7d2c" stroke-width="1.2"/><line x1="${f2(X(bp.x))}" y1="${f2(Y(bp.y) - 8)}" x2="${f2(X(bp.x))}" y2="${f2(Y(bp.y) + 8)}" stroke="#0a7d2c" stroke-width="1.2"/></g>`
         : `<circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
     });
+    if (dimList.length) out += dimsSvg(dimList, sc, X(0), Y(0));   // linie wymiarowe, linie pomocnicze, teksty (niebieskie – edytowalne)
     // uchwyty: odcinki i punkty nowego konturu (połowa – prawa strona; pełny kontur – wszystkie punkty)
     const hp = st.full ? st.full.map((p) => ({ x: p.x, y: p.y })) : (svg ? E.fullPoints(st.rows).slice(0, st.rows.length).map((p) => ({ x: p.x * 10, y: p.y * 10 })) : []);
     const closed = !!st.full;
@@ -468,6 +479,8 @@ export function mountContours(el, ctx) {
   const getPoint = (k) => (st.full ? { ...st.full[k] } : { x: Number(String(st.rows[k].r).replace(',', '.')) * 10, y: Number(String(st.rows[k].z).replace(',', '.')) * 10 });
   preview.addEventListener('pointerdown', (e) => {
     if (!st.tool) return;
+    const dimEl = e.target.closest && e.target.closest('[data-dim]');
+    if (dimEl) { pv.dimEdit = dimEl.dataset.dim; pv.ptEdit = null; pv.insSel = null; drawPreview(); e.preventDefault(); return; }   // klik w wymiar – okienko edycji wartości
     const w = world(e); if (!w) return;
     const ptEl = e.target.closest('[data-pt]'), segEl = e.target.closest('[data-seg]'), insEl = e.target.closest('[data-ins]');
     if (insEl) {
@@ -599,6 +612,23 @@ export function mountContours(el, ctx) {
     const rowI = (label, inp, unit = 'mm') => h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' } }, label), inp, h('span', { class: 'muted' }, unit));
     const closeBtn = (fn) => h('button', { class: 'btn small', style: { float: 'right' }, onclick: fn }, '✕');
     if (!svgEl) return;
+    if (pv.dimEdit != null) {   // edycja wymiaru: nowa wartość przesuwa odpowiednie punkty konturu (kontur z połowy, jak przy zmianie punktu w tabeli)
+      const dm = editorDims().find((q) => q.id === pv.dimEdit), pos = dm && at(`[data-dim="${dm.id}"]`);
+      if (dm && pos) {
+        const inp = h('input', { type: 'text', value: String(round3(dm.value)).replace('.', ','), style: { width: '80px', padding: '1px 4px' } });
+        const apply = () => {
+          const v = Number(String(inp.value).replace(',', '.'));
+          if (!Number.isFinite(v) || v <= 0) { toast('Wymiar musi być liczbą większą od zera.', true); return; }
+          dm.apply(v); st.full = null; st.srcHalf = null; st.dirty = true; pv.dimEdit = null; drawTable(); drawPreview();
+          status.set(`Zmieniono wymiar na ${String(round3(v)).replace('.', ',')} mm (kontur z połowy – bez linii wewnętrznych).`, 'neutral');
+        };
+        inp.onkeydown = (e) => { if (e.key === 'Enter') apply(); else if (e.key === 'Escape') { pv.dimEdit = null; drawPreview(); } };
+        box(pos.x, pos.y, closeBtn(() => { pv.dimEdit = null; drawPreview(); }), h('b', {}, dm.t === 'h' ? 'Średnica' : 'Długość'),
+          h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, inp, h('span', { class: 'muted' }, 'mm'), h('button', { class: 'btn small primary', onclick: apply }, 'Zmień')),
+          h('div', { class: 'muted', style: { fontSize: '10px' } }, dm.t === 'h' ? 'Zmienia promień obu punktów walca.' : 'Punkty powyżej przesuwają się o różnicę.'));
+        setTimeout(() => { inp.focus(); inp.select(); }, 0);
+      }
+    }
     if (pv.ptEdit != null) {
       const k = pv.ptEdit, pos = at(`[data-pt="${k}"]`);
       if (pos) {

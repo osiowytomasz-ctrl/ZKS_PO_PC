@@ -402,3 +402,31 @@ export function parseRegionsText(text) {
   return String(text || '').split(';').map((x) => /^(ostrze|oprawka)\s+(-?[\d.,]+)\s*[–-]\s*(-?[\d.,]+)$/i.exec(x.trim())).filter(Boolean)
     .map((m) => ({ role: m[1].toLowerCase(), z1: Number(m[2].replace(',', '.')), z2: Number(m[3].replace(',', '.')) }));
 }
+
+// ---------- wymiary konturu edytowalne w podglądzie 2D (Kontury) ----------
+const fm3 = (v) => String(Math.round(v * 1000) / 1000);
+const fmDim = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
+/**
+ * Wymiary konturu z wierszy tabeli [rows] (mm): średnice walców (poziome, wewnątrz bryły), długości kolejnych odcinków wzdłuż osi (łańcuch po prawej) i długość całkowita.
+ * Każdy ma `id`, `value` (mm) i `apply(v)` – zmienia wiersze [rows] w miejscu: średnica – promień obu punktów walca, długość odcinka (całkowita) – punkty powyżej (na poziomie
+ * szczytu) przesuwają się o różnicę. Współrzędne rysunku: y = −Z (0,1 mm), jak w rysunku zestawu (stackSvg / dimsSvg).
+ */
+export function rowDims(rows) {
+  const R = rows.map((r, i) => ({ i, z: Number(String(r.z ?? '').replace(',', '.')), r: Number(String(r.r ?? '').replace(',', '.')), ok: String(r.z ?? '').trim() !== '' && String(r.r ?? '').trim() !== '' }))
+    .filter((q) => q.ok && Number.isFinite(q.z) && Number.isFinite(q.r));
+  if (R.length < 2) return [];
+  const out = [], maxR = Math.max(...R.map((q) => q.r)), at = (z) => Math.max(0, ...R.filter((q) => Math.abs(q.z - z) < 1e-6).map((q) => q.r * 10)) || maxR * 10;
+  for (let k = 0; k + 1 < R.length; k++) {
+    const a = R[k], c = R[k + 1];
+    if (a.r > 0 && Math.abs(a.r - c.r) < 1e-9 && Math.abs(c.z - a.z) >= 0.5) out.push({ id: 'd' + k, t: 'h', y: -((a.z + c.z) / 2) * 10, x1: -a.r * 10, x2: a.r * 10, f1: null, f2: null, text: 'Ø' + fmDim(2 * a.r), value: 2 * a.r, apply: (v) => { rows[a.i].r = fm3(v / 2); rows[c.i].r = fm3(v / 2); } });
+  }
+  const lv = [...new Set(R.map((q) => Math.round(q.z * 1000) / 1000))].sort((p, q) => p - q);
+  const shiftFrom = (z1, d) => R.filter((q) => q.z >= z1 - 1e-6).forEach((q) => { rows[q.i].z = fm3(q.z + d); });
+  for (let k = 0; k + 1 < lv.length; k++) {
+    const z0 = lv[k], z1 = lv[k + 1];
+    if (z1 - z0 >= 0.2) out.push({ id: 'l' + k, t: 'v', x: maxR * 10 + 480, y1: -z1 * 10, y2: -z0 * 10, f1: at(z1), f2: at(z0), text: fmDim(z1 - z0), value: z1 - z0, apply: (v) => shiftFrom(z1, v - (z1 - z0)) });
+  }
+  if (lv.length > 2) { const zmin = lv[0], zmax = lv[lv.length - 1]; out.push({ id: 'L', t: 'v', x: maxR * 10 + 620, y1: -zmax * 10, y2: -zmin * 10, f1: at(zmax), f2: at(zmin), text: fmDim(zmax - zmin), value: zmax - zmin, apply: (v) => shiftFrom(zmax, v - (zmax - zmin)) }); }
+  return out;
+}
+

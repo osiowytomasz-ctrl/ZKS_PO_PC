@@ -5,7 +5,7 @@ import { h, clear, apiCached } from '../ui.js';
 import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
-import { wearCodeCell, toolCard, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine } from './toolViews.js';
+import { wearCodeCell, toolCard, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, dimsOn, dimsToggle } from './toolViews.js';
 
 const FILTERS = [['group', 'Grupa'], ['type', 'Rodzaj'], ['diameter', 'Φ'], ['length', 'L']];
 const empty = () => ({ group: '', type: '', diameter: '', length: '' });
@@ -64,7 +64,7 @@ export function mountBn(el, ctx) {
     let content;
     if (!st.index) content = h('p', {}, st.indexError ? 'Brak danych narzędzi: ' + st.indexError : 'Ładowanie danych narzędzi…');
     else if (view === 'parts') content = partsTable(st.index.partRows(codes));
-    else if (view === 'd2') { const s = G.buildStack(codes.map((c) => st.index.stackTool(c)).filter(Boolean), true, false); content = s ? stackSvg(s, { labels: true, dims: true, width: 900, height: 900 }) : h('p', {}, 'Brak danych konturu 2D.'); }
+    else if (view === 'd2') { const s = G.buildStack(codes.map((c) => st.index.stackTool(c)).filter(Boolean), true, false); if (!s) content = h('p', {}, 'Brak danych konturu 2D.'); else { const pane = h('div', { style: { flex: 1, minHeight: 0 } }), draw = () => { clear(pane); pane.append(stackSvg(s, { labels: true, dims: dimsOn(), width: 900, height: 900 })); }; draw(); content = h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', gap: '4px' } }, h('div', { class: 'row' }, dimsToggle(draw)), pane); } }
     else content = toolView3d(st.index, codes);
     fullScreen(title, content);
   }

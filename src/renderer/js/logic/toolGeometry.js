@@ -117,7 +117,7 @@ export function rotateAround(p, pivot, angleDeg) {
  * średnice walców, długość ostrza, końcówkę ponad czołem (np. trzpień FRE), długość chwytu / zagłębienia mocowania Ms (z konturu poniżej Z = 0 – głębokość z reguł mocowań:
  * Weldon, ER, MK, ABS, FRE …), oraz opisy Ms, Mk, r/α z tabeli narzędzi.
  */
-export function layerDims(tool, b, y0) {
+export function layerDims(tool, b, y0, { cylinders = true, chain = true } = {}) {
   // czoło narzędzia (wierzchołek płytki) leży na Z = tip: J, a dla frezów z chwytem Weldon / trzpieniem FRExxx J − chwyt (reszta długości J to chwyt poniżej Z = 0)
   const out = [], yOf = (z) => y0 + (b.maxY - z * 10), J = tool.length > 0 ? tool.length : tool.nominalLength || 0, total = tool.nominalLength || J, maxR = Math.max(Math.abs(b.minX), b.maxX);
   const R = (z) => radiusAtY(tool.contour, z * 10) || maxR, fm = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
@@ -131,7 +131,11 @@ export function layerDims(tool, b, y0) {
   for (const g of (tool.regions || [])) if (g.role === 'ostrze' && g.z2 > g.z1 && !tool.trepan) out.push({ t: 'v', x: maxR + 240, y1: yOf(g.z2), y2: yOf(g.z1), f1: R(g.z2), f2: R(g.z1), text: `ostrze ${fm(g.z2 - g.z1)}` });
   // średnice walców (odcinki obrysu o stałym promieniu, ≥ 3 mm) – wymiar wewnątrz bryły
   const rows = halfFromContour(tool.contour).map((q) => ({ r: Number(q.r), z: Number(q.z) })), seen = new Set();
-  for (let i = 0; i + 1 < rows.length; i++) {
+  if (chain) {   // łańcuch wymiarów: długości kolejnych odcinków konturu wzdłuż osi (od poziomu do poziomu)
+    const lv = [...new Set(rows.map((q) => Math.round(q.z * 1000) / 1000))].sort((a, c) => a - c);
+    for (let i = 0; i + 1 < lv.length; i++) if (lv[i + 1] - lv[i] >= 1) out.push({ t: 'v', x: maxR + 480, y1: yOf(lv[i + 1]), y2: yOf(lv[i]), f1: Math.max(0, ...rows.filter((q) => Math.abs(q.z - lv[i + 1]) < 1e-6).map((q) => q.r * 10)) || maxR, f2: Math.max(0, ...rows.filter((q) => Math.abs(q.z - lv[i]) < 1e-6).map((q) => q.r * 10)) || maxR, text: fm(lv[i + 1] - lv[i]) });
+  }
+  if (cylinders) for (let i = 0; i + 1 < rows.length; i++) {
     const a = rows[i], c = rows[i + 1], key = Math.round(a.r * 100);
     if (a.r > 0.5 && Math.abs(a.r - c.r) < 1e-6 && Math.abs(c.z - a.z) >= 3 && !seen.has(key) && !(tool.diameter > 0 && Math.abs(2 * a.r - tool.diameter) < 0.01 && Math.abs((a.z + c.z) / 2 - J) < 6)) {
       seen.add(key); out.push({ t: 'h', y: yOf((a.z + c.z) / 2), x1: -a.r * 10, x2: a.r * 10, f1: null, f2: null, text: `Ø${fm(2 * a.r)}` });
