@@ -202,6 +202,7 @@ export function contourOverrides(params, mounts, { gen = false, v = {} } = {}) {
   learnFre(params);   // wymiary trzpieni FRExxx z oprawek PSWT (L – średnica, K – wysokość) dla frezów z tym mocowaniem
   const m = confirmedOverrides(params);
   m.generated = new Set();
+  m.params = new Map(Object.entries(params || {}).map(([k, o]) => [String(k).trim().toLowerCase().replace(/\s+/g, ' '), o]));   // parametry PSWT (K – długość robocza, G – kąt, H – rzędy płytek jeża) do rozmieszczenia płytek
   m.blade = new Map();   // długość ostrza (mm) narzędzi monolitycznych – podział na ostrze / oprawkę także bez zatwierdzonego konturu
   const key = (k) => String(k).trim().toLowerCase();
   const str = (pts) => pts.map((p) => `${fmt(p.x)}_${fmt(p.y)}`).join(';');

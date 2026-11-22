@@ -112,8 +112,27 @@ export function rotateAround(p, pivot, angleDeg) {
 
 /** Frez z mocowaniem FRExxx (nasadzany na trzpień, grupa „fre”). */
 export const isFreFit = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && freL2(t && t.columnM) > 0;
-/** Frez palcowy / jeżowy (fre / pal, fre / jez) zamocowany na chwycie Weldon (M = WELxxx): kontur leży niżej o głębokość chwytu. */
-export const isWeldonMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['pal', 'jez'].includes(String((t && t.columnE) ?? '').trim().toLowerCase()) && weldonDepth(t && t.columnM) > 0;
+/** Frez palcowy / jeżowy / płytkowy (fre / pal, jez, plu) zamocowany na chwycie Weldon (M = WELxxx): kontur leży niżej o głębokość chwytu. */
+export const isWeldonMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['pal', 'jez', 'plu'].includes(String((t && t.columnE) ?? '').trim().toLowerCase()) && weldonDepth(t && t.columnM) > 0;
+/** Frez płytkowy (fre / plu) albo jeżowy (fre / jez): płytki w rzędach równomiernie na długości roboczej, pod kątem G. */
+export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && ['plu', 'jez'].includes(String((t && t.columnE) ?? '').trim().toLowerCase());
+/**
+ * Rzędy płytek frezu płytkowego / jeżowego: [catalog] – płytki katalogu [{ code, path }], [pswt] – parametry PSWT (K – długość robocza, G – kąt płytek ≈ 10°, H – liczba rzędów jeża).
+ * Liczba rzędów: jeż – kolumna H (całkowita ≥ 1), frez płytkowy – liczba płytek katalogu; płytki rozmieszczone równomiernie na długości roboczej K (pierwszy rząd na wysokości J,
+ * ostatni kończy się na J − K), każdy obrócony o kąt G. Bez długości roboczej – wszystkie na wysokości J. Wynik: lista płytek układu (kind edge, row: true).
+ */
+export function millRows(tool, catalog, pswt) {
+  if (!catalog.length) return [];
+  const jez = String(tool.columnE ?? '').trim().toLowerCase() === 'jez', hv = num(pswt && pswt.H), K = num(pswt && pswt.K), ang = num(pswt && pswt.G) || 0;
+  const n = jez && hv >= 1 ? Math.min(60, Math.round(hv)) : catalog.length;
+  const height = (path) => { const r = parseInsertPath(path); return r.length ? (Math.max(...r.map((p) => p.y)) - Math.min(...r.map((p) => p.y))) / 10 : 0; };
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const c = catalog[i % catalog.length], step = n > 1 && K > 0 ? Math.max(0, (K - height(c.path)) / (n - 1)) : 0;
+    rows.push({ code: c.code, path: c.path, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: 0, dz: Math.round(-i * step * 1000) / 1000 || 0, ang, phi: 0, z: 0, custom: false, row: true });
+  }
+  return rows;
+}
 /**
  * Długość do ustalenia płytek: J, a dla frezów z mocowaniem FRExxx J − L2 (kontur cofnięty o wysokość trzpienia mocującego), dla frezów palcowych i jeżowych
  * na chwycie Weldon J − długość chwytu Weldon (kontur leży niżej o głębokość chwytu).
@@ -223,7 +242,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     const outline = tool.contour.map((p) => pt(p.x, offsetY + (b.maxY - p.y)));
     // płytki: własny układ narzędzia (rodzaj, wiele płytek, położenie) albo płytki katalogu; centralna – jeden wielokąt na osi, obwodowa – para lewa / prawa
     // podgląd zapisu (allInserts = false) pokazuje pierwszą płytkę, ale nie gubi płytek, które tworzą układ: własny układ, płytki centralne / nieregularne i wiertła płytkowe (np. Komet z dwiema płytkami)
-    const list = tool.plates ? (allInserts ? tool.plates : tool.plates.filter((p, i) => i === 0 || p.custom || (p.kind && p.kind !== 'edge') || tool.drill))
+    const list = tool.plates ? (allInserts ? tool.plates : tool.plates.filter((p, i) => i === 0 || p.custom || (p.kind && p.kind !== 'edge') || p.row || tool.drill))
       : (allInserts ? tool.inserts : tool.inserts.slice(0, 1)).map((path) => ({ path, code: '', kind: tool.central ? 'central' : 'edge', central: !!tool.central, dx: 0, dz: 0, ang: 0, phi: 0, z: 0 }));
     const placed = [], plates = [];
     for (const pl0 of list) {
@@ -362,10 +381,12 @@ export function buildMini(tool, details, plateLookup = null) {
   let polygons = [];
   const custom = group === 'tre' ? null : plateSetup(tool);
   const kometDrill = isWiePly && company.includes('komet') && !company.includes('iscar') && !company.includes('amec');   // płytki Komet nie są centralne – układ jak w podglądzie
-  if (group !== 'tre' && (custom || kometDrill)) {   // własny układ płytek albo wiertło Komet: to samo rozmieszczenie co w podglądzie (miniatura = podgląd) (stos jednego narzędzia: y rysunku = offsetY + maxY − Z), przeliczone na miniaturę
+  const rowMill = group === 'fre' && isRowMill(tool) && !custom;   // frez płytkowy / jeżowy: rzędy płytek jak w podglądzie
+  if (group !== 'tre' && (custom || kometDrill || rowMill)) {   // własny układ płytek albo wiertło Komet: to samo rozmieszczenie co w podglądzie (miniatura = podgląd) (stos jednego narzędzia: y rysunku = offsetY + maxY − Z), przeliczone na miniaturę
     const catalog = inserts.filter((i) => String(i.contour ?? '').trim());
     const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || (plateLookup && plateLookup(code)) || '';
-    const plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
+    let plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
+    if (rowMill && plates.length) plates = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path })), details && details.pswt).map((p) => ({ ...p, base: plateBaseOf(p.code) }));
     const lay = buildStack([{ code: tool.productCode, contour: points, plates, inserts: plates.map((p) => p.path), diameter, length, angle: num(tool.columnG), chamfer: false, central: isCentralTool(tool), drill: isWiePly }], true, false);
     polygons = lay ? lay.layers[0].inserts.map((poly) => poly.map((p) => pt(offsetX + (p.x - b.minX) * scale, offsetY + p.y * scale))) : [];
   } else for (const ins of toRender) {
@@ -434,7 +455,8 @@ export function toolIndex(catalog, overrides = null) {
    */
   const detMemo = new Map();
   const det = (code) => {
-    const r = det0(code), t = tools.get(normCode(code));
+    const r0 = det0(code), t = tools.get(normCode(code));
+    const r = r0 && t && isRowMill(t) && !r0.pswt ? { ...r0, pswt: (overrides && overrides.params && overrides.params.get(normCode(code))) || null } : r0;   // parametry PSWT frezu płytkowego / jeżowego
     if (!r || !t || String(t.columnD ?? '').trim().toLowerCase() !== 'fre' || !String(r.columnAY ?? '').trim()) return r;
     const l2 = isFreFit(t) ? freL2(t.columnM) : 0, key = normCode(code), hit = detMemo.get(key);
     if (hit && hit.src === r.columnAY && hit.l2 === l2 && hit.regions === r.regions) return hit.ay === r.columnAY && hit.rg === r.regions ? r : { ...r, columnAY: hit.ay, regions: hit.rg };
@@ -467,6 +489,11 @@ export function toolIndex(catalog, overrides = null) {
       let plates = resolvePlates(opts.layout === false ? null : own(plateSetup(t)), catalog.map((i) => i.code), isCentralTool(t));
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code) })).filter((p) => p.path);
+      if (!tre && isRowMill(t) && !own(opts.layout === false ? null : plateSetup(t)) && plates.length) {   // frez płytkowy / jeżowy: rzędy równomiernie na długości roboczej, pod kątem G
+        const rows = millRows(t, plates.map((p) => ({ code: p.code, path: p.path })), d && d.pswt);
+        plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) }));
+        if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
+      }
       const contour = parseContour(d && d.columnAY);
       return { code: t.productCode, contour, regions: (d && d.regions) || null, inserts: plates.map((p) => p.path), plates, diameter: num(t.columnF), length: plateLength(t), angle: num(t.columnG), chamfer: isChamferForPreview(t.productCode, t.columnE, t.name), central: isCentralTool(t), drill: isDrillPlate(t), trepan: tre, holeN: String(t.columnD ?? '').trim().toLowerCase() === 'opr' ? t.columnN : '', startM: t.columnM, fitM: String(t.columnD ?? '').trim().toLowerCase() === 'fre' && freL2(t.columnM) ? t.columnM : '' };
     },

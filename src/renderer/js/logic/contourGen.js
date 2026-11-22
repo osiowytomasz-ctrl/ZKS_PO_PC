@@ -182,16 +182,17 @@ function bodyContour0(p, av = '') {
   if (D === 'opr' && E === 'red' && N3 === 'FRE' && (M3 === 'ABS' || M3 === 'MHD')) {
     return pts([[(-F * 10) / 2, 0], [(-I * 10) / 2, (I - F) * 5], ...holder(K || freL2(N)), [(I * 10) / 2, (I - F) * 5], [(F * 10) / 2, 0]]);   // trzpień: wysokość z kolumny K (PSWT), bez niej – tabela FRExxx
   }
-  if (D === 'fre' && (['tar', 'teo', 'jez', 'pal'].includes(E) || (E === 'plu' && M3 === 'WEL'))) {
+  if (D === 'fre' && (['tar', 'teo', 'jez', 'pal', 'plu'].includes(E))) {
     // wersja z kolumny T: chwyt Fi_większe (I), część robocza 0,98·F (tarczowe – F), czoło 1 mm krócej; w oprawce Weldon całość niżej o głębokość mocowania
-    const off = M3 === 'WEL' ? minY(av) : 0, a = ((E === 'tar' ? 1 : 0.98) * F * 10) / 2, i = (I * 10) / 2, w = (J - K) * 10 + off, t = (J - 1) * 10 + off;
+    // frez płytkowy (plu): korpus o 2,5% mniejszy od Ø nominalnego (płytki zostają na Ø), długość korpusu J − 3 mm (płytki na wysokości J); chwyt Weldon – całość niżej o głębokość chwytu
+    const off = M3 === 'WEL' ? minY(av) : 0, a = ((E === 'tar' ? 1 : E === 'plu' ? 0.975 : 0.98) * F * 10) / 2, i = (I * 10) / 2, w = (J - K) * 10 + off, t = (J - (E === 'plu' ? 3 : 1)) * 10 + off;
     return pts([[(-L * 10) / 2, 0], [-i, 0], [-i, w], [-a, w], [-a, t], [a, t], [a, w], [i, w], [i, 0], [(L * 10) / 2, 0]]);
   }
   if (D === 'fre' && (E === 'hss' || E === 'węg')) {
     const c = E === 'hss' ? 3 : 3.5, b = -c * F * 10, a = (F * 10) / 2, w = (-c * F + J - K) * 10, t = (-c * F + J) * 10;
     return pts([[0, b], [a, b], [a, w], [-a, w], [-a, t], [a, t], [a, w], [-a, w], [-a, b], [0, b]], { lead: false, tail: false });
   }
-  if (D === 'fre' && (E === 'faz' || E === 'plu')) {
+  if (D === 'fre' && E === 'faz') {
     // reguła dopisana (dawna formuła jej nie miała): walec Ø I (Fi_większe), na czole stożek pod kątem G (pochylenie) do Ø F; w Weldonie niżej o głębokość
     const off = M3 === 'WEL' ? minY(av) : 0, big = (I || F) * 5, small = F * 5, ang = G > 0 && G < 90 ? G : 90;
     const hc = ang === 90 ? 0 : (big - small) / Math.tan((ang * Math.PI) / 180);

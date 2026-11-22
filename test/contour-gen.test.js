@@ -357,3 +357,36 @@ test('frezy palcowe i jeżowe na chwycie Weldon: płytki ustalone względem dłu
   const lay = G2.buildStack([idx.stackTool(idx.tool('F'))], true, false).layers[0], topBody = Math.min(...lay.outline.map((q) => q.y)), apex = Math.min(...lay.inserts.flat().map((q) => q.y));
   assert.ok(Math.abs(topBody - apex - 10) < 1e-6, 'wierzchołek płytki 1 mm nad górą korpusu (jak w innych frezach), nie wyżej o długość chwytu');
 });
+
+test('frezy płytkowe (fre / plu) i jeżowe: korpus 97,5% Ø, długość korpusu J − 3 mm, płytki w rzędach równomiernie na długości roboczej pod kątem G', async () => {
+  const GEN = await import('../src/renderer/js/logic/contourGen.js');
+  const { contourOverrides } = await import('../src/renderer/js/logic/contourEditor.js');
+  const G2 = await import('../src/renderer/js/logic/toolGeometry.js');
+  // 1–2: korpus Ø97,5 (płytki na Ø100), góra korpusu J − 3
+  const p = { D: 'fre', E: 'plu', F: '100', G: '10', I: '60', J: '80', K: '50', L: '40', M: 'ABS063', N: '' };
+  const pts = GEN.fullContour(p, {}).split(';').filter(Boolean).map((q) => q.split('_').map(Number));
+  assert.equal(Math.max(...pts.map((q) => Math.abs(q[0]))), 487.5, 'promień korpusu 48,75 mm = 0,975 · Ø100 / 2'); assert.equal(Math.max(...pts.map((q) => q[1])), (80 - 3) * 10, 'góra korpusu na J − 3 mm');
+  const pw = { ...p, M: 'WEL020' }, ysw = GEN.fullContour(pw, {}).split(';').filter(Boolean).map((q) => Number(q.split('_')[1]));
+  assert.equal(Math.max(...ysw), (80 - 3) * 10 - 500, 'chwyt Weldon: całość niżej o głębokość chwytu (50 mm)');
+  const pf = { ...p, M: 'FRE032' }, ysf = GEN.fullContour(pf, {}).split(';').filter(Boolean).map((q) => Number(q.split('_')[1]));
+  assert.equal(Math.max(...ysf), (80 - 3) * 10 - 240, 'FRExxx: jak dotychczas (kontur cofnięty o L2)');
+  // płytki: Weldon – J − chwyt, FRExxx – J − L2 (jak dotychczas), inne – J
+  const tl = (E, M) => ({ productCode: 'F', columnD: 'fre', columnE: E, columnP: 'X', columnF: '100', columnJ: '80', columnM: M, columnG: '10' });
+  assert.equal(G2.plateLength(tl('plu', 'WEL020')), 30); assert.equal(G2.plateLength(tl('plu', 'FRE032')), 56); assert.equal(G2.plateLength(tl('plu', 'ABS063')), 80);
+  // 3–5: rzędy płytek: jeż – liczba z kolumny H, równomiernie na długości roboczej K, kąt G
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';   // wysokość 8 mm
+  const t = tl('jez', 'ABS063');
+  const params = { f: { D: 'fre', E: 'jez', G: '10', H: '4', K: '50' } };
+  const ov = contourOverrides(params, {}, { gen: false });
+  const idx = G2.toolIndex({ tools: [t], detailsMap: { F: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }] } } }, ov);
+  const st = idx.stackTool(t);
+  assert.equal(st.plates.length, 4); assert.deepEqual(st.plates.map((q) => q.dz), [0, -14, -28, -42], 'rzędy co (K − wysokość płytki) / (n − 1) = 14 mm'); assert.ok(st.plates.every((q) => q.ang === 10 && q.row));
+  const lay = G2.buildStack([st], false, true).layers[0];   // podgląd zapisu pokazuje wszystkie rzędy
+  assert.equal(lay.plates.length, 4);
+  // frez płytkowy: tyle rzędów, ile płytek w katalogu
+  const tp = tl('plu', 'ABS063'), ixp = G2.toolIndex({ tools: [tp], detailsMap: { F: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] } } }, contourOverrides({ f: { D: 'fre', E: 'plu', G: '10', K: '50' } }, {}, { gen: false }));
+  assert.deepEqual(ixp.stackTool(tp).plates.map((q) => q.dz), [0, -42]);
+  // własny układ płytek ma pierwszeństwo – bez rzędów
+  try { G2.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge' }]); assert.equal(ixp.stackTool(tp).plates.length, 1); } finally { G2.setPlateSetupProvider(null); }
+  assert.equal(G2.buildMini(tp, ixp.details('F')).inserts.length, 4, 'miniatura: dwa rzędy po dwie płytki (prawa i lewa)');
+});
