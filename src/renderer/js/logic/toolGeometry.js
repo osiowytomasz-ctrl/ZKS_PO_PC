@@ -346,7 +346,12 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       // (φ = 180° – lustrzane odbicie względem osi, ostrze po drugiej stronie), dzięki czemu dwie płytki nie nachodzą na siebie; src – położenie przed obrotem (dla 3D)
       const phi = pl.phi || 0, single = polys.length === 1, cs = Math.abs(phi % 360) < 1e-9 ? 1 : Math.round(Math.cos((phi * Math.PI) / 180) * 1e9) / 1e9;
       const shown = single && cs !== 1 ? polys.map((q) => q.map((p) => pt(p.x * cs, p.y))) : polys;
-      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)), row: !!pl.row, refs: shown.map((q) => basePlaced(raw, q, effBase)), corners: placedCorners(raw, shown[single ? 0 : shown.length - 1], flip) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
+      // płytka rzędu ułożona według krawędzi tnącej: punkt odniesienia = punkt skrawający (koniec krawędzi dalszy od osi); punkt początkowy rzędów (rowRef) = jego położenie bez przesunięcia ΔX / ΔZ pierwszego rzędu
+      const edgeRow = !!pl.row && kind === 'edge' && !!(pl.edge && pl.edge.a && pl.edge.b);
+      const useA = edgeRow ? (() => { const o0 = placeInsert0(raw, b, offsetY, tool, true, rotateChamfer), A0 = basePlaced(raw, o0, pl.edge.a), B0 = basePlaced(raw, o0, pl.edge.b); return !A0 || !B0 || Math.abs(A0.x) >= Math.abs(B0.x); })() : true;   // koniec krawędzi dalszy od osi w położeniu bez obrotu (jak w placeByEdge)
+      const cutPts = edgeRow ? shown.map((q) => basePlaced(raw, q, useA ? pl.edge.a : pl.edge.b)) : null;
+      if (edgeRow && !rowRef.true && cutPts[1]) rowRef.true = pt(cutPts[1].x - (pl.dx || 0) * 10, cutPts[1].y + (pl.dz || 0) * 10);
+      placed.push(...shown); plates.push({ code: pl.code, kind, central: kind === 'central', irregular: kind === 'irregular', single, phi, z: pl.z || 0, polys: shown, src: polys, bases: shown.map((q) => basePlaced(raw, q, pl.base)), row: !!pl.row, refs: cutPts ? cutPts : shown.map((q) => basePlaced(raw, q, effBase)), corners: placedCorners(raw, shown[single ? 0 : shown.length - 1], flip) });   // bases – punkt bazowy płytki w układzie rysunku (null – nie ustawiony)
     }
     // frez nasadzany na trzpień FRExxx osadza się dolną płaszczyzną na czole oprawki (trzpień wchodzi w otwór na głębokość L2): kolejne narzędzie (oprawka) leży o L2 wyżej niż koniec trzpienia, niezależnie od tego, jak głęboko sięga kontur frezu
     offsetY += tool.fitM && index < tools.length - 1 ? (b.maxY - b.minY) - freL2(tool.fitM) * 10 : b.r;

@@ -347,3 +347,16 @@ test('przesuwanie całej grupy płytek: przesunięcie punktu Q o wektor przesuwa
   const a = refs(null), b = refs({ px: 0, py: 0, qx: 5, qy: -3 });   // 5 mm w prawo, 3 mm w górę (y w dół)
   a.forEach((r, i) => { assert.ok(Math.abs(b[i].x - r.x - 50) < 0.05 && Math.abs(b[i].y - r.y + 30) < 0.05, `płytka ${i + 1} przesunięta o ten sam wektor`); });
 });
+
+test('rzędy ułożone według krawędzi tnącej mają punkt początkowy (rowRef) i punkt odniesienia = punkt skrawający', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'jez', columnP: 'X', columnF: '20', columnJ: '78', columnM: 'ABS063', columnG: '45' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-100_0;100_0;100_770;-100_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  try {
+    G.setPlateEdgeProvider(() => ({ a: { x: 6, y: 0 }, b: { x: 6, y: 8 } }));
+    const run = (g) => { const l = G.buildStack([idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: g, H: '3', K: '25' } })], true, false).layers[0]; return { R0: l.rowRef, refs: l.plates.map((p) => p.refs[p.refs.length - 1]) }; };
+    const a = run('90'), b = run('45');
+    assert.ok(a.R0 && b.R0 && Math.abs(a.R0.x - b.R0.x) < 0.05 && Math.abs(a.R0.y - b.R0.y) < 0.05, 'punkt początkowy rzędów nie zależy od kąta');
+    assert.ok(Math.abs(a.refs[0].x - a.R0.x) < 0.05 && Math.abs(a.refs[0].y - a.R0.y) < 0.05, 'pierwszy rząd przy 90° leży w punkcie początkowym');
+  } finally { G.setPlateEdgeProvider(null); }
+});

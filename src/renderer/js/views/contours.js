@@ -437,6 +437,7 @@ export function mountContours(el, ctx) {
       const on = pv.insSel === j;
       if (q.left) out += `<polygon points="${poly(q.left)}" fill="#c8a400" fill-opacity="0.35" stroke="${on ? '#e00000' : '#8a6d00'}" stroke-width="${on ? 1.6 : 1}" stroke-dasharray="4 2" pointer-events="none"/>`;
       out += `<polygon data-ins="${j}" points="${poly(q.right)}" fill="#c8a400" fill-opacity="${on ? 0.8 : 0.65}" stroke="${on ? '#e00000' : '#8a6d00'}" stroke-width="${on ? 2.4 : 1.3}" style="cursor:move"/>`;
+      if (q.edge) out += `<line x1="${f2(X(q.edge.a.x))}" y1="${f2(Y(q.edge.a.y))}" x2="${f2(X(q.edge.b.x))}" y2="${f2(Y(q.edge.b.y))}" stroke="#e00000" stroke-width="2.6" stroke-linecap="round" pointer-events="none"/>`;   // zaznaczona krawędź tnąca płytki – czerwona
       const bp = q.base || q.right[0];   // punkt bazowy płytki (wybrany w edytorze płytki / okienku danych; domyślnie pierwszy punkt konturu)
       out += q.base ? `<g pointer-events="none"><circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="5" fill="none" stroke="#0a7d2c" stroke-width="1.6"/><line x1="${f2(X(bp.x) - 8)}" y1="${f2(Y(bp.y))}" x2="${f2(X(bp.x) + 8)}" y2="${f2(Y(bp.y))}" stroke="#0a7d2c" stroke-width="1.2"/><line x1="${f2(X(bp.x))}" y1="${f2(Y(bp.y) - 8)}" x2="${f2(X(bp.x))}" y2="${f2(Y(bp.y) + 8)}" stroke="#0a7d2c" stroke-width="1.2"/></g>`
         : `<circle cx="${f2(X(bp.x))}" cy="${f2(Y(bp.y))}" r="3" fill="#ff6d00" pointer-events="none"/>`;
@@ -583,7 +584,7 @@ export function mountContours(el, ctx) {
       const right = conv(pick(pm)), auto = conv(pick(stack0.layers[0].plates[j]));
       const pb = (m) => { const b = m.bases && m.bases[m.single ? 0 : m.bases.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt bazowy płytki (null – nie wybrany: pierwszy punkt konturu)
       const pr = (m) => { const b = m.refs && m.refs[m.single ? 0 : m.refs.length - 1]; return b ? tx(conv([b]))[0] : null; };   // punkt odniesienia płytki rzędu (bazowy albo pierwszy punkt konturu)
-      return { path: (stt.plates[j] && stt.plates[j].path) || '', code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [], row: !!pm.row, ref: pr(pm) };
+      return { path: (stt.plates[j] && stt.plates[j].path) || '', code: pm.code || 'płytka ' + (j + 1), base: pb(pm), autoBase: pb(stack0.layers[0].plates[j]), auto: tx(auto), right: tx(right), left: pm.single ? null : tx(right.map((p) => ({ x: -p.x, y: p.y }))), local: conv(pickSrc(pm)), central: pm.central, irregular: pm.irregular, single: pm.single, phi: pm.phi, z: pm.z, corners: pm.corners || [], row: !!pm.row, ref: pr(pm), edge: (() => { const e = stt.plates[j] && stt.plates[j].edge, path = (stt.plates[j] && stt.plates[j].path) || '', pl = pick(pm), A = e && G.placedPoint(path, pl, e.a), B = e && G.placedPoint(path, pl, e.b); return A && B ? { a: tx(conv([A]))[0], b: tx(conv([B]))[0] } : null; })() };
     });
     const R0 = stack.layers[0].rowRef, pvt = G.normPivot(insertSetup(t).pivot);   // czerwony punkt obrotu grupy: punkt odniesienia pierwszego rzędu + Q (stałe miejsce)
     if (R0) res.pivotPt = tx(conv([{ x: R0.x + (pvt ? pvt.qx * 10 : 0), y: R0.y + (pvt ? pvt.qy * 10 : 0) }]))[0];
@@ -646,18 +647,20 @@ export function mountContours(el, ctx) {
     if (!t || !st.index) return null;
     const cur = st.index.stackTool(t, { pswt: pw }), lc = cur && G.buildStack([cur], true, false), sc = lc && lc.layers[0];
     if (!sc) return null;
-    const last = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]), polys = [], dots = [], marks = [], rows = [], specs = layoutNow();
+    const last = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]), polys = [], dots = [], marks = [], rows = [], lines = [], specs = layoutNow();
     sc.plates.forEach((pm, j) => {
       const path = (cur.plates[j] && cur.plates[j].path) || '';
       if (!path) return;
       const poly = last(pm), n = rows.length + 1;
       rows.push({ j, path, code: pm.code });
       polys.push(poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })));
+      const ed = cur.plates[j] && cur.plates[j].edge, ea = ed && G.placedPoint(path, poly, ed.a), eb = ed && G.placedPoint(path, poly, ed.b);
+      if (ea && eb) lines.push({ a: { x: ea.x / 10, y: ea.y / 10 }, b: { x: eb.x / 10, y: eb.y / 10 }, color: '#e00000', w: 3 });   // zaznaczona krawędź tnąca (czerwona)
       basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${n}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
       const own = (specs[j] && specs[j].base) || plateBase(pm.code), mp = own && G.placedPoint(path, poly, own);
       if (mp) marks.push({ x: mp.x / 10, y: mp.y / 10 });
     });
-    return rows.length > 1 ? { polys, dots, marks, rows } : null;
+    return rows.length > 1 ? { polys, dots, marks, rows, lines } : null;
   }
   /** Wybór punktu bazowego dla całej grupy: ten sam punkt (po numerze na liście punktów płytki) dostają wszystkie płytki grupy – grupa przesuwa się razem, żadna płytka nie „przeskakuje” sama. */
   function pickBaseGroup(e, dat) {
@@ -691,9 +694,29 @@ export function mountContours(el, ctx) {
       const bm = bbox(sm.plates.filter((pm) => pm.row).map(last));
       pts = corners4(bm).map((m) => { const rel = rot({ x: m.x - R0.x - pv0.px, y: m.y - R0.y - pv0.py }, th); return { x: R0.x + pv0.qx + rel.x, y: R0.y + pv0.qy + rel.y }; });
     } else pts = corners4(bbox(rows.map((e) => last(e.pm))));   // aktualny układ: prostokąt nieobrócony wokół płytek w bieżącym ułożeniu
+    // dodatkowy punkt: przecięcie najwyższej stycznej poziomej grupy (aktualny układ) z krawędzią tnącą (krawędź zaznaczona w edytorze płytki; bez niej – linia rzędów przez skrajny punkt pierwszej płytki)
+    const lines = [], allPoly = rows.map((e) => last(e.pm)), topY = Math.min(...allPoly.flat().map((v) => v.y)) / 10;
+    let la = null, lb = null;
+    for (const { pm, j } of rows) {   // zaznaczona krawędź tnąca każdej płytki (czerwona); pierwsza z nich wyznacza linię krawędzi tnącej grupy
+      const ed = cur.plates[j] && cur.plates[j].edge, path = (cur.plates[j] && cur.plates[j].path) || '';
+      if (ed && ed.a && ed.b) {
+        const A = G.placedPoint(path, last(pm), ed.a), B = G.placedPoint(path, last(pm), ed.b);
+        if (A && B) { lines.push({ a: { x: A.x / 10, y: A.y / 10 }, b: { x: B.x / 10, y: B.y / 10 }, color: '#e00000', w: 3 }); if (!la && Math.abs(B.y - A.y) > 1e-6) { la = { x: A.x / 10, y: A.y / 10 }; lb = { x: B.x / 10, y: B.y / 10 }; } }
+      }
+    }
+    if (!la) {   // bez zaznaczonej krawędzi: styczna zewnętrzna pierwszej płytki w kierunku rzędów (zewnętrzny bok płytki)
+      const dd = { x: -Math.sin(th), y: Math.cos(th) }, nn = dd.y >= 0 ? { x: dd.y, y: -dd.x } : { x: -dd.y, y: dd.x }, nx = nn.x >= 0 ? nn : { x: -nn.x, y: -nn.y };
+      const p0 = allPoly[0].reduce((m, v) => (v.x * nx.x + v.y * nx.y > m.x * nx.x + m.y * nx.y ? v : m), allPoly[0][0]);
+      if (Math.abs(dd.y) > 1e-6) { la = { x: p0.x / 10, y: p0.y / 10 }; lb = { x: la.x + dd.x * 10, y: la.y + dd.y * 10 }; }
+    }
+    if (la && lb && Math.abs(lb.y - la.y) > 1e-9) {
+      const k = (topY - la.y) / (lb.y - la.y), cx = la.x + k * (lb.x - la.x);
+      dots.push({ id: 'gcut', label: 'Przecięcie najwyższej stycznej poziomej grupy z krawędzią tnącą', x: cx, y: topY, kind: 'cut' });
+      lines.push({ a: { x: cx, y: topY }, b: Math.hypot(lb.x - cx, lb.y - topY) > Math.hypot(la.x - cx, la.y - topY) ? lb : la, color: '#e57373' });
+    }
     const corners = pts.map((p, i) => ({ id: 'g' + i, label: `Skrajny punkt grupy – ${names[i]} (${inMain ? 'układ główny, obrócony o kąt skrawania' : 'aktualny układ'})`, x: p.x, y: p.y }));
     const q = { x: R0.x + pv0.qx, y: R0.y + pv0.qy }, own = !!G.normPivot(insertSetup(t).pivot);
-    return { polys, dots, rect: pts, corners, cur: q, curLabel: own ? `własny (${round3(pv0.qx)}; ${round3(-pv0.qy)}) mm od punktu odniesienia 1. płytki` : 'domyślny (punkt odniesienia pierwszej płytki)', R0, pv0, th, rot };
+    return { polys, dots, lines, rect: pts, corners, cur: q, curLabel: own ? `własny (${round3(pv0.qx)}; ${round3(-pv0.qy)}) mm od punktu odniesienia 1. płytki` : 'domyślny (punkt odniesienia pierwszej płytki)', R0, pv0, th, rot };
   }
   /** Wybór punktu obrotu grupy: Q – wskazane miejsce (stałe), P – ten sam punkt w układzie głównym (przez odwrócenie bieżącego obrotu), więc rysunek się nie zmienia. */
   function pickPivot(e, dat) {
@@ -701,7 +724,7 @@ export function mountContours(el, ctx) {
     saveInsertSetup(st.tool, { pivot: { px: dat.pv0.px + back.x, py: dat.pv0.py + back.y, qx: c.x, qy: c.y } });
     drawPreview();
   }
-  const openPivotPicker = () => { resetPickerZoom(); pv.pivotOrig = G.normPivot(insertSetup(st.tool).pivot); pv.insSel = null; pv.basePick = null; pv.pivotPick = true; drawPreview(); };
+  const openPivotPicker = () => { if (!pivotData()) { toast('Punkt obrotu grupy działa dla płytek ułożonych w rzędach bez zaznaczonej krawędzi skrawającej (przy krawędzi płytki ustawiają się względem punktu skrawającego).', true); return; } resetPickerZoom(); pv.pivotOrig = G.normPivot(insertSetup(st.tool).pivot); pv.insSel = null; pv.basePick = null; pv.pivotPick = true; drawPreview(); };
   /** Cofnięcie wyboru punktów (Esc / „Cofnij”): punkt bazowy płytki albo punkt obrotu grupy wraca do pierwotnego stanu, okno się zamyka. */
   function cancelPicks() {
     if (pv.pivotPick) { pv.pivotPick = false; saveInsertSetup(st.tool, { pivot: pv.pivotOrig || null }); drawPreview(); return; }
@@ -784,7 +807,7 @@ export function mountContours(el, ctx) {
       if (pv.basePick !== j) { pv.basePick = null; pv.baseGroup = false; }
       const gdat = pv.basePick === j && pv.baseGroup ? groupBaseData() : null;
       if (pv.basePick === j && pv.baseGroup && gdat) {   // grupa płytek (jeż / frez płytkowy): w jednym oknie wszystkie płytki z punktami, wybrany punkt dostają wszystkie płytki grupy
-        cornerBox(closeBtn(() => cancelPicks()), h('b', {}, 'Punkt bazowy – grupa płytek'), ...groupPicker({ polys: gdat.polys, dots: gdat.dots, rect: [], corners: [], marks: gdat.marks, markColor: '#2e7d32', hintPrefix: 'Punkt bazowy', curLabel: gdat.marks.length ? 'wybrany (zielone ⊕)' : 'domyślny (pierwszy punkt konturu)',
+        cornerBox(closeBtn(() => cancelPicks()), h('b', {}, 'Punkt bazowy – grupa płytek'), ...groupPicker({ polys: gdat.polys, dots: gdat.dots, lines: gdat.lines, rect: [], corners: [], marks: gdat.marks, markColor: '#2e7d32', hintPrefix: 'Punkt bazowy', curLabel: gdat.marks.length ? 'wybrany (zielone ⊕)' : 'domyślny (pierwszy punkt konturu)',
           legend: '■ środki i rogi obwiedni · ● punkty konturu · zielone ⊕ – punkt bazowy każdej płytki. Wybrany punkt dostają wszystkie płytki grupy (ten sam punkt każdej płytki). Klikaj do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.', defTitle: 'Bez własnego punktu bazowego: pierwszy punkt konturu każdej płytki',
           onPick: (e) => pickBaseGroup(e, gdat), onDefault: () => { let list = ownPlates(st.tool) || normPlates(effectiveSpecs()); gdat.rows.forEach((r) => { list = patchPlate(list, plateCodes(), r.j, { base: null }); savePlateBase(r.code, null); }); saveInsertSetup(st.tool, { plates: list }); drawPreview(); },
           onDone: () => { pv.basePick = null; pv.baseGroup = false; drawPreview(); }, onCancel: () => cancelPicks() }));
@@ -796,7 +819,7 @@ export function mountContours(el, ctx) {
       if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki (wspólny moduł z edytorem płytki) zamiast całego okna danych
         const stdPts = parsePlate(plateSrc).pts;
         cornerBox(closeBtn(() => { pv.basePick = null; drawPreview(); }), h('b', {}, `Punkt bazowy – płytka ${q.code}`),
-          ...basePicker({ mode: pv.baseMode, onMode: (m) => { pv.baseMode = m; drawPreview(); }, presets, stdPts, toolPoly: q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })),
+          ...basePicker({ mode: pv.baseMode, onMode: (m) => { pv.baseMode = m; drawPreview(); }, presets, stdPts, edge: plateEdge(q.code), toolPoly: q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })),
             toolPoint: (pt) => { const b = G.placedPoint(plateSrc, q.right, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; }, cur, defLabel,
             onPick: (b) => set({ base: b }), onDone: () => { pv.basePick = null; drawPreview(); }, onCancel: () => cancelPicks() }));   // wybór wielokrotny: okno zostaje do „Zatwierdź”, Esc cofa do pierwotnego punktu
         if (platePanel) platePanel.sync(layoutNow(), pv.insSel);
