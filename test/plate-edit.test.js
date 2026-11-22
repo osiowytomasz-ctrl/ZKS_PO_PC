@@ -165,3 +165,16 @@ test('plunger (fre / plu): domyślny punkt bazowy płytek = róg skrajny prawy g
   } finally { G.setPlateBaseProvider(null); }
   assert.equal(G.isPlunger(mk('plu')), true); assert.equal(G.isPlunger(mk('pal')), false);
 });
+
+test('krzywe Q płytki zamieniają się w łuki, a ciągi drobnych odcinków na okręgu – w jeden łuk (kontur nie jest „poszatkowany”)', async () => {
+  const P = await import('../src/renderer/js/logic/plateEdit.js');
+  const r = P.parsePlate('M 0 0 L 8 0 Q 10 0 10 2 L 10 10 Q 10 12 8 12 L 0 12 Z');
+  assert.equal(r.pts.length, 6, 'dwa zaokrąglenia = dwa łuki, bez dziesiątek odcinków'); assert.equal(r.pts.filter((p) => p.arc).length, 2);
+  assert.ok(P.plateToPath(r.pts).includes('A '));
+  const poly = [{ x: 0, y: 0 }, { x: 7, y: 0 }];
+  for (let k = 1; k <= 13; k++) { const a = -Math.PI / 2 + (k / 14) * (Math.PI / 2); poly.push({ x: 7 + 3 * Math.cos(a), y: 3 + 3 * Math.sin(a) }); }
+  poly.push({ x: 10, y: 3 }, { x: 10, y: 12 }, { x: 0, y: 12 });
+  const s = P.smoothArcs(poly);
+  assert.equal(s.pts.length, 5); assert.ok(s.merged >= 12); assert.equal(s.pts.filter((p) => p.arc).length, 1); assert.ok(Math.abs(s.pts.find((p) => p.arc).arc.r - 3) < 1e-3);
+  assert.equal(P.smoothArcs([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }]).merged, 0, 'prostokąt bez zmian');
+});

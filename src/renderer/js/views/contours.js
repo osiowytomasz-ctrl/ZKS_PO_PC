@@ -14,6 +14,7 @@ import { mountPlateLayout } from './plateLayout.js';
 import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase, plateEdge, savePlateEdge, dimsSvg, dimsOn, dimsToggle } from './toolViews.js';
 import { basePresets, parsePlate } from '../logic/plateEdit.js';
+import { basePicker } from './basePicker.js';
 import * as B from '../logic/builder.js';
 
 let pendingCode = null;
@@ -658,34 +659,12 @@ export function mountContours(el, ctx) {
       const curPreset = presets.find(same), defLabel = G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu';
       const curLabel = curPreset ? curPreset.label : cur ? `własny (${round3(cur.x)}; ${round3(cur.y)})` : defLabel;
       if (pv.basePick !== j) pv.basePick = null;
-      if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki zamiast całego okna danych: tryb „na narzędziu” (z transformacją) albo „standardowo” (pozycja z konturu płytki)
-        const inTool = pv.baseMode !== 'std';
+      if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki (wspólny moduł z edytorem płytki) zamiast całego okna danych
         const raw = G.parseInsertPath(plateSrc), stdPts = parsePlate(plateSrc).pts;
-        let poly, pts;
-        if (inTool) { poly = q.right; pts = presets.map((pr) => ({ pr, p: G.basePlaced(raw, q.right, pr.pt) })).filter((x) => x.p).map((x) => ({ pr: x.pr, x: x.p.x / 10, y: x.p.y / 10 })); poly = q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })); }
-        else { poly = stdPts; pts = presets.map((pr) => ({ pr, x: pr.pt.x, y: pr.pt.y })); }
-        const xs = [...poly.map((v) => v.x), ...pts.map((v) => v.x)], ys = [...poly.map((v) => v.y), ...pts.map((v) => v.y)];
-        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), W = 224, Hh = 230, sc = Math.min((W - 24) / Math.max(x1 - x0, 1e-6), (Hh - 24) / Math.max(y1 - y0, 1e-6));
-        const X = (v) => round3(12 + (v - x0) * sc + (W - 24 - (x1 - x0) * sc) / 2), Y = (v) => round3(12 + (v - y0) * sc + (Hh - 24 - (y1 - y0) * sc) / 2);
-        const order = [...pts.filter((e) => !/^p\d/.test(e.pr.id) && !e.pr.id.startsWith('k_')), ...pts.filter((e) => /^p\d/.test(e.pr.id)), ...pts.filter((e) => e.pr.id.startsWith('k_'))];
-        const dots = order.map((e) => {
-          const cx = X(e.x), cy = Y(e.y), on = same(e.pr), k = e.pr.id.startsWith('k_'), v = /^p\d/.test(e.pr.id);
-          const mark = on ? `<circle cx="${cx}" cy="${cy}" r="7" fill="#fff" stroke="#2e7d32" stroke-width="2"/><path d="M${cx - 10} ${cy}H${cx + 10}M${cx} ${cy - 10}V${cy + 10}" stroke="#2e7d32" stroke-width="2"/>`
-            : k ? `<path d="M${cx} ${cy - 5}L${cx + 5} ${cy}L${cx} ${cy + 5}L${cx - 5} ${cy}Z" fill="#ef6c00" stroke="#fff" stroke-width="1"/>` : v ? `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#1565c0" stroke="#fff" stroke-width="1"/>` : `<rect x="${cx - 3.5}" y="${cy - 3.5}" width="7" height="7" fill="#fff" stroke="#607d8b" stroke-width="1.5"/>`;
-          return `<g data-id="${e.pr.id}" style="cursor:pointer">${mark}<circle cx="${cx}" cy="${cy}" r="9" fill="transparent"/></g>`;
-        }).join('');
-        const pg = poly.map((v) => `${X(v.x)},${Y(v.y)}`).join(' ');
-        const holder = h('div', { style: { border: '1px solid #ccc', background: '#fff', lineHeight: 0 } });
-        holder.innerHTML = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg"><polygon points="${pg}" fill="#c8a400" fill-opacity=".55" stroke="#8a6d00" stroke-width="1.5"/>${dots}</svg>`;
-        const hint = h('div', { class: 'muted', style: { fontSize: '11px', minHeight: '28px', lineHeight: '1.3' } }, `Wybrany: ${curLabel}`);
-        holder.addEventListener('pointerover', (ev) => { const g = ev.target.closest && ev.target.closest('[data-id]'); const pr = g && presets.find((x) => x.id === g.getAttribute('data-id')); if (pr) hint.textContent = pr.label; });
-        holder.addEventListener('click', (ev) => { const g = ev.target.closest && ev.target.closest('[data-id]'); const pr = g && presets.find((x) => x.id === g.getAttribute('data-id')); if (pr) { pv.basePick = null; set({ base: { x: pr.pt.x, y: pr.pt.y } }); } });
-        const modeBtn = (id, text, tip) => h('button', { class: 'btn small' + ((pv.baseMode !== 'std') === (id === 'tool') ? ' primary' : ''), title: tip, onclick: () => { pv.baseMode = id; drawPreview(); } }, text);
         cornerBox(closeBtn(() => { pv.basePick = null; drawPreview(); }), h('b', {}, `Punkt bazowy – płytka ${q.code}`),
-          h('div', { class: 'row', style: { gap: '4px', margin: '4px 0' } }, modeBtn('tool', 'Na narzędziu', 'Płytka tak, jak leży na narzędziu (obrót, kąt, odbicie)'), modeBtn('std', 'Standardowo', 'Płytka w pozycji standardowej (bez transformacji na narzędziu); rogi skrajne – już z transformacją')),
-          holder, hint,
-          h('div', { class: 'muted', style: { fontSize: '10px' } }, '■ środki i rogi obwiedni · ● punkty konturu · ◆ rogi skrajne (zawsze z transformacją na narzędziu) · ⊕ wybrany. Kliknij punkt.'),
-          h('div', { class: 'row', style: { gap: '4px', marginTop: '4px' } }, h('button', { class: 'btn small', title: defLabel, onclick: () => { pv.basePick = null; set({ base: null }); } }, 'Domyślny'), h('button', { class: 'btn small', onclick: () => { pv.basePick = null; drawPreview(); } }, 'Wróć')));
+          ...basePicker({ mode: pv.baseMode, onMode: (m) => { pv.baseMode = m; drawPreview(); }, presets, stdPts, toolPoly: q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })),
+            toolPoint: (pt) => { const b = G.basePlaced(raw, q.right, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; }, cur, defLabel,
+            onPick: (b) => { pv.basePick = null; set({ base: b }); }, onBack: () => { pv.basePick = null; drawPreview(); } }));
         if (platePanel) platePanel.sync(layoutNow(), pv.insSel);
         return;
       }

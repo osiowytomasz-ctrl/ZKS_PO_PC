@@ -404,6 +404,13 @@ export function plateCorners(path, { kind = 'edge', ang = 0 } = {}) {
   const m = lay && lay.layers[0].plates[0];
   return m ? m.corners || [] : [];
 }
+/** Płytka o ścieżce [path] ułożona na narzędziu jako [kind] i obrócona o [ang]° (jak w [plateCorners]): { raw, poly } (0,1 mm; poly 1:1 z raw – do [basePlaced]) albo null. */
+export function plateOnTool(path, { kind = 'edge', ang = 0 } = {}) {
+  const contour = [pt(-500, 0), pt(500, 0), pt(500, 1000), pt(-500, 1000)];
+  const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(ang) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
+  const m = lay && lay.layers[0].plates[0], raw = parseInsertPath(path);
+  return m && m.polys.length ? { raw, poly: m.single ? m.polys[0] : m.polys[m.polys.length - 1] } : null;
+}
 /** Frez płytkowy „plunger” (fre / plu). */
 export const isPlunger = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && String((t && t.columnE) ?? '').trim().toLowerCase() === 'plu';
 const plungerMemo = new Map();

@@ -7,6 +7,58 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const fmt = (v) => String(Object.is(r3(v), -0) ? 0 : r3(v));
 const clone = (p) => (p.arc ? { x: p.x, y: p.y, arc: { ...p.arc } } : { x: p.x, y: p.y });
 
+/** Okrąg przez trzy punkty (początek, punkt pośredni na łuku, koniec): { ux, uy, r, sweep, large } (sweep / large jak w SVG) albo null, gdy punkty leżą na prostej. */
+function circleArc(p0, m, p1) {
+  const cross = (m.x - p0.x) * (p1.y - m.y) - (m.y - p0.y) * (p1.x - m.x);
+  const d = 2 * (p0.x * (m.y - p1.y) + m.x * (p1.y - p0.y) + p1.x * (p0.y - m.y));
+  if (Math.abs(d) < 1e-9 || Math.abs(cross) < 1e-9) return null;
+  const s0 = p0.x * p0.x + p0.y * p0.y, sm = m.x * m.x + m.y * m.y, s1 = p1.x * p1.x + p1.y * p1.y;
+  const ux = (s0 * (m.y - p1.y) + sm * (p1.y - p0.y) + s1 * (p0.y - m.y)) / d, uy = (s0 * (p1.x - m.x) + sm * (p0.x - p1.x) + s1 * (m.x - p0.x)) / d, r = Math.hypot(p0.x - ux, p0.y - uy);
+  if (!(r > 1e-9)) return null;
+  const sweep = cross > 0 ? 1 : 0, dir = sweep ? 1 : -1, a0 = Math.atan2(p0.y - uy, p0.x - ux), a1 = Math.atan2(p1.y - uy, p1.x - ux);
+  const span = ((((a1 - a0) * dir) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  return { ux, uy, r, sweep, large: span > Math.PI ? 1 : 0 };
+}
+/**
+ * Krzywa kwadratowa (Q) płytki → łuk koła przez punkt początkowy, środek krzywej (t = ½) i koniec: { r, sweep, large } albo null, gdy krzywa odbiega od koła o więcej niż [tol] mm
+ * (lub jest prosta). Dzięki temu zaokrąglenia z arkusza nie rozpadają się na kilkanaście drobnych odcinków, tylko są jednym łukiem, który można edytować promieniem.
+ */
+export function quadToArc(p0, c, p1, tol = 0.05) {
+  const q = (t) => ({ x: (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * c.x + t * t * p1.x, y: (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * c.y + t * t * p1.y });
+  const a = circleArc(p0, q(0.5), p1);
+  if (!a || [0.125, 0.25, 0.75, 0.875].some((t) => { const k = q(t); return Math.abs(Math.hypot(k.x - a.ux, k.y - a.uy) - a.r) > tol; })) return null;
+  return { r: r3(a.r), sweep: a.sweep, large: a.large };
+}
+/**
+ * Zamiana ciągów drobnych odcinków leżących na jednym okręgu (odchyłka ≤ [tol] mm, min. 4 punkty, jeden kierunek skrętu) na pojedyncze łuki – „odszatkowanie” konturu.
+ * Wynik: { pts, merged } (merged – liczba usuniętych punktów). Punkty z już ustawionym łukiem nie są łączone.
+ */
+export function smoothArcs(pts, tol = 0.02) {
+  const n = pts.length, out = [];
+  let i = 0, merged = 0;
+  while (i < n) {
+    let best = null;
+    for (let j = n - 1; j >= i + 3 && !best; j--) {
+      if (pts.slice(i, j).some((p) => p.arc)) continue;
+      const a = circleArc(pts[i], pts[Math.floor((i + j) / 2)], pts[j]);
+      if (!a || a.r > 5000) continue;
+      let ok = true, sign = 0;
+      for (let k = i + 1; k < j && ok; k++) {
+        if (Math.abs(Math.hypot(pts[k].x - a.ux, pts[k].y - a.uy) - a.r) > tol) ok = false;
+        const cr = (pts[k].x - pts[k - 1].x) * (pts[k + 1].y - pts[k].y) - (pts[k].y - pts[k - 1].y) * (pts[k + 1].x - pts[k].x);
+        if (Math.abs(cr) > 1e-12) { const sg = Math.sign(cr); if (sign && sg !== sign) ok = false; sign = sg; }
+        const dt = (pts[k].x - pts[k - 1].x) * (pts[k + 1].x - pts[k].x) + (pts[k].y - pts[k - 1].y) * (pts[k + 1].y - pts[k].y);
+        if (Math.abs(Math.atan2(cr, dt)) > 0.7) ok = false;   // załamanie ostrzejsze niż ~40° to narożnik, nie kawałek łuku
+      }
+      const seg = []; for (let k = i; k < j; k++) seg.push(Math.hypot(pts[k + 1].x - pts[k].x, pts[k + 1].y - pts[k].y));
+      if (Math.max(...seg) > 2.5 * Math.max(Math.min(...seg), 1e-9)) ok = false;   // odcinki łuku są podobnej długości – prosty odcinek obok łuku nie jest jego częścią
+      if (ok && Math.abs(Math.hypot(pts[j].x - a.ux, pts[j].y - a.uy) - a.r) <= tol) best = { j, a };
+    }
+    if (best) { out.push({ x: pts[i].x, y: pts[i].y, arc: { r: r3(best.a.r), sweep: best.a.sweep, large: best.a.large } }); merged += best.j - i - 1; i = best.j; }
+    else { out.push(pts[i]); i++; }
+  }
+  return { pts: out, merged };
+}
 /**
  * Ścieżka SVG płytki → { pts (z łukami), hasArcs – są łuki, lossy – coś nie dało się zachować (łuk eliptyczny / obrócony, krzywa Q → odcinki) }.
  * Łuk „A r r 0 large sweep x y” zostaje łukiem przypisanym do punktu początkowego odcinka.
@@ -30,7 +82,8 @@ export function parsePlate(path) {
     } else if (cmd === 'Q') {
       const cx = read(), cy = read(), x = read(), y = read();
       if (pts.length && ![cx, cy, x, y].some(Number.isNaN)) {
-        lossy = true; const p0 = pts[pts.length - 1];
+        lossy = true; const p0 = pts[pts.length - 1], arc = quadToArc(p0, { x: cx, y: cy }, { x, y });
+        if (arc) { p0.arc = arc; pts.push({ x: r3(x), y: r3(y) }); continue; }   // zaokrąglenie jako jeden łuk
         for (let s = 1; s <= 12; s++) { const t = s / 12, u = 1 - t; pts.push({ x: r3(u * u * p0.x + 2 * u * t * cx + t * t * x), y: r3(u * u * p0.y + 2 * u * t * cy + t * t * y) }); }
       }
     } else if (cmd === 'Z') break;
