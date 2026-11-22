@@ -41,6 +41,35 @@ export function mountParts(el, ctx) {
   const dirBtn = h('button', { class: 'btn', title: 'Kierunek sortowania', onclick: () => { st.dir = -st.dir; dirBtn.textContent = st.dir > 0 ? '↑' : '↓'; draw(); } }, '↑');
   const legend = h('span', { style: { display: 'inline-flex', gap: '8px', fontSize: '11px', alignItems: 'center' } }, ...Object.values(V.CATEGORIES).map((c) => h('span', {}, h('span', { style: { display: 'inline-block', width: '10px', height: '10px', background: c.bg, border: '1px solid #888', marginRight: '3px' } }), c.label)));
 
+  /** Parametry PSWT narzędzi części (Lrob, kolumny U i T) po zmianie [st.params]. */
+  function applyParams() {
+    for (const p of st.parts) {
+      p.tools.forEach((x) => { x.params = st.params[normCode(x.code)] || null; x.info = V.toolInfo(x.tool, x.params); });
+      p.plist = p.tools.map((x) => x.params).filter(Boolean);
+    }
+  }
+  /** Filtry po kolumnach U i T arkusza PSWT (kolejność: U, T): zawsze widoczne; bez danych kolumn – komunikat w opisie. */
+  function fillCols() {
+    for (const [col, sel] of [['U', uSel], ['T', tSel]]) {
+      const vals = [...new Set(st.parts.flatMap((p) => V.partValues(p.plist, col)))].sort(naturalCompare), keep = st[col.toLowerCase()];
+      clear(sel).append(h('option', { value: '' }, vals.length ? col : col + ' – brak danych'), ...vals.map((v) => h('option', { value: v, selected: v === keep }, v)));
+      if (!vals.includes(keep)) st[col.toLowerCase()] = '';
+      sel.classList.toggle('on', !!st[col.toLowerCase()]); sel.disabled = !vals.length;
+      sel.title = vals.length ? `Filtr: kolumna ${col} arkusza PSWT narzędzi, w których jest część` : `Brak wartości kolumny ${col} – wdróż Kontury.gs (odczyt PSWT T i U) i prześlij dane do bazy (Ustawienia → Narzędziownia)`;
+    }
+  }
+  /** Gdy baza (Firebase) nie ma jeszcze kolumn U i T – dociągnięcie ich bezpośrednio z arkusza PSWT (Apps Script) w tle. */
+  let colsTried = false;
+  async function ensureColumns() {
+    if (colsTried || st.parts.some((p) => p.plist.some((x) => x.U || x.T))) return;
+    colsTried = true;
+    try {
+      const cd = await api('ndContourData', [], { timeoutMs: 180000 });
+      let any = false;
+      for (const [k, o] of Object.entries((cd && cd.params) || {})) { const key = normCode(k), cur = st.params[key]; if (cur && (o.T || o.U)) { cur.T = o.T || ''; cur.U = o.U || ''; any = true; } }
+      if (any) { applyParams(); fillCols(); draw(); }
+    } catch { /* stary backend albo brak dostępu – filtry zostają wyłączone */ }
+  }
   async function load(force) {
     clear(grid).append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie części…'));
     try {
@@ -54,11 +83,7 @@ export function mountParts(el, ctx) {
         const cut = tools.filter((x) => x.role !== 'accessory');
         return { code, contour: st.index.insertContour(code), tool: t, uses, tools, cat: V.partCategory(cut.map((x) => x.tool)), types: [...new Set(cut.map((x) => x.info.group).filter(Boolean))].sort(naturalCompare).join(', '), plist: tools.map((x) => x.params).filter(Boolean) };
       }).sort((a, b) => naturalCompare(a.code, b.code));
-      for (const [col, sel] of [['U', uSel], ['T', tSel]]) {   // filtry po kolumnach U i T arkusza PSWT (kolejność: U, T)
-        const vals = [...new Set(st.parts.flatMap((p) => V.partValues(p.plist, col)))].sort(naturalCompare);
-        clear(sel).append(h('option', { value: '' }, col), ...vals.map((v) => h('option', { value: v }, v)));
-        sel.style.display = vals.length ? '' : 'none'; st[col.toLowerCase()] = '';
-      }
+      fillCols(); ensureColumns();
       const firms = [...new Set(st.parts.map((p) => String((p.tool && p.tool.columnP) || '').trim()).filter(Boolean))].sort(naturalCompare);
       clear(companySel).append(h('option', { value: '' }, 'Firma'), ...firms.map((f) => h('option', { value: f }, f)));
       draw();
@@ -68,13 +93,13 @@ export function mountParts(el, ctx) {
   const stockLine = (t) => (t ? `Stan ${G.numberText(t.status || 0)} · Zapas ${G.numberText(t.stock || 0)} · Dostępne ${G.numberText(t.available || 0)}` : 'Brak w katalogu (stan nieznany)');
   function tile(p) {
     const t = p.tool, warn = t && String(t.partStatusColor || '').trim() && !/^#?fff(fff)?$/i.test(String(t.partStatusColor).trim());
-    const bg = warn ? parseSheetColor(t.partStatusColor, '#ffffff') : '#f3f3f3';
+    const cat0 = V.CATEGORIES[p.cat], bg = warn ? parseSheetColor(t.partStatusColor, '#ffffff') : (cat0 ? cat0.bg : '#f3f3f3');   // brak stanu – nagłówek w kolorze kategorii
     const cat = V.CATEGORIES[p.cat], body = cat ? cat.bg : '#fff';   // tło kafelka wg kategorii: piaskowy – wiertła, szary – frezy, niebieski – toczenie
     const shown = p.tools.slice(0, 6);
     return h('div', { class: 'tool-tile click', onclick: () => detail(p), style: { minHeight: '0', background: body } },
       h('div', { class: 'tile-head' }, h('div', { style: { flex: 1, padding: '4px 8px', fontWeight: 800, background: bg, color: warn ? contrast(bg) : '#000' } }, String(p.code).toUpperCase())),
-      h('div', { style: { display: 'flex', justifyContent: 'center', padding: '4px', background: '#fff' } }, insertSvg(p.contour, { w: 200, hgt: 110, dims: true })),
-      h('div', { style: { padding: '3px 8px', fontSize: '12px', borderTop: '1px solid #ddd' } }, stockLine(t)),
+      h('div', { style: { display: 'flex', justifyContent: 'center', margin: '4px 6px', padding: '4px', border: '2px solid #000', background: 'transparent' } }, insertSvg(p.contour, { w: 200, hgt: 110, dims: true })),   // rejon rysunku płytki w ramce 2 px, kolor kategorii na całym kafelku
+      h('div', { style: { padding: '3px 8px', fontSize: '12px', borderTop: '1px solid rgba(0,0,0,.25)' } }, stockLine(t)),
       h('div', { style: { padding: '0 8px 4px', fontSize: '11px', color: '#333' }, title: p.tools.map((x) => x.code + ' – ' + (V.toolInfoText(x.info) || 'brak danych')).join('\n') },
         h('div', { class: 'muted' }, `W narzędziach (${p.uses.length}):`),
         ...shown.map((x) => h('div', { style: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, h('b', {}, x.code), x.role === 'accessory' ? ' (akc.)' : '', ' · ' + (V.toolInfoText(x.info) || '—'))),

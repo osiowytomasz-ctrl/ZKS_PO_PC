@@ -4,9 +4,9 @@ import { naturalCompare } from './common.js';
 
 /** Kategorie kafelków części: kolor tła (piaskowy – wiertła, szary – frezy, niebieski – toczenie). */
 export const CATEGORIES = {
-  wie: { label: 'wiertła', bg: '#f3e5b8' },
-  fre: { label: 'frezy', bg: '#dedede' },
-  tok: { label: 'toczenie', bg: '#d3e2f8' },
+  wie: { label: 'wiertła', bg: '#dcc578' },
+  fre: { label: 'frezy', bg: '#b4b4b4' },
+  tok: { label: 'toczenie', bg: '#8fb3e6' },
 };
 const ORDER = { wie: 0, fre: 1, tok: 2, '': 3 };
 const low = (v) => String(v ?? '').trim().toLowerCase();
