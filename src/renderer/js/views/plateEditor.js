@@ -139,7 +139,7 @@ export function openPlateEditor(o) {
   }
   const markRows = () => tbody.querySelectorAll('tr').forEach((tr) => { tr.style.background = Number(tr.dataset.row) === st.sel ? '#fff3e0' : ''; });
   const fillRow = (i) => { const r = inputs[i]; if (r) { const o = (k) => (st.rel && st.base ? st.base[k] : 0); r.x.value = comma(st.pts[i].x - o('x')); r.y.value = comma(st.pts[i].y - o('y')); } };
-  const act = (fn, op, arg) => () => { push(); const pvt = st.base && (op === 'rotate' || op === 'scale') ? st.base : null; st.base = P.mapBase(op, st.base, st.pts, arg, pvt); st.edge = P.mapEdge(op, st.edge, st.pts, arg, pvt);   // obrót i skala wokół punktu bazowego (gdy ustawiony)
+  const act = (fn, op, arg) => () => { push(); const pvt = st.base && (op === 'rotate' || op === 'scale' || op === 'origin') ? st.base : null; st.base = P.mapBase(op, st.base, st.pts, arg, pvt); st.edge = P.mapEdge(op, st.edge, st.pts, arg, pvt);   // obrót i skala wokół punktu bazowego (gdy ustawiony)
     st.pts = fn(st.pts); st.view = null; drawTable(); drawCanvas(); schedule3d(); check(); };
   const undo = () => { const last = st.hist.pop(); if (!last) return; const h0 = JSON.parse(last); st.pts = h0.pts; st.base = h0.base; st.edge = h0.edge || null; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); };
   const rotI = h('input', { type: 'text', value: '90', style: { width: '48px', padding: '1px 4px' } }), scaleI = h('input', { type: 'text', value: '100', style: { width: '48px', padding: '1px 4px' } });
@@ -243,7 +243,7 @@ export function openPlateEditor(o) {
         h('div', { class: 'table-wrap', style: { maxHeight: '220px', margin: '4px 0', flex: 'none' } }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, 'Lp'), h('th', {}, 'X'), h('th', {}, 'Y'), h('th', {}, 'R łuku'), h('th', {}, ''))), tbody)),
         h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap' } },
           h('button', { class: 'btn small', onclick: act(P.mirrorX, 'mirrorX') }, 'Odbij X'), h('button', { class: 'btn small', onclick: act(P.mirrorY, 'mirrorY') }, 'Odbij Y'),
-          h('button', { class: 'btn small', onclick: act(P.toOrigin, 'origin'), title: 'Lewy górny róg obwiedni w (0, 0)' }, 'Do (0,0)'),
+          h('button', { class: 'btn small', onclick: () => act((p) => P.toOrigin(p, st.base), 'origin')(), title: 'Punkt bazowy w (0, 0) – cała płytka przesuwa się razem z nim (położenie względem punktu bazowego bez zmian); bez punktu bazowego – lewy górny róg obwiedni w (0, 0)' }, 'Do (0,0)'),
           h('button', { class: 'btn small', title: 'Zamienia ciągi drobnych odcinków leżących na jednym okręgu na pojedyncze łuki (kontur przestaje być „poszatkowany”, łuk edytujesz promieniem)', onclick: () => {
             const r = P.smoothArcs(st.pts); if (!r.merged) { say('Nie znaleziono odcinków do zamiany na łuki.', 'neutral'); return; }
             push(); st.pts = r.pts; st.sel = Math.min(st.sel, st.pts.length - 1); st.view = null; drawTable(); drawCanvas(); schedule3d(); say(`Zamieniono odcinki na łuki – usunięto ${r.merged} pkt.`);

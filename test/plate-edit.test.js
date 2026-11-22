@@ -205,3 +205,13 @@ test('dodatkowe punkty bazowe łuków: środek promienia i przecięcie stycznych
   // płytka bez łuków – bez nowych punktów
   assert.equal(P.basePresets(P.parsePlate('M 0 0 L 6 0 L 6 8 L 0 8 Z').pts).filter((x) => /^a[ct]/.test(x.id)).length, 0);
 });
+
+test('Do (0,0) z punktem bazowym: punkt bazowy w (0,0), płytka i krawędź przesunięte razem z nim', async () => {
+  const P = await import('../src/renderer/js/logic/plateEdit.js');
+  const sq = [{ x: 4, y: 6 }, { x: 10, y: 6 }, { x: 10, y: 14 }, { x: 4, y: 14 }], base = { x: 10, y: 14 }, edge = { a: { x: 4, y: 6 }, b: { x: 10, y: 6 } };
+  const moved = P.toOrigin(sq, base);
+  assert.deepEqual(moved.map((p) => [p.x, p.y]), [[-6, -8], [0, -8], [0, 0], [-6, 0]], 'wymiary płytki bez zmian, punkt bazowy w (0, 0)');
+  assert.deepEqual(P.mapBase('origin', base, sq, 0, base), { x: 0, y: 0 });
+  assert.deepEqual(P.mapEdge('origin', edge, sq, 0, base), { a: { x: -6, y: -8 }, b: { x: 0, y: -8 } });
+  assert.deepEqual(P.toOrigin(sq).map((p) => [p.x, p.y]), [[0, 0], [6, 0], [6, 8], [0, 8]], 'bez punktu bazowego jak dotąd');
+});

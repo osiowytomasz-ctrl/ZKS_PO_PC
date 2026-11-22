@@ -153,7 +153,8 @@ export function rotate(pts, deg, pivot = null) {
 /** Skalowanie wokół środka płytki o [percent] % (promienie łuków też). */
 export const scale = (pts, percent, pivot = null) => { const b = plateBounds(pts), k = percent / 100, cx = pivot ? pivot.x : b.cx, cy = pivot ? pivot.y : b.cy; return map(pts, (p) => ({ x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k }), k); };
 /** Przesunięcie tak, aby lewy górny róg obwiedni był w (0, 0). */
-export const toOrigin = (pts) => { const b = plateBounds(pts); return map(pts, (p) => ({ x: p.x - b.minX, y: p.y - b.minY })); };
+/** Przesunięcie płytki tak, aby punkt bazowy [base] (gdy ustawiony) leżał w (0, 0) – płytka nie zmienia położenia względem niego; bez punktu bazowego – lewy górny róg obwiedni w (0, 0). */
+export const toOrigin = (pts, base = null) => { const b = plateBounds(pts), ox = base ? base.x : b.minX, oy = base ? base.y : b.minY; return map(pts, (p) => ({ x: p.x - ox, y: p.y - oy })); };
 /** Wstawienie punktu po punkcie [i]: w środku odcinka, a na łuku – w środku łuku (obie części zostają łukami o tym samym promieniu). */
 export function insertAfter(pts, i) {
   const a = pts[i], b = pts[(i + 1) % pts.length], m = a.arc ? arcMid(a, b) : { x: r3((a.x + b.x) / 2), y: r3((a.y + b.y) / 2) };
@@ -236,7 +237,7 @@ export function mapBase(op, base, pts, arg = 0, pivot = null) {
   if (op === 'mirrorY') return { x: base.x, y: r3(2 * b.cy - base.y) };
   if (op === 'rotate') { const a = (arg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return { x: r3(b.cx + (base.x - b.cx) * c - (base.y - b.cy) * s), y: r3(b.cy + (base.x - b.cx) * s + (base.y - b.cy) * c) }; }
   if (op === 'scale') { const k = arg / 100; return { x: r3(b.cx + (base.x - b.cx) * k), y: r3(b.cy + (base.y - b.cy) * k) }; }
-  if (op === 'origin') return { x: r3(base.x - b.minX), y: r3(base.y - b.minY) };
+  if (op === 'origin') return pivot ? { x: r3(base.x - pivot.x), y: r3(base.y - pivot.y) } : { x: r3(base.x - b.minX), y: r3(base.y - b.minY) };   // [pivot] – punkt bazowy: przesunięcie o jego wektor
   return base;
 }
 /** Krawędź skrawająca płytki: { a: { x, y }, b: { x, y } } (mm, współrzędne konturu płytki) albo null; punkty identyczne albo nieliczbowe – null. */
