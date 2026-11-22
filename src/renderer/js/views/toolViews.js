@@ -173,7 +173,7 @@ export function savedInsertZ(t) { const z = Number((insStore()[codeOf(t)] || {})
 export function insertSetup(t) {
   const o = insStore()[codeOf(t)] || {}, central = !!t && typeof t === 'object' && G.isCentralTool(t);   // płytka centralna (wiertła ISCAR / AMEC): jedna na osi, opad na obie strony
   const num = (v) => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : null);
-  return { z: central ? 1 : Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), central, plates: normPlates(o.plates),   // plates – własny układ płytek (null – automatyczny)
+  return { z: central ? 1 : Number(o.z) >= 1 ? Math.min(60, Math.round(Number(o.z))) : teethFromTool(t), central, plates: normPlates(o.plates), pivot: G.normPivot(o.pivot),   // plates – własny układ płytek (null – automatyczny); pivot – punkt obrotu grupy płytek (null – punkt bazowy pierwszej płytki)
     draft: num(o.draft) != null ? Math.max(0, Math.min(30, num(o.draft))) : central ? 5 : 7,   // pochylenie ścian / opad (°)
     thickness: num(o.thickness) > 0 ? Math.min(30, num(o.thickness)) : 0 };   // grubość płytki, mm (0 – automatycznie)
 }
@@ -181,10 +181,12 @@ export function saveInsertSetup(t, patch) {
   const all = insStore(), k = codeOf(t);
   all[k] = { ...insertSetup(t), ...(all[k] || {}), ...patch };
   if (!all[k].plates) delete all[k].plates;   // brak własnego układu – układ automatyczny
+  if (!G.normPivot(all[k].pivot)) delete all[k].pivot;
   try { localStorage.setItem(INS_KEY, JSON.stringify(all)); } catch { /* bez pamięci */ }
 }
 /** Własny układ płytek narzędzia (rodzaj, wiele płytek, położenie) dla rysunków 2D / 3D w całym programie. */
 G.setPlateSetupProvider((t) => normPlates((insStore()[codeOf(t)] || {}).plates));
+G.setGroupPivotProvider((t) => G.normPivot((insStore()[codeOf(t)] || {}).pivot));
 // ---------- punkt bazowy płytki (wspólny dla wszystkich narzędzi z tą płytką; pamięć tego komputera) ----------
 const BASE_KEY = 'zks.plates.base';
 const baseStore = () => { try { return JSON.parse(localStorage.getItem(BASE_KEY) || '{}') || {}; } catch { return {}; } };

@@ -4,7 +4,7 @@
 import { h, clear, toast, modal } from '../ui.js';
 import * as P from '../logic/plateEdit.js';
 import { view3d } from './toolViews.js';
-import { basePicker, baseLabel } from './basePicker.js';
+import { basePicker, baseLabel, escGuard } from './basePicker.js';
 import * as G from '../logic/toolGeometry.js';
 
 const DEFAULT_PLATE = [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }];
@@ -148,6 +148,9 @@ export function openPlateEditor(o) {
     ...STEPS.map(([v, l]) => h('option', { value: v, selected: v === '0.1' }, l)));
   // ---------- punkt bazowy: punkt płytki, względem którego liczone jest położenie w narzędziu (zielony celownik) ----------
   const baseBox = h('div', { style: { border: '1px solid #0a7d2c', padding: '6px', margin: '6px 0', fontSize: '12px' } });
+  /** Esc / „Cofnij”: punkt bazowy wraca do pierwotnego wyboru, wybór się zamyka (okno edytora zostaje). */
+  function cancelBase() { st.base = st.baseOrig ? { ...st.baseOrig } : null; if (!st.base) st.rel = false; st.basePick = false; drawTable(); drawCanvas(); paintBase(); }
+  escGuard(baseBox, () => !!st.basePick, () => cancelBase());
   function paintBase() {
     clear(baseBox);
     const kindNow = st.plate && st.plate.mode === 'irregular' ? 'irregular' : isCentral() ? 'central' : 'edge', path = P.plateToPath(st.pts), angNow = st.plate ? st.plate.ang : 0;
@@ -158,13 +161,14 @@ export function openPlateEditor(o) {
       const on = path ? G.plateOnTool(path, { kind: kindNow, ang: angNow }) : null;
       baseBox.append(...basePicker({ mode: st.baseMode, onMode: (m2) => { st.baseMode = m2; paintBase(); }, presets, stdPts: st.pts,
         toolPoly: on ? on.poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })) : null, toolPoint: (pt) => { const b = on && G.basePlaced(on.raw, on.poly, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; },
-        cur: st.base, defLabel, onPick: (b) => { push(); st.base = b ? { ...b } : null; if (!b) st.rel = false; st.basePick = false; drawTable(); drawCanvas(); paintBase(); }, onBack: () => { st.basePick = false; paintBase(); } }));
+        cur: st.base, defLabel, onPick: (b) => { st.base = b ? { ...b } : null; if (!b) st.rel = false; drawTable(); drawCanvas(); paintBase(); },   // wybór wielokrotny: okno zostaje do „Zatwierdź”
+        onDone: () => { st.basePick = false; paintBase(); }, onCancel: () => cancelBase() }));
       return;
     }
     const bx = h('input', { type: 'text', value: st.base ? comma(st.base.x) : '', placeholder: 'X', style: { width: '58px', padding: '1px 4px' }, onchange: () => setB(num(bx.value), st.base ? st.base.y : 0) });
     const by = h('input', { type: 'text', value: st.base ? comma(st.base.y) : '', placeholder: 'Y', style: { width: '58px', padding: '1px 4px' }, onchange: () => setB(st.base ? st.base.x : 0, num(by.value)) });
     baseBox.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Punkt, względem którego liczone jest położenie płytki w narzędziu (współrzędne X, Z) i wokół którego płytka się obraca (kąt płytki). Bez punktu – środek płytki.'),
-      h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', flexWrap: 'wrap', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (na narzędziu / standardowo)', onclick: () => { st.basePick = true; paintBase(); } }, '⊕ Punkt bazowy'),
+      h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', flexWrap: 'wrap', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (na narzędziu / standardowo)', onclick: () => { push(); st.baseOrig = st.base ? { ...st.base } : null; st.basePick = true; paintBase(); } }, '⊕ Punkt bazowy'),
         h('span', { class: 'muted', style: { fontSize: '11px' } }, baseLabel(presets, st.base, defLabel)),
         h('button', { class: 'btn small', title: 'Ustaw zaznaczony punkt konturu (pomarańczowy) jako bazowy', onclick: () => { const q = st.pts[st.sel]; if (q) { push(); st.base = { x: q.x, y: q.y }; drawTable(); drawCanvas(); } } }, 'Zaznaczony punkt'),
         h('button', { class: 'btn small', onclick: () => { push(); st.base = null; st.rel = false; drawTable(); drawCanvas(); } }, 'Usuń')),

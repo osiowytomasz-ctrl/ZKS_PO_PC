@@ -183,7 +183,7 @@ export const isRowMill = (t) => String((t && t.columnD) ?? '').trim().toLowerCas
  * Liczba rzędów: jeż – kolumna H (całkowita ≥ 1), frez płytkowy – liczba płytek katalogu; płytki rozmieszczone równomiernie na długości roboczej K (pierwszy rząd na wysokości J,
  * ostatni kończy się na J − K), każdy obrócony o kąt G. Bez długości roboczej – wszystkie na wysokości J. Wynik: lista płytek układu (kind edge, row: true).
  */
-export function millRows(tool, catalog, pswt) {
+export function millRows(tool, catalog, pswt, pivot = null) {
   if (!catalog.length) return [];
   const E = String(tool.columnE ?? '').trim().toLowerCase(), jez = E === 'jez', faz = E === 'faz', hv = num(pswt && pswt.H), K = num(pswt && pswt.K), G = num(pswt && pswt.G) || num(tool.columnG);
   const ang = plateTilt(tool, G), n = jez && hv >= 1 ? Math.min(60, Math.round(hv)) : catalog.length;
@@ -203,7 +203,10 @@ export function millRows(tool, catalog, pswt) {
   for (let i = 0; i < n; i++) {
     const c = catalog[i % catalog.length], step = n > 1 && K > 0 ? Math.max(0, (K - height(c.path)) / (n - 1)) : 0;
     // grupa płytek obraca się razem wokół wspólnego punktu (czoło pierwszego rzędu – góra): rząd leżący d niżej przesuwa się o (−d·sin ang, −d·cos ang) – linia rzędów pod kątem
-    const d = i * step, th = (ang * Math.PI) / 180, rdx = Math.round(-d * Math.sin(th) * 1000) / 1000 || 0, rdz = Math.round(-d * Math.cos(th) * 1000) / 1000 || 0;
+    // punkt obrotu grupy [pivot] { px, py, qx, qy } (mm względem punktu odniesienia pierwszego rzędu, y w dół): punkt grupy P (układ główny, kąt 90°) leży stale w Q, grupa obraca się wokół niego;
+    // bez punktu – wokół punktu odniesienia pierwszego rzędu (P = Q = 0)
+    const d = i * step, th = (ang * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th), P = pivot || { px: 0, py: 0, qx: 0, qy: 0 }, ox = -P.px, oy = d - P.py;
+    const rdx = Math.round((P.qx + ox * cs - oy * sn) * 1000) / 1000 || 0, rdz = Math.round(-(P.qy + ox * sn + oy * cs) * 1000) / 1000 || 0;
     rows.push({ code: c.code, path: c.path, edge: c.edge || null, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: rdx, dz: rdz, ang, phi: 0, z: 0, custom: false, row: true });
   }
   return rows;
@@ -350,7 +353,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
     if (index === tools.length - 1) offsetY += b.m;
     const fitD = tool.fitM ? fitDrawingFor(tool.fitM, tool.contour) : null, fitH = fitD ? fitD.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null;   // gniazdo frezu nasadzanego (FRExxx)
     const dims = tool.dims !== false && tool.nominalLength ? layerDims(tool, b, offsetY0) : [];   // wymiary (rysowane na życzenie przez stackSvg)
-    layers.push({ code: tool.code, outline, inserts: placed, plates, dims, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
+    layers.push({ code: tool.code, outline, inserts: placed, plates, rowRef: rowRef.true || null, dims, referenceY: offsetY, blades: tool.trepan ? [] : bladeBands(tool.regions, (z) => offsetY0 + (b.maxY - z * 10)), nut: tool.holeN ? mapNut(nutDrawingFor(tool.holeN, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null, slits: ((d) => (d ? d.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : null))(colletDrawingFor(tool.startM)), hole: tool.holeN || fitH ? [...(tool.holeN ? ((h) => (h ? h.hidden.map((q) => q.map((p) => pt(p.x, offsetY0 + (b.maxY - p.y)))) : []))(holeDrawingFor(tool.holeN, tool.contour, tool.startM)) : []), ...(fitH || [])] : null, draw: tool.trepan ? mapTrepanDrawing(trepanDrawingFor(tool.diameter, tool.length, tool.contour), (p) => pt(p.x, offsetY0 + (b.maxY - p.y))) : null });
   });
   if (!layers.length) return null;
   return { layers, bounds: bounds(layers.flatMap((l) => [...l.outline, ...l.inserts.flat()])) };
@@ -543,7 +546,7 @@ export function buildMini(tool, details, plateLookup = null) {
     const catalog = inserts.filter((i) => String(i.contour ?? '').trim());
     const pathOf = (code) => ((catalog.find((i) => normCode(i.code) === normCode(code)) || {}).contour) || (plateLookup && plateLookup(code)) || '';
     let plates = resolvePlates(custom, catalog.map((i) => i.code), isCentralTool(tool)).map((p) => ({ ...p, path: pathOf(p.code), ownBase: p.base || null, base: p.base || plateBaseOf(p.code), ...(group === 'fre' ? { edge: plateEdgeOf(p.code) } : {}) })).filter((p) => p.path);
-    if (rowMill && plates.length && isRowMill(tool)) { const rows = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path, edge: p.edge })), details && details.pswt); if (rows) plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) })); }
+    if (rowMill && plates.length && isRowMill(tool)) { const rows = millRows(tool, plates.map((p) => ({ code: p.code, path: p.path, edge: p.edge })), details && details.pswt, normPivot(groupPivotOf(tool))); if (rows) plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) })); }
     else if (group === 'fre' && !custom && plates.length) { const tilt = plateTilt(tool, (details && details.pswt && details.pswt.G) || tool.columnG); if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt })); }
     if (isPlunger(tool)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślny punkt bazowy jak w podglądzie
     const lay = buildStack([{ code: tool.productCode, contour: points, plates, inserts: plates.map((p) => p.path), diameter, length, angle: num(tool.columnG), chamfer: false, central: isCentralTool(tool), drill: isWiePly }], true, false);
@@ -586,6 +589,11 @@ let plateBaseOf = () => null;
 /** Dostawca punktu bazowego płytki: (kod płytki) → { x, y } mm we współrzędnych konturu płytki albo null. Ustawia warstwa widoków. */
 export const setPlateBaseProvider = (fn) => { plateBaseOf = typeof fn === 'function' ? fn : () => null; };
 export const setPlateSetupProvider = (fn) => { plateSetup = typeof fn === 'function' ? fn : () => null; };
+let groupPivotOf = () => null;
+/** Dostawca punktu obrotu grupy płytek narzędzia: (narzędzie) → { px, py, qx, qy } (mm względem punktu odniesienia pierwszego rzędu, y w dół) albo null. Ustawia warstwa widoków. */
+export const setGroupPivotProvider = (fn) => { groupPivotOf = typeof fn === 'function' ? fn : () => null; };
+/** Punkt obrotu grupy ze znormalizowanymi liczbami albo null. */
+export const normPivot = (p) => (p && ['px', 'py', 'qx', 'qy'].every((k) => Number.isFinite(Number(p[k])) && p[k] !== '' && p[k] != null) ? { px: Math.round(Number(p.px) * 1000) / 1000, py: Math.round(Number(p.py) * 1000) / 1000, qx: Math.round(Number(p.qx) * 1000) / 1000, qy: Math.round(Number(p.qy) * 1000) / 1000 } : null);
 
 // ---------- indeks katalogu (ToolsLogic.kt) ----------
 export const NO_DATA = 'Brak danych';
@@ -655,7 +663,7 @@ export function toolIndex(catalog, overrides = null) {
       const custom = !!own(opts.layout === false ? null : plateSetup(t));
       // parametry PSWT: [opts.pswt] (np. wartości właśnie wpisane w Konturach) albo wczytane z arkusza; kąt skrawania G z nich (puste = 0), bez nich z katalogu
       const pswt = opts.pswt || (d && d.pswt) || null, tilt = mill ? plateTilt(t, pswt ? pswt.G : t.columnG) : 0;
-      const rowsOf = () => (isRowMill(t) && catalog.length ? millRows(t, catalog.map((i) => ({ code: i.code, path: i.contour, edge: plateEdgeOf(i.code) })), pswt) : null);
+      const rowsOf = () => (isRowMill(t) && catalog.length ? millRows(t, catalog.map((i) => ({ code: i.code, path: i.contour, edge: plateEdgeOf(i.code) })), pswt, opts.pivot !== undefined ? normPivot(opts.pivot) : normPivot(groupPivotOf(t))) : null);
       if (!tre && isRowMill(t) && !custom && plates.length) {   // frez płytkowy / jeżowy / fazowy: rzędy równomiernie na długości roboczej, grupa obracana wokół wspólnego punktu (fazowy – krawędzią skrawającą w jednej linii pod kątem)
         const rows = rowsOf();
         if (rows) {

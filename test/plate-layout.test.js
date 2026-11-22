@@ -301,3 +301,28 @@ test('jeż: punkty odniesienia (bazowe) płytek w rzędach leżą na jednej lini
     assert.ok(Math.abs(e(m[0]) - e(m[2])) < 1e-9, 'płytki równoległe');
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('punkt obrotu grupy płytek (P w układzie głównym, Q – stałe miejsce): grupa obraca się sztywno wokół niego', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'jez', columnP: 'X', columnF: '20', columnJ: '78', columnM: 'ABS063', columnG: '45' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-100_0;100_0;100_770;-100_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const run = (g, pivot) => {
+    const st = idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: g, H: '3', K: '25' }, pivot }), lay = G.buildStack([st], true, false).layers[0];
+    return { refs: lay.plates.map((p) => p.refs[p.refs.length - 1]), R0: lay.rowRef };
+  };
+  const main = run('90', null), cur = run('45', null);
+  assert.ok(main.R0 && cur.R0 && Math.abs(main.R0.x - cur.R0.x) < 1e-6, 'punkt odniesienia pierwszego rzędu nie zależy od kąta');
+  // pivot P = Q = drugi rząd w układzie głównym (względem R0, mm, y w dół): ten punkt zostaje w miejscu przy zmianie kąta
+  const P = { x: (main.refs[1].x - main.R0.x) / 10, y: (main.refs[1].y - main.R0.y) / 10 }, pivot = { px: P.x, py: P.y, qx: P.x, qy: P.y };
+  const a = run('90', pivot), b = run('45', pivot);
+  assert.ok(Math.abs(a.refs[1].x - main.refs[1].x) < 0.05 && Math.abs(a.refs[1].y - main.refs[1].y) < 0.05, 'przy 90° bez zmian');
+  assert.ok(Math.abs(b.refs[1].x - main.refs[1].x) < 0.05 && Math.abs(b.refs[1].y - main.refs[1].y) < 0.05, 'drugi rząd (punkt obrotu) stoi w miejscu przy obrocie o 45°');
+  assert.ok(Math.abs(b.refs[0].x - cur.refs[0].x) > 5, 'pierwszy rząd przesuwa się, bo grupa obraca się wokół innego punktu');
+  const d = (r) => [r[1].x - r[0].x, r[1].y - r[0].y];
+  assert.ok(Math.abs(d(b.refs)[0] - d(cur.refs)[0]) < 0.05 && Math.abs(d(b.refs)[1] - d(cur.refs)[1]) < 0.05, 'odstępy między rzędami bez zmian (ruch sztywny)');
+});
+
+test('normPivot: punkt obrotu grupy – tylko komplet liczb', () => {
+  assert.deepEqual(G.normPivot({ px: '1', py: 2, qx: 3.0004, qy: -4 }), { px: 1, py: 2, qx: 3, qy: -4 });
+  assert.equal(G.normPivot({ px: 1, py: 2, qx: 3 }), null); assert.equal(G.normPivot(null), null); assert.equal(G.normPivot({ px: '', py: 0, qx: 0, qy: 0 }), null);
+});

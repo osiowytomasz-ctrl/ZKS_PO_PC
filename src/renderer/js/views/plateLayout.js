@@ -46,8 +46,10 @@ export function mountPlateLayout(o) {
     });
     if (!rows.length) tbody.append(h('tr', {}, h('td', { colspan: 9, class: 'muted' }, 'Brak płytek – dodaj płytkę albo wróć do układu automatycznego.')));
     markSel();
+    pivotBtn.style.display = o.onPivot && (!o.canPivot || o.canPivot()) && rows.length > 1 ? '' : 'none';
   }
   const add = () => { const used = new Set(rows.map((r) => r.code)), code = (o.allCodes || []).find((c) => !used.has(c)) || (o.allCodes || [])[0] || ''; if (!code) return; rows.push(normPlate({ code, mode: rows.length ? 'edge' : 'auto' })); apply(); draw(); choose(rows.length - 1); };
+  const pivotBtn = h('button', { class: 'btn small', title: 'Punkt, wokół którego obraca się cała grupa płytek (kąt skrawania): wybierany spośród punktów wszystkich płytek i czterech skrajnych punktów grupy', onclick: () => o.onPivot && o.onPivot() }, '⊕ Punkt obrotu grupy…');
   const root = h('div', { class: 'plate-panel', style: { width: '520px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '6px', background: '#fff', border: '1px solid #c8a400', padding: '6px 8px', fontSize: '12px', overflow: 'auto', minHeight: 0 } },
     h('style', {}, '.plate-panel th, .plate-panel td { padding: 2px 3px !important; } .plate-panel .btn.small { padding: 1px 5px; }'),
     h('div', { class: 'row' }, h('b', { style: { flex: 1 } }, `Płytki – ${o.tool}`), h('button', { class: 'btn small', onclick: () => o.onClose() }, 'Zamknij')),
@@ -56,6 +58,7 @@ export function mountPlateLayout(o) {
     h('div', { class: 'table-wrap', style: { overflow: 'auto' } }, h('table', { class: 't', style: { width: 'auto', fontSize: '11px' } }, h('thead', {}, h('tr', {}, ...['Lp', 'Płytka', 'Rodzaj', 'ΔX', 'ΔZ', o.angOffset ? 'Kąt' : 'Obrót', 'φ', 'z', ''].map((t) => h('th', {}, t)))), tbody)),
     h('div', { class: 'row', style: { gap: '6px' } },
       h('button', { class: 'btn small', onclick: add, title: 'Dodaj kolejną płytkę (wiele płytek na narzędziu)' }, '+ Dodaj płytkę'),
+      pivotBtn,
       h('button', { class: 'btn small', onclick: () => { rows = (o.autoPlates || []).map((p) => normPlate(p)); sel = null; o.onSelect(null); o.onChange(null); draw(); }, title: 'Płytki z katalogu narzędzia, bez własnych ustawień' }, 'Układ automatyczny')));
   /** Odświeżenie z zewnątrz (nie przeszkadza w pisaniu w tabeli). */
   root.sync = (plates, selected) => {
