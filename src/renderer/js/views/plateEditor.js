@@ -160,7 +160,7 @@ export function openPlateEditor(o) {
     if (st.basePick) {   // ten sam wybór punktu, co w oknie danych płytki w ToolBuilderze: rysunek płytki, tryb „na narzędziu” / „standardowo”
       const on = path ? G.plateOnTool(path, { kind: kindNow, ang: angNow }) : null;
       baseBox.append(...basePicker({ mode: st.baseMode, onMode: (m2) => { st.baseMode = m2; paintBase(); }, presets, stdPts: st.pts,
-        toolPoly: on ? on.poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })) : null, toolPoint: (pt) => { const b = on && G.basePlaced(on.raw, on.poly, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; },
+        toolPoly: on ? on.poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })) : null, toolPoint: (pt) => { const b = on && on.place(pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; },
         cur: st.base, defLabel, onPick: (b) => { st.base = b ? { ...b } : null; if (!b) st.rel = false; drawTable(); drawCanvas(); paintBase(); },   // wybór wielokrotny: okno zostaje do „Zatwierdź”
         onDone: () => { st.basePick = false; paintBase(); }, onCancel: () => cancelBase() }));
       return;

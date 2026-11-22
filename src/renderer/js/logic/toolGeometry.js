@@ -327,7 +327,7 @@ export function buildStack(tools, allInserts, rotateChamfer) {
       const raw = parseInsertPath(pl0.path);
       if (raw.length < 2) continue;
       // punkt bazowy płytki (współrzędne konturu z arkusza); gdy konturem płytki odwrócono w pionie (cały pod osią) – razem z nim
-      const rawN = pl0.base || pl0.edge ? parseInsertPath(pl0.path, { absY: false }) : null, flip = !!rawN && rawN.length > 0 && Math.abs(rawN[0].y) > 1e-9 && Math.abs(raw[0].y + rawN[0].y) < 1e-9;
+      const flip = !!(pl0.base || pl0.edge) && pathFlip(pl0.path);
       const pl = flip ? { ...pl0, ...(pl0.base ? { base: { x: pl0.base.x, y: -pl0.base.y } } : {}), ...(pl0.edge ? { edge: { a: { x: pl0.edge.a.x, y: -pl0.edge.a.y }, b: { x: pl0.edge.b.x, y: -pl0.edge.b.y } } } : {}) } : pl0;
       const kind = pl.kind || (pl.central ? 'central' : 'edge');   // centralna: jedna na osi; nieregularna: jedna w dowolnym miejscu; obwodowa: para lewa / prawa
       // rzędy frezu płytkowego / jeżowego: punkt odniesienia płytki = punkt bazowy (domyślnie pierwszy punkt konturu) – płytki obracają się wokół niego, a punkty odniesienia kolejnych rzędów
@@ -413,15 +413,26 @@ export function placedCorners(raw, poly, flip = false) {
 export function plateCorners(path, { kind = 'edge', ang = 0 } = {}) {
   const contour = [pt(-500, 0), pt(500, 0), pt(500, 1000), pt(-500, 1000)];
   const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(ang) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
-  const m = lay && lay.layers[0].plates[0];
-  return m ? m.corners || [] : [];
+  const m = lay && lay.layers[0].plates[0], fl = pathFlip(path);
+  return m ? (m.corners || []).map((c) => (fl ? { ...c, pt: { x: c.pt.x, y: -c.pt.y || 0 } } : c)) : [];   // rogi we współrzędnych edytora (także dla konturu odwróconego w pionie)
+}
+/** Czy kontur płytki leży w arkuszu odwrócony w pionie (współrzędne Y ujemne) – układ edytora ma wtedy znak Y przeciwny niż [parseInsertPath] (wartości bezwzględne). */
+export function pathFlip(path) {
+  const raw = parseInsertPath(path), rawN = parseInsertPath(path, { absY: false });
+  const k = rawN.findIndex((q) => Math.abs(q.y) > 1e-9);   // pierwszy punkt poza Y = 0 rozstrzyga, czy kontur odwrócono
+  return k >= 0 && raw.length === rawN.length && Math.abs(raw[k].y + rawN[k].y) < 1e-9;
+}
+/** Punkt płytki [base] (mm, współrzędne edytora / arkusza) po ułożeniu płytki ([poly] – wielokąt płytki na narzędziu 1:1 z [parseInsertPath]); z uwzględnieniem odwróconego konturu. null – brak. */
+export function placedPoint(path, poly, base) {
+  if (!base) return null;
+  return basePlaced(parseInsertPath(path), poly, pathFlip(path) ? { x: base.x, y: -base.y } : base);
 }
 /** Płytka o ścieżce [path] ułożona na narzędziu jako [kind] i obrócona o [ang]° (jak w [plateCorners]): { raw, poly } (0,1 mm; poly 1:1 z raw – do [basePlaced]) albo null. */
 export function plateOnTool(path, { kind = 'edge', ang = 0 } = {}) {
   const contour = [pt(-500, 0), pt(500, 0), pt(500, 1000), pt(-500, 1000)];
   const lay = buildStack([{ code: 'x', contour, inserts: [path], plates: [{ path, code: 'x', kind, central: kind === 'central', dx: 0, dz: 0, ang: Number(ang) || 0, phi: 0, z: 0 }], diameter: 100, length: 100, angle: 0, chamfer: false, drill: kind === 'central' }], true, false);
   const m = lay && lay.layers[0].plates[0], raw = parseInsertPath(path);
-  return m && m.polys.length ? { raw, poly: m.single ? m.polys[0] : m.polys[m.polys.length - 1] } : null;
+  return m && m.polys.length ? { raw, poly: m.single ? m.polys[0] : m.polys[m.polys.length - 1], place: (b) => placedPoint(path, m.single ? m.polys[0] : m.polys[m.polys.length - 1], b) } : null;
 }
 /** Frez płytkowy „plunger” (fre / plu). */
 export const isPlunger = (t) => String((t && t.columnD) ?? '').trim().toLowerCase() === 'fre' && String((t && t.columnE) ?? '').trim().toLowerCase() === 'plu';

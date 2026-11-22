@@ -611,6 +611,33 @@ export function mountContours(el, ctx) {
         status.set(`Płytka ${q.code}: zastosowano zmiany w podglądzie${np !== path ? ' (kontur płytki – do odświeżenia katalogu)' : ''}.`, 'neutral');
       } });
   }
+  /** Grupa płytek frezu jeżowego / płytkowego: dane okna wyboru punktu bazowego (kontury wszystkich płytek, ich punkty i zaznaczone punkty bazowe), mm w układzie rysunku stosu (y w dół). */
+  function groupBaseData() {
+    const t = st.tool, pw = paramsOf(t) || {};
+    if (!t || !st.index) return null;
+    const cur = st.index.stackTool(t, { pswt: pw }), lc = cur && G.buildStack([cur], true, false), sc = lc && lc.layers[0];
+    if (!sc) return null;
+    const last = (pm) => (pm.single ? pm.polys[0] : pm.polys[pm.polys.length - 1]), polys = [], dots = [], marks = [], rows = [], specs = layoutNow();
+    sc.plates.forEach((pm, j) => {
+      const path = (cur.plates[j] && cur.plates[j].path) || '';
+      if (!path) return;
+      const poly = last(pm), n = rows.length + 1;
+      rows.push({ j, path, code: pm.code });
+      polys.push(poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })));
+      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${n}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
+      const own = (specs[j] && specs[j].base) || plateBase(pm.code), mp = own && G.placedPoint(path, poly, own);
+      if (mp) marks.push({ x: mp.x / 10, y: mp.y / 10 });
+    });
+    return rows.length > 1 ? { polys, dots, marks, rows } : null;
+  }
+  /** Wybór punktu bazowego dla całej grupy: ten sam punkt (po numerze na liście punktów płytki) dostają wszystkie płytki grupy – grupa przesuwa się razem, żadna płytka nie „przeskakuje” sama. */
+  function pickBaseGroup(e, dat) {
+    const id = e.id.slice(e.id.indexOf('_') + 1);
+    let list = ownPlates(st.tool) || normPlates(effectiveSpecs());
+    dat.rows.forEach((r) => { const pr = basePresets(parsePlate(r.path).pts).find((x) => x.id === id); if (pr) list = patchPlate(list, plateCodes(), r.j, { base: { x: pr.pt.x, y: pr.pt.y } }); });
+    saveInsertSetup(st.tool, { plates: list });
+    drawPreview();
+  }
   /** Punkt obrotu grupy płytek rzędów: dane okna wyboru (kontury płytek, ich punkty i prostokąt skrajny grupy), wszystko w mm w układzie rysunku stosu (y w dół). */
   function pivotData() {
     const t = st.tool, pw = paramsOf(t) || {};
@@ -625,7 +652,7 @@ export function mountContours(el, ctx) {
     rows.forEach(({ pm, j }) => {
       const poly = last(pm), path = (cur.plates[j] && cur.plates[j].path) || '', raw = G.parseInsertPath(path);
       polys.push(poly.map((v) => ({ x: v.x / 10, y: v.y / 10 })));
-      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.basePlaced(raw, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${rows.findIndex((e) => e.j === j) + 1}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
+      basePresets(parsePlate(path).pts).forEach((pr) => { const b = G.placedPoint(path, poly, pr.pt); if (b) dots.push({ id: `p${j}_${pr.id}`, label: `Płytka ${rows.findIndex((e) => e.j === j) + 1}: ${pr.label}`, x: b.x / 10, y: b.y / 10, kind: /^p\d/.test(pr.id) ? 'vertex' : 'box' }); });
     });
     const bbox = (pls) => { const xs = pls.flat().map((v) => v.x / 10), ys = pls.flat().map((v) => v.y / 10); return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; };
     const names = ['lewy górny', 'prawy górny', 'prawy dolny', 'lewy dolny'], corners4 = (b) => [{ x: b.x0, y: b.y0 }, { x: b.x1, y: b.y0 }, { x: b.x1, y: b.y1 }, { x: b.x0, y: b.y1 }];
@@ -649,6 +676,12 @@ export function mountContours(el, ctx) {
   /** Cofnięcie wyboru punktów (Esc / „Cofnij”): punkt bazowy płytki albo punkt obrotu grupy wraca do pierwotnego stanu, okno się zamyka. */
   function cancelPicks() {
     if (pv.pivotPick) { pv.pivotPick = false; saveInsertSetup(st.tool, { pivot: pv.pivotOrig || null }); drawPreview(); return; }
+    if (pv.basePick != null && pv.baseGroup) {
+      pv.basePick = null; pv.baseGroup = false;
+      let list = ownPlates(st.tool) || normPlates(effectiveSpecs());
+      (pv.baseOrigAll || []).forEach((b, jj) => { list = patchPlate(list, plateCodes(), jj, { base: b }); });
+      saveInsertSetup(st.tool, { plates: list }); drawPreview(); return;
+    }
     if (pv.basePick != null) { const j = pv.basePick; pv.basePick = null; setPlate(j, { base: pv.baseOrig || null }); drawPreview(); }
   }
   escGuard(preview, () => !!pv.pivotPick || pv.basePick != null, () => cancelPicks());
@@ -719,12 +752,23 @@ export function mountContours(el, ctx) {
       const same = (pr) => !!cur && Math.abs(pr.pt.x - cur.x) < 1e-6 && Math.abs(pr.pt.y - cur.y) < 1e-6;
       const curPreset = presets.find(same), defLabel = G.isPlunger(st.tool) ? 'domyślny (plunger: róg skrajny prawy górny)' : 'pierwszy punkt konturu';
       const curLabel = curPreset ? curPreset.label : cur ? `własny (${round3(cur.x)}; ${round3(cur.y)})` : defLabel;
-      if (pv.basePick !== j) pv.basePick = null;
+      if (pv.basePick !== j) { pv.basePick = null; pv.baseGroup = false; }
+      const gdat = pv.basePick === j && pv.baseGroup ? groupBaseData() : null;
+      if (pv.basePick === j && pv.baseGroup && gdat) {   // grupa płytek (jeż / frez płytkowy): w jednym oknie wszystkie płytki z punktami, wybrany punkt dostają wszystkie płytki grupy
+        cornerBox(closeBtn(() => cancelPicks()), h('b', {}, 'Punkt bazowy – grupa płytek'), ...groupPicker({ polys: gdat.polys, dots: gdat.dots, rect: [], corners: [], marks: gdat.marks, markColor: '#2e7d32', hintPrefix: 'Punkt bazowy', curLabel: gdat.marks.length ? 'wybrany (zielone ⊕)' : 'domyślny (pierwszy punkt konturu)',
+          legend: '■ środki i rogi obwiedni · ● punkty konturu · zielone ⊕ – punkt bazowy każdej płytki. Wybrany punkt dostają wszystkie płytki grupy (ten sam punkt każdej płytki). Klikaj do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.', defTitle: 'Bez własnego punktu bazowego: pierwszy punkt konturu każdej płytki',
+          onPick: (e) => pickBaseGroup(e, gdat), onDefault: () => { let list = ownPlates(st.tool) || normPlates(effectiveSpecs()); gdat.rows.forEach((r) => { list = patchPlate(list, plateCodes(), r.j, { base: null }); savePlateBase(r.code, null); }); saveInsertSetup(st.tool, { plates: list }); drawPreview(); },
+          onDone: () => { pv.basePick = null; pv.baseGroup = false; drawPreview(); }, onCancel: () => cancelPicks() }));
+        preview.lastChild.style.width = '362px';
+        if (platePanel) platePanel.sync(layoutNow(), pv.insSel);
+        return;
+      }
+      if (pv.basePick === j && pv.baseGroup) pv.baseGroup = false;
       if (pv.basePick === j) {   // wybór punktu bazowego na rysunku płytki (wspólny moduł z edytorem płytki) zamiast całego okna danych
-        const raw = G.parseInsertPath(plateSrc), stdPts = parsePlate(plateSrc).pts;
+        const stdPts = parsePlate(plateSrc).pts;
         cornerBox(closeBtn(() => { pv.basePick = null; drawPreview(); }), h('b', {}, `Punkt bazowy – płytka ${q.code}`),
           ...basePicker({ mode: pv.baseMode, onMode: (m) => { pv.baseMode = m; drawPreview(); }, presets, stdPts, toolPoly: q.right.map((v) => ({ x: v.x / 10, y: v.y / 10 })),
-            toolPoint: (pt) => { const b = G.basePlaced(raw, q.right, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; }, cur, defLabel,
+            toolPoint: (pt) => { const b = G.placedPoint(plateSrc, q.right, pt); return b ? { x: b.x / 10, y: b.y / 10 } : null; }, cur, defLabel,
             onPick: (b) => set({ base: b }), onDone: () => { pv.basePick = null; drawPreview(); }, onCancel: () => cancelPicks() }));   // wybór wielokrotny: okno zostaje do „Zatwierdź”, Esc cofa do pierwotnego punktu
         if (platePanel) platePanel.sync(layoutNow(), pv.insSel);
         return;
@@ -735,7 +779,7 @@ export function mountContours(el, ctx) {
         rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set(fre ? { ang: G.relAngle(v, tiltOf(st.tool)), angRel: v } : { ang: v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
-        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { pv.baseOrig = cur ? { x: cur.x, y: cur.y } : null; pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),
+        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { pv.baseOrig = cur ? { x: cur.x, y: cur.y } : null; pv.baseGroup = G.isRowMill(st.tool) && ins.length > 1; pv.baseOrigAll = pv.baseGroup ? layoutNow().map((p) => (p.base ? { x: p.base.x, y: p.base.y } : null)) : null; pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, (q.base ? 'Punkt bazowy (⊕): ' : 'Punkt bazowy (●, pierwszy punkt konturu): ') + 'z algorytmu ', h('b', {}, mm(q.autoBase || q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.base || q.right[0]))),
         q.base ? h('div', {}, rowI('Bazowy X', num(round3(q.base.x / 10), (v) => { if (Number.isFinite(v) && cs) set({ dx: round3(a.dx + (v - q.base.x / 10) / cs) }); })), rowI('Bazowy Z', num(round3(q.base.y / 10), (v) => { if (Number.isFinite(v)) set({ dz: round3(a.dz + (v - q.base.y / 10)) }); })),
           h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Wpisz, gdzie ma leżeć punkt bazowy (X od osi, Z od Z = 0) – ΔX i ΔZ zostaną przeliczone.')) : null,

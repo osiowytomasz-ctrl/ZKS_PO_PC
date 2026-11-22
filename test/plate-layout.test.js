@@ -326,3 +326,15 @@ test('normPivot: punkt obrotu grupy – tylko komplet liczb', () => {
   assert.deepEqual(G.normPivot({ px: '1', py: 2, qx: 3.0004, qy: -4 }), { px: 1, py: 2, qx: 3, qy: -4 });
   assert.equal(G.normPivot({ px: 1, py: 2, qx: 3 }), null); assert.equal(G.normPivot(null), null); assert.equal(G.normPivot({ px: '', py: 0, qx: 0, qy: 0 }), null);
 });
+
+test('punkty płytki z konturem odwróconym w pionie (ujemne Y w arkuszu) leżą na narysowanej płytce – wybór punktu bazowego „na narzędziu”', async () => {
+  const PE = await import('../src/renderer/js/logic/plateEdit.js');
+  const plate = 'M 0 0 L 6 0 L 6 -8 L 0 -8 Z';
+  assert.equal(G.pathFlip(plate), true); assert.equal(G.pathFlip('M 0 0 L 6 0 L 6 8 L 0 8 Z'), false);
+  const on = G.plateOnTool(plate, { kind: 'edge', ang: 20 }), xs = on.poly.map((p) => p.x), ys = on.poly.map((p) => p.y);
+  const inside = (p) => p.x >= Math.min(...xs) - 1e-6 && p.x <= Math.max(...xs) + 1e-6 && p.y >= Math.min(...ys) - 1e-6 && p.y <= Math.max(...ys) + 1e-6;
+  for (const pr of PE.basePresets(PE.parsePlate(plate).pts)) assert.ok(inside(on.place(pr.pt)), `punkt „${pr.label}” leży na płytce`);
+  // rogi skrajne w układzie edytora (zgodne z presetami)
+  const cs = G.plateCorners(plate, { kind: 'edge', ang: 0 });
+  assert.ok(cs.every((c) => c.pt.y <= 1e-6), 'rogi skrajne w układzie edytora (Y ≤ 0)');
+});

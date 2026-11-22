@@ -60,7 +60,8 @@ export function baseLabel(presets, cur, defLabel) {
  * (teoretyczne położenie początkowe), obrócony o kąt skrawania razem z grupą.
  */
 export function groupPicker(o) {
-  const all = [...o.polys.flat(), ...o.dots, ...o.corners, ...o.rect, ...(o.cur ? [o.cur] : [])];
+  const marks = o.marks || (o.cur ? [o.cur] : []), mc = o.markColor || '#e00000';
+  const all = [...o.polys.flat(), ...o.dots, ...o.corners, ...o.rect, ...marks];
   const xs = all.map((v) => v.x), ys = all.map((v) => v.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), W = 340, Hh = 360;
   const sc = Math.min((W - 28) / Math.max(x1 - x0, 1e-6), (Hh - 28) / Math.max(y1 - y0, 1e-6));
   const X = (v) => r3(14 + (v - x0) * sc + (W - 28 - (x1 - x0) * sc) / 2), Y = (v) => r3(14 + (v - y0) * sc + (Hh - 28 - (y1 - y0) * sc) / 2);
@@ -71,24 +72,24 @@ export function groupPicker(o) {
       : `<rect x="${cx - 3}" y="${cy - 3}" width="6" height="6" fill="#fff" stroke="#607d8b" stroke-width="1.3"/>`;
     return `<g data-id="${e.id}" style="cursor:pointer">${mark}<circle cx="${cx}" cy="${cy}" r="8" fill="transparent"/></g>`;
   };
-  const sel = o.cur ? `<g pointer-events="none"><circle cx="${X(o.cur.x)}" cy="${Y(o.cur.y)}" r="8" fill="none" stroke="#e00000" stroke-width="2.2"/><path d="M${X(o.cur.x) - 12} ${Y(o.cur.y)}H${X(o.cur.x) + 12}M${X(o.cur.x)} ${Y(o.cur.y) - 12}V${Y(o.cur.y) + 12}" stroke="#e00000" stroke-width="1.8"/></g>` : '';
+  const sel = marks.map((m) => `<g pointer-events="none"><circle cx="${X(m.x)}" cy="${Y(m.y)}" r="8" fill="none" stroke="${mc}" stroke-width="2.2"/><path d="M${X(m.x) - 12} ${Y(m.y)}H${X(m.x) + 12}M${X(m.x)} ${Y(m.y) - 12}V${Y(m.y) + 12}" stroke="${mc}" stroke-width="1.8"/></g>`).join('');
   const holder = h('div', { style: { border: '1px solid #ccc', background: '#fff', lineHeight: 0, width: W + 'px' } });
   holder.innerHTML = `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">${o.polys.map((p) => `<polygon points="${pg(p)}" fill="#c8a400" fill-opacity=".5" stroke="#8a6d00" stroke-width="1.3"/>`).join('')}`
-    + `<polygon points="${pg(o.rect)}" fill="none" stroke="#7b1fa2" stroke-width="1.2" stroke-dasharray="5 3"/>${o.dots.map((e) => dot(e, e.kind)).join('')}${o.corners.map((e) => dot(e, 'corner')).join('')}${sel}</svg>`;
-  const hint = h('div', { class: 'muted', style: { fontSize: '11px', minHeight: '28px', lineHeight: '1.3' } }, `Punkt obrotu grupy: ${o.curLabel}`);
+    + `${o.rect.length ? `<polygon points="${pg(o.rect)}" fill="none" stroke="#7b1fa2" stroke-width="1.2" stroke-dasharray="5 3"/>` : ''}${o.dots.map((e) => dot(e, e.kind)).join('')}${o.corners.map((e) => dot(e, 'corner')).join('')}${sel}</svg>`;
+  const hint = h('div', { class: 'muted', style: { fontSize: '11px', minHeight: '28px', lineHeight: '1.3' } }, `${o.hintPrefix || 'Punkt obrotu grupy'}: ${o.curLabel}`);
   const find = (ev) => { const g = ev.target.closest && ev.target.closest('[data-id]'); const id = g && g.getAttribute('data-id'); return id && [...o.dots, ...o.corners].find((e) => e.id === id); };
   holder.addEventListener('pointerover', (ev) => { const e = find(ev); if (e) hint.textContent = e.label; });
   holder.addEventListener('click', (ev) => { const e = find(ev); if (e) o.onPick(e); });
   const modeBtn = (id, text, tip) => h('button', { class: 'btn small' + (o.mode === id ? ' primary' : ''), title: tip, onclick: () => o.onMode(id) }, text);
   return [
-    h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Skrajne punkty grupy (◆):'),
-    h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, modeBtn('cur', 'Aktualny układ', 'Prostokąt nieobrócony wokół płytek w bieżącym ułożeniu (płytki obrócone w grupie i lokalnie), dowolny kąt skrawania'),
+    ...(o.mode === undefined ? [] : [h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Skrajne punkty grupy (◆):')]),
+    o.mode === undefined ? null : h('div', { class: 'row', style: { gap: '4px', margin: '3px 0' } }, modeBtn('cur', 'Aktualny układ', 'Prostokąt nieobrócony wokół płytek w bieżącym ułożeniu (płytki obrócone w grupie i lokalnie), dowolny kąt skrawania'),
       modeBtn('main', 'Układ główny', 'Prostokąt wokół układu przy kącie 90° (teoretyczne położenie początkowe), obrócony o kąt skrawania')),
     holder, hint,
-    h('div', { class: 'muted', style: { fontSize: '10px' } }, '■ środki i rogi obwiedni płytek · ● punkty konturów · ◆ skrajne punkty grupy (prostokąt) · czerwony ⊕ – punkt obrotu grupy. Klikaj punkty do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.'),
+    h('div', { class: 'muted', style: { fontSize: '10px' } }, o.legend || '■ środki i rogi obwiedni płytek · ● punkty konturów · ◆ skrajne punkty grupy (prostokąt) · czerwony ⊕ – punkt obrotu grupy. Klikaj punkty do skutku; „Zatwierdź” zamyka okno, Esc cofa wszystko.'),
     h('div', { class: 'row', style: { gap: '4px', marginTop: '4px', flexWrap: 'wrap' } }, h('button', { class: 'btn small primary', onclick: () => o.onDone() }, 'Zatwierdź'),
-      h('button', { class: 'btn small', title: 'Bez własnego punktu: grupa obraca się wokół punktu odniesienia pierwszej płytki', onclick: () => o.onDefault() }, 'Domyślny'), h('button', { class: 'btn small', title: 'Cofnij wszystkie zmiany i wróć do pierwotnego wyboru (Esc)', onclick: () => o.onCancel() }, 'Cofnij (Esc)')),
-  ];
+      h('button', { class: 'btn small', title: o.defTitle || 'Bez własnego punktu: grupa obraca się wokół punktu odniesienia pierwszej płytki', onclick: () => o.onDefault() }, 'Domyślny'), h('button', { class: 'btn small', title: 'Cofnij wszystkie zmiany i wróć do pierwotnego wyboru (Esc)', onclick: () => o.onCancel() }, 'Cofnij (Esc)')),
+  ].filter(Boolean);
 }
 /**
  * Esc przy otwartym wyborze punktu cofa zmiany (nie zamyka okna nadrzędnego): nasłuch na oknie w fazie przechwytywania, więc wyprzedza obsługę Esc okien Kontur i edytora.
