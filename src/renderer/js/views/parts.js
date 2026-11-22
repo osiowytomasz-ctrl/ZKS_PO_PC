@@ -9,6 +9,9 @@ import { naturalCompare } from '../logic/common.js';
 import { lazyFill, contrast, plateBase, savePlateBase, plateEdge, savePlateEdge } from './toolViews.js';
 import { openPlateEditor } from './plateEditor.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { ndLoad } from '../ndStore.js';
+import { normCode } from '../logic/tooltrack.js';
+import * as V from '../logic/partsView.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -28,20 +31,34 @@ export function insertSvg(path, { w = 150, hgt = 120, dims = false } = {}) {
 
 export function mountParts(el, ctx) {
   const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
-  const st = { index: null, parts: [], q: '', onlyContour: true, company: '', stopFill: null };
+  const st = { index: null, parts: [], q: '', onlyContour: true, company: '', u: '', t: '', sort: 'code', dir: 1, params: {}, stopFill: null };
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' } });
   const info = h('span', { class: 'muted' });
   const companySel = h('select', { class: 'filter-dd', onchange: () => { st.company = companySel.value; companySel.classList.toggle('on', !!st.company); draw(); } });
+  const colSel = (col, title) => { const s = h('select', { class: 'filter-dd', title, onchange: () => { st[col.toLowerCase()] = s.value; s.classList.toggle('on', !!s.value); draw(); } }); return s; };
+  const uSel = colSel('U', 'Filtr: kolumna U arkusza PSWT narzędzi, w których jest część'), tSel = colSel('T', 'Filtr: kolumna T arkusza PSWT narzędzi, w których jest część');
+  const sortSel = h('select', { title: 'Sortowanie części', onchange: () => { st.sort = sortSel.value; draw(); } }, ...V.SORTS.map(([v, l]) => h('option', { value: v }, 'Sortuj: ' + l)));
+  const dirBtn = h('button', { class: 'btn', title: 'Kierunek sortowania', onclick: () => { st.dir = -st.dir; dirBtn.textContent = st.dir > 0 ? '↑' : '↓'; draw(); } }, '↑');
+  const legend = h('span', { style: { display: 'inline-flex', gap: '8px', fontSize: '11px', alignItems: 'center' } }, ...Object.values(V.CATEGORIES).map((c) => h('span', {}, h('span', { style: { display: 'inline-block', width: '10px', height: '10px', background: c.bg, border: '1px solid #888', marginRight: '3px' } }), c.label)));
 
   async function load(force) {
     clear(grid).append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie części…'));
     try {
       const cat = await toolCatalog(force);
       st.index = G.toolIndex(cat, await confirmedContoursQuick());
+      try { st.params = (await ndLoad({ manage: false, force })).params || {}; } catch { st.params = {}; }   // parametry PSWT narzędzi (K – długość robocza, kolumny T i U)
       st.parts = st.index.cuttingParts().map((code) => {
-        const t = st.index.tool(code);
-        return { code, contour: st.index.insertContour(code), tool: t, uses: st.index.usages(code) };
+        const t = st.index.tool(code), uses = st.index.usages(code);
+        // narzędzia, w których część skrawa: opis (Grupa / Rodzaj, Lrob, L), kategoria kafelka i parametry PSWT do filtrów U / T
+        const tools = uses.map((u) => { const tl = st.index.tool(u.toolCode), pr = st.params[normCode(u.toolCode)] || null; return { code: u.toolCode, role: u.role, tool: tl, params: pr, info: V.toolInfo(tl, pr) }; });
+        const cut = tools.filter((x) => x.role !== 'accessory');
+        return { code, contour: st.index.insertContour(code), tool: t, uses, tools, cat: V.partCategory(cut.map((x) => x.tool)), types: [...new Set(cut.map((x) => x.info.group).filter(Boolean))].sort(naturalCompare).join(', '), plist: tools.map((x) => x.params).filter(Boolean) };
       }).sort((a, b) => naturalCompare(a.code, b.code));
+      for (const [col, sel] of [['U', uSel], ['T', tSel]]) {   // filtry po kolumnach U i T arkusza PSWT (kolejność: U, T)
+        const vals = [...new Set(st.parts.flatMap((p) => V.partValues(p.plist, col)))].sort(naturalCompare);
+        clear(sel).append(h('option', { value: '' }, col), ...vals.map((v) => h('option', { value: v }, v)));
+        sel.style.display = vals.length ? '' : 'none'; st[col.toLowerCase()] = '';
+      }
       const firms = [...new Set(st.parts.map((p) => String((p.tool && p.tool.columnP) || '').trim()).filter(Boolean))].sort(naturalCompare);
       clear(companySel).append(h('option', { value: '' }, 'Firma'), ...firms.map((f) => h('option', { value: f }, f)));
       draw();
@@ -52,12 +69,16 @@ export function mountParts(el, ctx) {
   function tile(p) {
     const t = p.tool, warn = t && String(t.partStatusColor || '').trim() && !/^#?fff(fff)?$/i.test(String(t.partStatusColor).trim());
     const bg = warn ? parseSheetColor(t.partStatusColor, '#ffffff') : '#f3f3f3';
-    return h('div', { class: 'tool-tile click', onclick: () => detail(p), style: { minHeight: '0' } },
+    const cat = V.CATEGORIES[p.cat], body = cat ? cat.bg : '#fff';   // tło kafelka wg kategorii: piaskowy – wiertła, szary – frezy, niebieski – toczenie
+    const shown = p.tools.slice(0, 6);
+    return h('div', { class: 'tool-tile click', onclick: () => detail(p), style: { minHeight: '0', background: body } },
       h('div', { class: 'tile-head' }, h('div', { style: { flex: 1, padding: '4px 8px', fontWeight: 800, background: bg, color: warn ? contrast(bg) : '#000' } }, String(p.code).toUpperCase())),
       h('div', { style: { display: 'flex', justifyContent: 'center', padding: '4px', background: '#fff' } }, insertSvg(p.contour, { w: 200, hgt: 110, dims: true })),
-      h('div', { style: { padding: '3px 8px', fontSize: '12px', borderTop: '1px solid #eee' } }, stockLine(t)),
-      h('div', { class: 'muted', style: { padding: '0 8px 4px', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
-        `W narzędziach (${p.uses.length}): ` + p.uses.map((u) => u.toolCode).join(', ')));
+      h('div', { style: { padding: '3px 8px', fontSize: '12px', borderTop: '1px solid #ddd' } }, stockLine(t)),
+      h('div', { style: { padding: '0 8px 4px', fontSize: '11px', color: '#333' }, title: p.tools.map((x) => x.code + ' – ' + (V.toolInfoText(x.info) || 'brak danych')).join('\n') },
+        h('div', { class: 'muted' }, `W narzędziach (${p.uses.length}):`),
+        ...shown.map((x) => h('div', { style: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, h('b', {}, x.code), x.role === 'accessory' ? ' (akc.)' : '', ' · ' + (V.toolInfoText(x.info) || '—'))),
+        p.tools.length > shown.length ? h('div', { class: 'muted' }, `… i ${p.tools.length - shown.length} więcej (kliknij kafelek)`) : null));
   }
 
   /**
@@ -66,7 +87,7 @@ export function mountParts(el, ctx) {
    */
   function detail(p) {
     const t = p.tool, path = st.index.insertContour(p.code) || p.contour || '';
-    const info = [t ? [t.columnP, t.name, t.columnO].filter((x) => String(x || '').trim()).join(' | ') : '', stockLine(t), `Używana w narzędziach (${p.uses.length}): ` + p.uses.map((u) => u.toolCode + (u.role === 'accessory' ? ' (akcesorium)' : '')).join(', ')].filter(Boolean).join(' · ');
+    const info = [t ? [t.columnP, t.name, t.columnO].filter((x) => String(x || '').trim()).join(' | ') : '', stockLine(t), `Używana w narzędziach (${p.uses.length}): ` + p.tools.map((x) => x.code + (x.role === 'accessory' ? ' (akcesorium)' : '') + ' [' + (V.toolInfoText(x.info) || 'brak danych') + ']').join('; ')].filter(Boolean).join(' · ');
     openPlateEditor({ code: p.code, path, tool: '', info, setup: { z: 2, draft: 7, thickness: 0 }, plate: null, base: plateBase(p.code), edge: plateEdge(p.code), autoCentral: false, canSave,
       save: async (code, svg) => { await api('plSaveContour', [code, svg]); },
       onApply: ({ path: np, base, edge }) => {
@@ -79,8 +100,9 @@ export function mountParts(el, ctx) {
 
   function draw() {
     const q = st.q.toLowerCase();
-    const items = st.parts.filter((p) => (!st.onlyContour || p.contour) && (!q || p.code.toLowerCase().includes(q) || p.uses.some((u) => String(u.toolCode).toLowerCase().includes(q)))
-      && (!st.company || String((p.tool && p.tool.columnP) || '').trim() === st.company));
+    let items = st.parts.filter((p) => (!st.onlyContour || p.contour) && (!q || p.code.toLowerCase().includes(q) || p.uses.some((u) => String(u.toolCode).toLowerCase().includes(q)))
+      && (!st.company || String((p.tool && p.tool.columnP) || '').trim() === st.company) && V.matchesColumns(p.plist, { U: st.u, T: st.t }));
+    items = V.sortParts(items, st.sort, st.dir);
     info.textContent = `Części: ${items.length} z ${st.parts.length} (z konturem: ${st.parts.filter((p) => p.contour).length})`;
     if (st.stopFill) st.stopFill();
     clear(grid);
@@ -91,7 +113,7 @@ export function mountParts(el, ctx) {
   const search = h('input', { type: 'search', placeholder: 'Kod płytki albo narzędzia', style: { width: '220px', padding: '4px 8px' }, oninput: () => { st.q = search.value; draw(); } });
   const only = h('input', { type: 'checkbox', checked: true, onchange: () => { st.onlyContour = only.checked; draw(); } });
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
-  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Części – kontury płytek'), search, companySel, h('label', { class: 'row', style: { gap: '4px' } }, only, 'tylko z konturem'),
+  el.append(h('div', { class: 'row panel' }, h('b', {}, 'Części – kontury płytek'), search, companySel, uSel, tSel, sortSel, dirBtn, legend, h('label', { class: 'row', style: { gap: '4px' } }, only, 'tylko z konturem'),
     h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), grid);
   load(false);
 }

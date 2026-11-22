@@ -84,6 +84,7 @@ function nd_contourData_() {
     var bh = p.getRange(2, ND_PSWT_OK_COL, n, 1).getDisplayValues();   // potwierdzenie poprawności konturu
     var bc = p.getRange(2, ND_PSWT_CONTOUR_COL, n, 1).getDisplayValues();   // zatwierdzony nowy kontur (SVG, mm)
     var be = p.getRange(2, ND_PSWT_REGIONS_COL, n, 1).getDisplayValues();   // rejony ostrze / oprawka
+    var tu = p.getRange(2, 20, n, 2).getDisplayValues();   // kolumny T i U arkusza PSWT (filtry części w Narzędziowni → Części)
     p.getRange(2, 2, n, 13).getDisplayValues().forEach(function (r, idx) {
       var code = nd_norm_(r[0]);
       if (!code || !String(r[2] || '').trim()) return;
@@ -92,6 +93,8 @@ function nd_contourData_() {
       o.BH = String(bh[idx][0] || '').trim();
       o.BC = String(bc[idx][0] || '').trim();
       o.BE = String(be[idx][0] || '').trim();
+      o.T = String(tu[idx][0] || '').trim();
+      o.U = String(tu[idx][1] || '').trim();
       params[code] = o;
     });
   }

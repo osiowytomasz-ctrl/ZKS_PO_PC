@@ -9,6 +9,7 @@ import { api } from './ui.js';
 import { firebase } from './fb.js';
 
 const KEYS = ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'BH', 'BC', 'BE'];
+const EXTRA = ['T', 'U'];   // kolumny T i U arkusza PSWT – w wierszu bazy po konturze V (dotychczasowe wiersze bez zmian)
 const NCHUNK = 8;
 const DAY = 24 * 3600 * 1000;
 const norm = (c) => String(c ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -18,8 +19,8 @@ export function chunkOf(code) {
   for (const ch of norm(code)) h = ((h * 33) ^ ch.codePointAt(0)) >>> 0;
   return String(h % NCHUNK);
 }
-const toRow = (p, v) => [...KEYS.map((k) => String((p && p[k]) ?? '')), String(v ?? '')];
-const fromRow = (a) => Object.fromEntries(KEYS.map((k, i) => [k, String(a[i] ?? '')]));
+const toRow = (p, v) => [...KEYS.map((k) => String((p && p[k]) ?? '')), String(v ?? ''), ...EXTRA.map((k) => String((p && p[k]) ?? ''))];
+const fromRow = (a) => ({ ...Object.fromEntries(KEYS.map((k, i) => [k, String(a[i] ?? '')])), ...Object.fromEntries(EXTRA.map((k, i) => [k, String(a[KEYS.length + 1 + i] ?? '')])) });
 
 let memo = null;
 /** Pamięć w programie do następnego zapisu / przesłania. */
