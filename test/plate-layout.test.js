@@ -156,9 +156,9 @@ test('pierwsza zmiana układu płytek (np. punkt bazowy, φ) nie kasuje pochylen
   const ov = (() => { const o = new Map(); o.params = new Map([['p1', { D: 'fre', E: 'plu', G: '10', K: '50' }]]); o.regions = new Map(); o.generated = new Set(); o.blade = new Map(); return o; })();
   const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-400_0;400_0;400_770;-400_770', insertContours: [{ code: 'A', contour: plate }, { code: 'B', contour: plate }] } } }, ov);
   const stt = idx.stackTool(t), specs = L.specsFromPlates(stt.plates);
-  assert.deepEqual(specs.map((p) => [p.code, p.mode, p.ang, p.dz]), [['A', 'edge', 10, 0], ['B', 'edge', 10, -42]]);
+  assert.deepEqual(specs.map((p) => [p.code, p.mode, p.ang, p.dz]), [['A', 'edge', 10, 0], ['B', 'edge', 10, -41.362]]);
   const next = L.patchPlate(L.normPlates(specs), ['A', 'B'], 0, { phi: 30 });
-  assert.deepEqual(next.map((p) => [p.ang, p.dz, p.phi]), [[10, 0, 30], [10, -42, 0]], 'kąt z tabeli i rzędy zostają po zmianie jednego pola');
+  assert.deepEqual(next.map((p) => [p.ang, p.dz, p.phi]), [[10, 0, 30], [10, -41.362, 0]], 'kąt z tabeli i rzędy zostają po zmianie jednego pola');
   // układ zapisany jako własny rysuje się tak samo (bez zmiany pochylenia)
   try { G.setPlateSetupProvider(() => next); assert.deepEqual(idx.stackTool(t).plates.map((p) => p.ang), [10, 10]); } finally { G.setPlateSetupProvider(null); }
 });
@@ -199,4 +199,29 @@ test('krawędź skrawająca płytki: koniec dalszy od osi na Ø narzędzia; fazo
     G.setPlateEdgeProvider(null);
     assert.ok(!ix(faz, { ov }).stackTool(faz).plates[0].align);
   } finally { G.setPlateEdgeProvider(null); }
+});
+
+test('zmiana kąta skrawania G od razu obraca płytki; grupa obraca się wokół wspólnego punktu, ręcznie wpisany kąt płytki jest bezwzględny', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'jez', columnP: 'X', columnF: '50', columnJ: '80', columnM: 'ABS063', columnG: '10' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-250_0;250_0;250_770;-250_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const rows = (g) => idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: g, H: '3', K: '50' } }).plates;
+  // G wpisane w Konturach (opts.pswt) zmienia kąt i położenie całej grupy rzędów: pierwszy rząd – punkt wspólny, kolejne obrócone o ten sam kąt wokół niego
+  const r10 = rows('10'), r30 = rows('30'), r0 = rows('90');
+  assert.deepEqual(r10.map((p) => p.ang), [10, 10, 10]); assert.deepEqual(r30.map((p) => p.ang), [30, 30, 30]); assert.deepEqual(r0.map((p) => p.ang), [0, 0, 0], '90° – bez obrotu');
+  assert.deepEqual([r30[0].dx, r30[0].dz], [0, 0], 'punkt wspólny (czoło pierwszego rzędu) się nie rusza');
+  const d1 = Math.hypot(r30[1].dx, r30[1].dz), d2 = Math.hypot(r30[2].dx, r30[2].dz); assert.ok(Math.abs(d2 - 2 * d1) < 1e-2, 'rzędy równomiernie wzdłuż linii');
+  assert.ok(Math.abs(Math.atan2(-r30[1].dx, -r30[1].dz) * 180 / Math.PI - 30) < 0.1, 'linia rzędów nachylona o kąt G od osi');
+  assert.deepEqual([r0[1].dx, r0[1].dz], [0, r0[1].dz]); assert.ok(r0[1].dz < 0);
+  // własny układ z polami automatycznymi (autoAng / autoPos) nadal podąża za G; ręcznie wpisany kąt płytki jest bezwzględny i nie dodaje się do kąta grupy
+  const specs = L.normPlates(L.specsFromPlates(r10));
+  assert.ok(specs.every((p) => p.autoAng && p.autoPos));
+  const edited = L.patchPlate(specs, ['A'], 1, { ang: 55 });   // tylko płytka 2: bezwzględny kąt 55°
+  assert.deepEqual(edited.map((p) => [p.ang, !!p.autoAng, !!p.autoPos]), [[10, true, true], [55, false, true], [10, true, true]]);
+  try {
+    G.setPlateSetupProvider(() => edited);
+    const own = idx.stackTool(t, { pswt: { D: 'fre', E: 'jez', G: '30', H: '3', K: '50' } }).plates;
+    assert.deepEqual(own.map((p) => p.ang), [30, 55, 30], 'grupa podąża za G = 30°, płytka 2 ma własny bezwzględny kąt 55°');
+    assert.ok(Math.abs(Math.hypot(own[2].dx, own[2].dz) - d2) < 1e-6, 'położenie nadal automatyczne (rzędy obrócone wokół punktu wspólnego)');
+  } finally { G.setPlateSetupProvider(null); }
 });

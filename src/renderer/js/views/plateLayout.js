@@ -3,7 +3,7 @@
 // liczba kopii). Każda zmiana w tabeli od razu zmienia kształt i położenie płytki na rysunku; wybrana płytka ma czerwony kontur.
 // Układ zapisuje się dla narzędzia na tym komputerze; „Układ automatyczny” wraca do płytek z katalogu (pierwsza płytka wiertła ISCAR / AMEC – centralna).
 import { h, clear } from '../ui.js';
-import { PLATE_MODES, normPlate, normPlates } from '../logic/plateLayout.js';
+import { PLATE_MODES, normPlate, normPlates, withManual } from '../logic/plateLayout.js';
 
 const comma = (v) => String(Math.round(v * 1000) / 1000).replace('.', ',');
 const num = (t) => Number(String(t).replace(',', '.'));
@@ -27,7 +27,7 @@ export function mountPlateLayout(o) {
   const field = (j, key, w = '44px') => {
     const inp = h('input', { type: 'text', value: comma(rows[j][key]), style: { width: w, padding: '1px 3px' },
       onfocus: () => choose(j),
-      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate({ ...rows[j], [key]: key === 'z' ? Math.round(v) : v }); apply(); },
+      oninput: () => { const v = num(inp.value); if (!Number.isFinite(v) || inp.value.trim() === '') return; rows[j] = normPlate(withManual(rows[j], { [key]: key === 'z' ? Math.round(v) : v })); apply(); },
       onchange: () => { const v = num(inp.value); if (!Number.isFinite(v)) inp.value = comma(rows[j][key]); } });
     return inp;
   };

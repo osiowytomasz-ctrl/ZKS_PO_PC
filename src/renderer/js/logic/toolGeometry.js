@@ -197,7 +197,9 @@ export function millRows(tool, catalog, pswt) {
   const rows = [];
   for (let i = 0; i < n; i++) {
     const c = catalog[i % catalog.length], step = n > 1 && K > 0 ? Math.max(0, (K - height(c.path)) / (n - 1)) : 0;
-    rows.push({ code: c.code, path: c.path, edge: c.edge || null, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: 0, dz: Math.round(-i * step * 1000) / 1000 || 0, ang, phi: 0, z: 0, custom: false, row: true });
+    // grupa płytek obraca się razem wokół wspólnego punktu (czoło pierwszego rzędu – góra): rząd leżący d niżej przesuwa się o (−d·sin ang, −d·cos ang) – linia rzędów pod kątem
+    const d = i * step, th = (ang * Math.PI) / 180, rdx = Math.round(-d * Math.sin(th) * 1000) / 1000 || 0, rdz = Math.round(-d * Math.cos(th) * 1000) / 1000 || 0;
+    rows.push({ code: c.code, path: c.path, edge: c.edge || null, mode: 'edge', kind: 'edge', central: false, irregular: false, dx: rdx, dz: rdz, ang, phi: 0, z: 0, custom: false, row: true });
   }
   return rows;
 }
@@ -622,16 +624,27 @@ export function toolIndex(catalog, overrides = null) {
       if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
       const mill = !tre && String(t.columnD ?? '').trim().toLowerCase() === 'fre';
       plates = tre ? [] : plates.map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code), ...(mill ? { edge: plateEdgeOf(p.code) } : {}) })).filter((p) => p.path);   // frez: krawędź skrawająca z edytora płytki
-      const custom = !!own(opts.layout === false ? null : plateSetup(t)), pswtG = d && d.pswt && d.pswt.G;
-      if (!tre && isRowMill(t) && !custom && plates.length) {   // frez płytkowy / jeżowy / fazowy: rzędy równomiernie na długości roboczej (fazowy – krawędzią skrawającą w jednej linii pod kątem)
-        const rows = millRows(t, plates.map((p) => ({ code: p.code, path: p.path, edge: p.edge })), d && d.pswt);
+      const custom = !!own(opts.layout === false ? null : plateSetup(t));
+      // parametry PSWT: [opts.pswt] (np. wartości właśnie wpisane w Konturach) albo wczytane z arkusza; kąt skrawania G z nich (puste = 0), bez nich z katalogu
+      const pswt = opts.pswt || (d && d.pswt) || null, tilt = mill ? plateTilt(t, pswt ? pswt.G : t.columnG) : 0;
+      const rowsOf = () => (isRowMill(t) && catalog.length ? millRows(t, catalog.map((i) => ({ code: i.code, path: i.contour, edge: plateEdgeOf(i.code) })), pswt) : null);
+      if (!tre && isRowMill(t) && !custom && plates.length) {   // frez płytkowy / jeżowy / fazowy: rzędy równomiernie na długości roboczej, grupa obracana wokół wspólnego punktu (fazowy – krawędzią skrawającą w jednej linii pod kątem)
+        const rows = rowsOf();
         if (rows) {
-          plates = rows.map((p) => ({ ...p, base: plateBaseOf(p.code) }));
+          plates = rows.filter((p) => pathOf(p.code)).map((p) => ({ ...p, path: pathOf(p.code), base: plateBaseOf(p.code), autoAng: true, autoPos: true }));
           if (opts.adj === false) plates = plates.map((p) => ({ ...p, dx: 0, dz: 0, ang: 0 }));
         }
-      } else if (mill && !custom && opts.adj !== false) {   // pozostałe frezy: płytki obrócone o kąt skrawania G (normalne położenie – 90°, bez obrotu); własny układ i korekty mają pierwszeństwo
-        const tilt = plateTilt(t, pswtG || t.columnG);
-        if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt }));
+      } else if (mill && !custom && opts.adj !== false) {   // pozostałe frezy: płytki obrócone o kąt skrawania G (normalne położenie – 90°, bez obrotu)
+        if (tilt) plates = plates.map((p) => (p.ang ? p : { ...p, ang: tilt, autoAng: true }));
+      } else if (mill && custom && opts.adj !== false) {   // własny układ: pola oznaczone jako automatyczne (autoAng / autoPos) nadal podążają za kątem skrawania i rzędami, a ręcznie wpisane wartości są bezwzględne
+        const rows = plates.some((p) => p.autoPos) ? rowsOf() : null;
+        plates = plates.map((p, j) => {
+          let q = p;
+          if (p.autoAng) q = { ...q, ang: tilt };
+          const r = p.autoPos && rows && rows[j];
+          if (r) q = { ...q, dx: r.dx, dz: r.dz, anchor: r.anchor, align: r.align, ang: p.autoAng ? r.ang : q.ang, row: true };
+          return q;
+        });
       }
       if (!tre && isPlunger(t)) plates = plates.map((p) => (p.base ? p : { ...p, base: plungerBase(p) }));   // plunger: domyślnie róg skrajny prawy górny (wybór użytkownika ma pierwszeństwo)
       const contour = parseContour(d && d.columnAY);

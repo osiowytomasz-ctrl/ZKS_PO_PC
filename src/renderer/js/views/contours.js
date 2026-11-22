@@ -545,7 +545,7 @@ export function mountContours(el, ctx) {
   /** Własny układ płytek ograniczony do płytek przypisanych do narzędzia (spójnie ze stackTool). */
   const ownPlates = (t) => { const codes = plateCodes().map((c) => String(c).trim().toLowerCase()), l = (insertSetup(t).plates || []).filter((p) => codes.includes(String(p.code).trim().toLowerCase())); return l.length ? l : null; };
   /** Układ płytek tak, jak jest rysowany (z tabeli: kąt G, rzędy plunger / jeż; własny układ ma pierwszeństwo). */
-  const effectiveSpecs = (opts) => { const stt = st.tool && st.index ? st.index.stackTool(st.tool, opts) : null; return stt ? specsFromPlates(stt.plates) : []; };
+  const effectiveSpecs = (opts) => { const stt = st.tool && st.index ? st.index.stackTool(st.tool, { pswt: paramsOf(st.tool), ...(opts || {}) }) : null; return stt ? specsFromPlates(stt.plates) : []; };
   const layoutNow = () => effectiveSpecs();
   const adjOf = (j) => { const p = layoutNow()[j]; return p ? { dx: p.dx, dz: p.dz, ang: p.ang, phi: p.phi } : { dx: 0, dz: 0, ang: 0, phi: 0 }; };
   // pierwsza zmiana tworzy własny układ z faktycznego stanu (z kątem z tabeli i rzędami), nie z pustego układu katalogu – pochylenie nie znika
@@ -553,7 +553,7 @@ export function mountContours(el, ctx) {
   /** Płytki narzędzia w układzie konturu (0,1 mm): auto – położenie z algorytmu zestawu (bez korekt); right – z korektą (dX, dZ, obrót) i rodzajem płytki; left – odbicie (tylko obwodowe). */
   function insertsOf(t) {
     if (!st.index) return [];
-    const stt = st.index.stackTool(t), st0 = st.index.stackTool(t, { adj: false });
+    const stt = st.index.stackTool(t, { pswt: paramsOf(t) }), st0 = st.index.stackTool(t, { adj: false, pswt: paramsOf(t) });   // parametry PSWT wpisane w Konturach (kąt skrawania G, K, H, I) od razu zmieniają płytki
     if (!stt || !stt.plates.length || stt.contour.length < 3) return [];
     const stack = G.buildStack([stt], true, false), stack0 = G.buildStack([st0], true, false);
     if (!stack || !stack0) return [];
