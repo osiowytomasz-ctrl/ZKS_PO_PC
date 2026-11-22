@@ -4,7 +4,7 @@
 import { h, clear, toast, modal } from '../ui.js';
 import * as P from '../logic/plateEdit.js';
 import { view3d } from './toolViews.js';
-import { basePicker, baseLabel, escGuard } from './basePicker.js';
+import { basePicker, baseLabel, escGuard, resetPickerZoom } from './basePicker.js';
 import * as G from '../logic/toolGeometry.js';
 
 const DEFAULT_PLATE = [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }];
@@ -168,7 +168,7 @@ export function openPlateEditor(o) {
     const bx = h('input', { type: 'text', value: st.base ? comma(st.base.x) : '', placeholder: 'X', style: { width: '58px', padding: '1px 4px' }, onchange: () => setB(num(bx.value), st.base ? st.base.y : 0) });
     const by = h('input', { type: 'text', value: st.base ? comma(st.base.y) : '', placeholder: 'Y', style: { width: '58px', padding: '1px 4px' }, onchange: () => setB(st.base ? st.base.x : 0, num(by.value)) });
     baseBox.append(h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Punkt, względem którego liczone jest położenie płytki w narzędziu (współrzędne X, Z) i wokół którego płytka się obraca (kąt płytki). Bez punktu – środek płytki.'),
-      h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', flexWrap: 'wrap', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (na narzędziu / standardowo)', onclick: () => { push(); st.baseOrig = st.base ? { ...st.base } : null; st.basePick = true; paintBase(); } }, '⊕ Punkt bazowy'),
+      h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', flexWrap: 'wrap', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (na narzędziu / standardowo)', onclick: () => { resetPickerZoom(); push(); st.baseOrig = st.base ? { ...st.base } : null; st.basePick = true; paintBase(); } }, '⊕ Punkt bazowy'),
         h('span', { class: 'muted', style: { fontSize: '11px' } }, baseLabel(presets, st.base, defLabel)),
         h('button', { class: 'btn small', title: 'Ustaw zaznaczony punkt konturu (pomarańczowy) jako bazowy', onclick: () => { const q = st.pts[st.sel]; if (q) { push(); st.base = { x: q.x, y: q.y }; drawTable(); drawCanvas(); } } }, 'Zaznaczony punkt'),
         h('button', { class: 'btn small', onclick: () => { push(); st.base = null; st.rel = false; drawTable(); drawCanvas(); } }, 'Usuń')),

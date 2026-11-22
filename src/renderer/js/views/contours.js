@@ -14,7 +14,7 @@ import { mountPlateLayout } from './plateLayout.js';
 import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
 import { statusLine, multiFilter, lazyFill, view3d, insertSetup, saveInsertSetup, savedInsertZ, plateBase, savePlateBase, plateEdge, savePlateEdge, dimsSvg, dimsOn, dimsToggle } from './toolViews.js';
 import { basePresets, parsePlate } from '../logic/plateEdit.js';
-import { basePicker, groupPicker, escGuard } from './basePicker.js';
+import { basePicker, groupPicker, escGuard, resetPickerZoom } from './basePicker.js';
 import * as B from '../logic/builder.js';
 
 let pendingCode = null;
@@ -701,7 +701,7 @@ export function mountContours(el, ctx) {
     saveInsertSetup(st.tool, { pivot: { px: dat.pv0.px + back.x, py: dat.pv0.py + back.y, qx: c.x, qy: c.y } });
     drawPreview();
   }
-  const openPivotPicker = () => { pv.pivotOrig = G.normPivot(insertSetup(st.tool).pivot); pv.insSel = null; pv.basePick = null; pv.pivotPick = true; drawPreview(); };
+  const openPivotPicker = () => { resetPickerZoom(); pv.pivotOrig = G.normPivot(insertSetup(st.tool).pivot); pv.insSel = null; pv.basePick = null; pv.pivotPick = true; drawPreview(); };
   /** Cofnięcie wyboru punktów (Esc / „Cofnij”): punkt bazowy płytki albo punkt obrotu grupy wraca do pierwotnego stanu, okno się zamyka. */
   function cancelPicks() {
     if (pv.pivotPick) { pv.pivotPick = false; saveInsertSetup(st.tool, { pivot: pv.pivotOrig || null }); drawPreview(); return; }
@@ -808,7 +808,7 @@ export function mountContours(el, ctx) {
         rowI('Korekta ΔX', num(a.dx, (v) => Number.isFinite(v) && set({ dx: v }))), rowI('Korekta ΔZ', num(a.dz, (v) => Number.isFinite(v) && set({ dz: v }))), rowI(fre ? 'Kąt płytki' : 'Obrót płytki', num(fre ? G.absAngle(a.ang, tiltOf(st.tool)) : a.ang, (v) => Number.isFinite(v) && set(fre ? { ang: G.relAngle(v, tiltOf(st.tool)), angRel: v } : { ang: v })), fre ? '° (0° = w linii z krawędzią narzędzia)' : '°'),
         q.single ? h('div', { class: 'row', style: { gap: '4px', margin: '2px 0' } }, h('span', { style: { width: '78px' }, title: 'Obrót płytki wokół osi narzędzia: 180° – płytka po przeciwnej stronie (nie styka się z drugą płytką, ostrze po drugiej stronie osi)' }, 'Wokół osi φ'),
           num(a.phi, (v) => Number.isFinite(v) && set({ phi: v })), h('span', { class: 'muted' }, '°'), h('button', { class: 'btn small', title: 'Obróć płytkę wokół osi narzędzia o 180°', onclick: () => set({ phi: (((a.phi || 0) + 180) % 360) }) }, '+180°')) : null,
-        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { pv.baseOrig = cur ? { x: cur.x, y: cur.y } : null; pv.baseGroup = G.isRowMill(st.tool) && ins.length > 1; pv.baseOrigAll = pv.baseGroup ? layoutNow().map((p) => (p.base ? { x: p.base.x, y: p.base.y } : null)) : null; pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),
+        h('div', { class: 'row', style: { gap: '4px', margin: '3px 0', alignItems: 'center' } }, h('button', { class: 'btn small', title: 'Wybierz punkt bazowy na rysunku płytki (osobny dla każdej płytki; względem niego liczone jest położenie, zielony celownik na rysunku; obrót korekty też jest wokół niego)', onclick: () => { resetPickerZoom(); pv.baseOrig = cur ? { x: cur.x, y: cur.y } : null; pv.baseGroup = G.isRowMill(st.tool) && ins.length > 1; pv.baseOrigAll = pv.baseGroup ? layoutNow().map((p) => (p.base ? { x: p.base.x, y: p.base.y } : null)) : null; pv.basePick = j; drawPreview(); } }, '⊕ Punkt bazowy'), h('span', { class: 'muted', style: { fontSize: '11px' } }, curLabel)),
         h('div', { style: { fontSize: '11px', margin: '3px 0' } }, (q.base ? 'Punkt bazowy (⊕): ' : 'Punkt bazowy (●, pierwszy punkt konturu): ') + 'z algorytmu ', h('b', {}, mm(q.autoBase || q.auto[0])), h('br', {}), 'po korekcie ', h('b', {}, mm(q.base || q.right[0]))),
         q.base ? h('div', {}, rowI('Bazowy X', num(round3(q.base.x / 10), (v) => { if (Number.isFinite(v) && cs) set({ dx: round3(a.dx + (v - q.base.x / 10) / cs) }); })), rowI('Bazowy Z', num(round3(q.base.y / 10), (v) => { if (Number.isFinite(v)) set({ dz: round3(a.dz + (v - q.base.y / 10)) }); })),
           h('div', { class: 'muted', style: { fontSize: '10px' } }, 'Wpisz, gdzie ma leżeć punkt bazowy (X od osi, Z od Z = 0) – ΔX i ΔZ zostaną przeliczone.')) : null,
