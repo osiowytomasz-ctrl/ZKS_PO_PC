@@ -264,3 +264,20 @@ test('kąt płytki frezu względem krawędzi skrawającej: płytka podąża za z
     assert.equal(G.absAngle(at('45').ang, G.plateTilt(t, 45)), 15);
   } finally { G.setPlateSetupProvider(null); }
 });
+
+test('obrót płytki wokół wybranego punktu bazowego – także gdy płytka ma zaznaczoną krawędź skrawającą (punkt bazowy zostaje w miejscu)', () => {
+  const plate = 'M 0 0 L 6 0 L 6 8 L 0 8 Z';
+  const t = { productCode: 'P1', columnD: 'fre', columnE: 'pal', columnP: 'X', columnF: '50', columnJ: '80', columnM: 'ABS063', columnG: '' };
+  const idx = G.toolIndex({ tools: [t], detailsMap: { P1: { columnAY: '-250_0;250_0;250_770;-250_770', insertContours: [{ code: 'A', contour: plate }] } } }, null);
+  const baseAt = (edge, ang, base) => {
+    G.setPlateEdgeProvider(() => edge); G.setPlateSetupProvider(() => [{ code: 'A', mode: 'edge', ang, ...(base ? { base } : {}) }]);
+    const m = G.buildStack([idx.stackTool(t)], true, false).layers[0].plates[0];
+    return m.bases[1] && { x: Math.round(m.bases[1].x * 10) / 10, y: Math.round(m.bases[1].y * 10) / 10 };
+  };
+  try {
+    for (const edge of [null, { a: { x: 0, y: 0 }, b: { x: 6, y: 0 } }]) {
+      const b0 = baseAt(edge, 0, { x: 0, y: 8 }), b30 = baseAt(edge, 30, { x: 0, y: 8 });
+      assert.deepEqual(b30, b0, `punkt bazowy nie przesuwa się przy obrocie (krawędź: ${!!edge})`);
+    }
+  } finally { G.setPlateEdgeProvider(null); G.setPlateSetupProvider(null); }
+});

@@ -455,9 +455,14 @@ function placeByEdge(raw, out, b, offsetY, tool, mirror, pl) {
     const want = Math.atan2(pl.align.dy, sign * pl.align.dx), have = Math.atan2(cp.y - other.y, cp.x - other.x);
     ang = ((want - have) * 180) / Math.PI;
   }
-  const rot = ang ? out.map((p) => rotateAround(p, cp, ang)) : out;
+  const baseP = pl.base && !pl.align ? basePlaced(raw, out, pl.base) : null;   // ustawiony punkt bazowy: obrót wokół niego (bez niego – wokół punktu skrawającego)
+  const rot = ang && !baseP ? out.map((p) => rotateAround(p, cp, ang)) : out;
   const r = (pl.anchor && pl.anchor.r != null ? pl.anchor.r : tool.diameter / 2) * 10, z = pl.anchor && pl.anchor.z != null ? pl.anchor.z : tool.length;
   const tx = sign * r + (mirror ? pl.dx : -pl.dx) * 10, ty = offsetY + (b.maxY - z * 10) - (pl.dz || 0) * 10;
+  if (baseP) {   // punkt skrawający na zadanym miejscu (kąt 0), potem obrót o [ang] wokół punktu bazowego – punkt bazowy zostaje w miejscu
+    const sx = tx - cp.x, sy = ty - cp.y, pv = pt(baseP.x + sx, baseP.y + sy), moved = out.map((p) => pt(p.x + sx, p.y + sy));
+    return ang ? moved.map((p) => rotateAround(p, pv, ang)) : moved;
+  }
   return rot.map((p) => pt(p.x + tx - cp.x, p.y + ty - cp.y));
 }
 function placeInsert(raw, b, offsetY, tool, mirror, rotateChamfer, pl) {
