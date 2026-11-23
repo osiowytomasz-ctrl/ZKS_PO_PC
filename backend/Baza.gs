@@ -5,9 +5,11 @@
  * W Api.gs (API_FUNCS):
  *   baseSheet: { run: function (a) { return base_sheet_(a[0]); } },
  * Karty: PSWT (produkty – wiersz 1 = nagłówki), POM (narzędzia pomiarowe; kod w kolumnie C, interwał w kolumnie H),
- *        BADANIA = „Badania 2026” (kod w kolumnie A, daty badań; w L6:L11 kolory statusów – zwracane jako legenda).
+ *        BADANIA = „Badania 2026” (kod w kolumnie A, daty badań; w L6:L11 kolory statusów – zwracane jako legenda),
+ *        ZN – zniszczone narzędzia (Narzędziownia → Zniszczone): wiersz 2 = nagłówki, od wiersza 3 wpisy: A lp, B nr narzędzia, C procent zniszczenia, D–G opis / cena / firma /
+ *        oznaczenie (formuły z PSWT – program czyta wartości wyświetlane), H kto / gdzie, I data, J miesiąc, K kwota strat, L opis zniszczeń, M przyczyna.
  */
-var BASE_ALLOWED = { PSWT: 'PSWT', POM: 'POM', BADANIA: 'Badania 2026' };
+var BASE_ALLOWED = { PSWT: 'PSWT', POM: 'POM', BADANIA: 'Badania 2026', ZN: 'ZN' };
 
 /** Wartości wyświetlane całej karty [key] (bez pustych wierszy na końcu): { sheet, rows, cols, values, legend? }. */
 function base_sheet_(key) {
