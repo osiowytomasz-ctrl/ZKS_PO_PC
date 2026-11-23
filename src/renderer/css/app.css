@@ -164,3 +164,19 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .tile-ok { display: flex; gap: 4px; align-items: center; padding: 3px 6px; border-top: 1px solid #eee; min-height: 26px; }
 .tile-ok .btn.small { padding: 1px 8px; }
 .tile-ok-on { flex: 1; min-width: 0; background: #2e7d32; color: #fff; border-radius: 0; padding: 1px 6px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Status i dostępność pracowników – menu rozwijane w prawym dolnym rogu (views/presence.js) */
+.presence { position: fixed; right: 12px; bottom: 12px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 12px; }
+.presence-pill { display: inline-flex; align-items: center; gap: 6px; background: #fff; color: #000; border: 2px solid #000; border-radius: 0; padding: 4px 10px; cursor: pointer; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.presence-count { background: #2e7d32; color: #fff; padding: 0 6px; font-weight: 700; }
+.presence-panel { width: 360px; max-height: min(70vh, 560px); overflow: auto; background: #fff; border: 2px solid #000; border-radius: 0; box-shadow: 0 4px 16px rgba(0,0,0,.3); padding: 6px 8px; }
+.presence-tabs { display: flex; gap: 4px; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 6px; }
+.presence-tabs button { border: 1px solid #000; background: #fff; border-radius: 0; padding: 2px 10px; cursor: pointer; }
+.presence-tabs button.on { background: #1565c0; color: #fff; }
+.presence-form { display: flex; flex-direction: column; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid #ccc; margin-bottom: 6px; }
+.presence-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.presence-chip { display: flex; align-items: center; gap: 6px; border: 1px solid #000; background: #fff; border-radius: 0; padding: 3px 6px; cursor: pointer; text-align: left; }
+.presence-chip.on { outline: 2px solid #1565c0; background: #e8f0fe; font-weight: 700; }
+.presence-row { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; border-bottom: 1px solid #eee; }
+.presence-row.stale { opacity: .55; }
+.presence-hist { max-height: 340px; overflow: auto; }

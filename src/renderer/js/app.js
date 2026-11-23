@@ -171,6 +171,7 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   if (reopen) setTimeout(() => toast('Naprawiono pamięć lokalną bazy – dane pobrane z serwera od nowa'), 500);
   if (cfg.url && cfg.key) {
     preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
+    import('./views/presence.js').then(({ mountPresence }) => mountPresence(ctx)).catch(() => {});   // status i dostępność pracowników (prawy dolny róg)
     import('./prefetch.js').then(({ startBackgroundRefresh }) => startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none')).catch(() => {});
   }
 })();

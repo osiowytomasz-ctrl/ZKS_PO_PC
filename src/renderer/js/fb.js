@@ -38,6 +38,9 @@ export async function firebase({ fresh = false } = {}) {
   return { sdk: s, db };
 }
 
+/** Identyfikator zalogowanego w Firebase (uid z tokenu) albo '' – klucz dokumentu własnego statusu (presence/{uid}). */
+export const fbUid = () => (auth && auth.currentUser ? auth.currentUser.uid : '');
+
 /** Poziom dostępu do Harmonogramu z ostatniego tokenu ('god'|'master'|'clerik'|'tourist'|'none'); null – serwer go nie podał (stary Firebase.gs). */
 export const harmLevel = () => harm;
 /** Nasłuch zmiany poziomu (po odnowieniu tokenu); zwraca funkcję wyłączającą. */
