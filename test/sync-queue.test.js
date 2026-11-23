@@ -10,3 +10,16 @@ test('kolejka Grafiku: ostatnia wartość komórki, osoby bez wiersza karty G po
 test('kolejka Planu: wiersz~kolumna', () => {
   assert.deepEqual(planQueueItems([{ row: 3, col: 2, value: '<span>x</span>' }], 9), { '3~2': { row: 3, col: 2, value: '<span>x</span>', ts: 9 } });
 });
+
+import { splitResults } from '../src/renderer/js/syncStore.js';
+test('wynik wysyłki Grafiku: z kolejki znikają tylko zapisane, reszta ma powód', () => {
+  const r = splitResults(['a', 'b', 'c', 'd'], ['ok', 'nodate', 'name', 'norow']);
+  assert.deepEqual(r.ok, ['a']);
+  assert.deepEqual(r.failed.map((x) => x.key), ['b', 'c', 'd']);
+  assert.match(r.failed[1].why, /inna osoba/);
+  assert.deepEqual(splitResults(['a', 'b'], undefined).ok, ['a', 'b']);   // starszy serwer
+});
+test('kolejka Grafiku: nazwisko do weryfikacji wiersza', () => {
+  const it = grafikQueueItems([{ pid: 'P', iso: '2026-11-22', code: 'x' }], { P: 9 }, 1, { P: 'Wlazłowski Paweł' });
+  assert.equal(it['P~2026-11-22'].name, 'Wlazłowski Paweł');
+});

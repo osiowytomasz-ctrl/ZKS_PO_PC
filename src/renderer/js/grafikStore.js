@@ -52,7 +52,7 @@ export async function watchGrafik(months, cb, onError) {
  * Zapis zmian komórek: [{pid, iso, code?, note?}] (code/note pominięte = bez zmiany, '' = usunięcie) – jednym zapisem wsadowym.
  * [rows] – mapa pid → wiersz karty G: w okresie przejściowym te same zmiany idą też do arkusza (graf_norm, wersja webowa).
  */
-export async function saveCells(changes, rows) {
+export async function saveCells(changes, rows, names = {}) {
   if (!changes.length) return { sheet: null };
   const { sdk, db } = await firebase();
   const byMonth = new Map();
@@ -71,7 +71,7 @@ export async function saveCells(changes, rows) {
     b.set(sdk.doc(db, 'gr_days', mk), data, { merge: true });
   }
   // do arkusza (karta G) – nie od razu: kolejka wysyłki „Do arkusza” (MASTER, GOD), w tym samym zapisie
-  queueInBatch(sdk, db, b, 'grafik', grafikQueueItems(changes, rows));
+  queueInBatch(sdk, db, b, 'grafik', grafikQueueItems(changes, rows, Date.now(), names));
   await b.commit();
   return { sheet: null };
 }

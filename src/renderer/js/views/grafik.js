@@ -340,15 +340,15 @@ export function mountGrafik(el, ctx) {
     }
     if (!changes.length) return;
     try {
-      const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row]));
-      const r = await saveCells(changes, rowsMap);
+      const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row])), namesMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.name]));
+      const r = await saveCells(changes, rowsMap, namesMap);
       st.undo.push({ label, before, after: changes }); if (st.undo.length > 100) st.undo.shift(); st.redo = [];
     } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
   }
   async function undoRedo(from, to) {
     const step = from.pop(); if (!step) return;
-    const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row]));
-    try { await saveCells(from === st.undo ? step.before : step.after, rowsMap); to.push(step); toast((from === st.undo ? 'Cofnięto: ' : 'Ponowiono: ') + step.label); }
+    const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row])), namesMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.name]));
+    try { await saveCells(from === st.undo ? step.before : step.after, rowsMap, namesMap); to.push(step); toast((from === st.undo ? 'Cofnięto: ' : 'Ponowiono: ') + step.label); }
     catch (e) { from.push(step); toast('Nie zapisano: ' + (e.message || e), true); }
   }
   /** Urlop z poprzedniego / bieżącego roku wpisany w tabeli (kolumny „UT rrrr”) – zapis w danych pracownika. */

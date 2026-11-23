@@ -1718,20 +1718,27 @@ function api_grafikExport_() {
 
 /** Zmiany z aplikacji do karty G: [{row (wiersz arkusza), iso, value?, note?}] – value/note pominięte = bez zmiany, '' = wyczyszczenie. */
 function api_grafikWriteBack_(changes) {
-  if (!Array.isArray(changes) || !changes.length) return { written: 0 };
+  if (!Array.isArray(changes) || !changes.length) return { written: 0, results: [], missing: [] };
   var sheet = SpreadsheetApp.getActive().getSheetByName('G');
   if (!sheet) throw new Error('Arkusz G nie istnieje!');
   var cols = api_grafikColumns_(sheet), written = 0, missing = [];
-  changes.forEach(function (ch) {
+  var lastRow = sheet.getLastRow();
+  var names = lastRow >= GR_FIRST_ROW ? sheet.getRange(GR_FIRST_ROW, 2, lastRow - GR_FIRST_ROW + 1, 1).getDisplayValues() : [];
+  var norm = function (x) { return String(x == null ? '' : x).replace(/\s+/g, ' ').trim().toLowerCase(); };
+  // wynik dla każdej pozycji (ta sama kolejność): 'ok' | 'nodate' (brak kolumny daty) | 'norow' (brak wiersza) | 'name' (w wierszu inna osoba – przesunięty arkusz)
+  var results = changes.map(function (ch) {
     var row = Number(ch && ch.row), col = cols.dateCol[ch && ch.iso];
-    if (!(row >= GR_FIRST_ROW) || col == null) { missing.push(ch && ch.iso); return; }
+    if (col == null) { missing.push(ch && ch.iso); return 'nodate'; }
+    if (!(row >= GR_FIRST_ROW) || row > lastRow) return 'norow';
+    if (ch.name && norm(names[row - GR_FIRST_ROW][0]).indexOf(norm(ch.name)) !== 0) return 'name';
     var cell = sheet.getRange(row, col + 1);
     if (ch.value !== undefined && ch.value !== null) { cell.setValue(String(ch.value)); written++; }
     if (ch.note !== undefined && ch.note !== null) { cell.setNote(String(ch.note)); written++; }
+    return 'ok';
   });
   SpreadsheetApp.flush();
   api_grBump_();
-  return { written: written, missing: missing.slice(0, 20) };
+  return { written: written, results: results, missing: missing.slice(0, 20) };
 }
 
 

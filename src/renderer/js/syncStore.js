@@ -11,11 +11,12 @@ const enc = (s) => encodeURIComponent(String(s)).replace(/\./g, '%2E');
 const ref = (sdk, db, name) => sdk.doc(db, 'sync', name);
 
 /** Pozycje kolejki Grafiku dla zmian ([{pid, iso, code?, note?}], [rows] – osoba → wiersz karty G). */
-export function grafikQueueItems(changes, rows, ts = Date.now()) {
+export function grafikQueueItems(changes, rows, ts = Date.now(), names = {}) {
   const items = {};
   for (const ch of changes) {
     if (!rows || !rows[ch.pid]) continue;
     const it = { row: rows[ch.pid], iso: ch.iso, ts };
+    if (names && names[ch.pid]) it.name = names[ch.pid];   // serwer sprawdza, czy w tym wierszu karty G jest ta osoba
     if (ch.code !== undefined) it.value = ch.code;
     if (ch.note !== undefined) it.note = ch.note;
     items[enc(ch.pid) + '~' + ch.iso] = it;
@@ -39,6 +40,20 @@ export async function watchQueue(name, cb) {
 }
 
 /** Wysłanie kolejki do arkusza; wynik: { sent, rest } (rest – zmiany dopisane w trakcie wysyłki). */
+const WHY = { nodate: 'brak kolumny daty w karcie G', norow: 'brak wiersza w karcie G', name: 'w wierszu karty G jest inna osoba (zmieniona kolejność – zaimportuj Grafik z arkusza)' };
+/**
+ * Wynik wysyłki Grafiku: [results] z serwera (po jednym na pozycję: 'ok' | 'nodate' | 'norow' | 'name'; starszy serwer – brak tablicy = wszystko zapisane).
+ * Zwraca { ok: [klucze zapisane], failed: [{ key, why }] } – z kolejki wolno usunąć tylko zapisane.
+ */
+export function splitResults(keys, results) {
+  const ok = [], failed = [];
+  keys.forEach((k, i) => {
+    const r = Array.isArray(results) ? results[i] : 'ok';
+    if (r === 'ok' || r === undefined) ok.push(k); else failed.push({ key: k, why: WHY[r] || String(r) });
+  });
+  return { ok, failed };
+}
+
 export async function sendQueue(name) {
   const { sdk, db } = await firebase();
   const snap = await sdk.getDoc(ref(sdk, db, name));
@@ -56,11 +71,11 @@ export async function sendQueue(name) {
   await sdk.runTransaction(db, async (tx) => {
     const cur = await tx.get(ref(sdk, db, name));
     const now = { ...((cur.exists() && cur.data().items) || {}) };
-    for (const k of keys) if (now[k] && now[k].ts === items[k].ts) delete now[k];
+    for (const k of ok) if (now[k] && now[k].ts === items[k].ts) delete now[k];
     rest = Object.keys(now).length;
     tx.set(ref(sdk, db, name), { items: now, updatedAt: Date.now(), sentAt: Date.now() });
   });
-  return { sent: keys.length, rest };
+  return { sent: ok.length, rest, failed };
 }
 
 /**
@@ -79,7 +94,12 @@ export function syncButton(name, label, { h, toast, confirmBox }) {
     if (!n || busy) return;
     if (!(await confirmBox('Wysyłka do arkusza', `Wysłać ${n} zmienionych komórek do karty ${label} arkusza Google?`, 'Wyślij'))) return;
     busy = true; paint();
-    try { const r = await sendQueue(name); toast(`Wysłano do karty ${label}: ${r.sent}` + (r.rest ? ` (nowe zmiany w kolejce: ${r.rest})` : '')); }
+    try {
+      const r = await sendQueue(name);
+      const bad = r.failed || [];
+      if (bad.length) toast(`Karta ${label}: zapisano ${r.sent}, NIE zapisano ${bad.length} – ${[...new Set(bad.map((x) => x.why))].join('; ')}. Pozycje zostały w kolejce.`, true);
+      else toast(`Wysłano do karty ${label}: ${r.sent}` + (r.rest ? ` (nowe zmiany w kolejce: ${r.rest})` : ''));
+    }
     catch (e) { toast('Nie wysłano: ' + (e.message || e), true); }
     busy = false; paint();
   };
