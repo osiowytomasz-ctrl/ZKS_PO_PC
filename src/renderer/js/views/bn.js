@@ -1,7 +1,9 @@
 // Assembled Tool Viewer – jak w aplikacji na Androida (BnScreen.kt): zespoły narzędzi z arkusza BN. Filtry kaskadowe (grupa, rodzaj, Φ, L),
 // kod na pasku zużycia z kolorem lokalizacji, L zespołu i komis _ KTK _ operacja, opis i parametry, przyciski Części / 2D / 3D,
 // miniatura całego zespołu (kliknięcie – widok 2D) i elementy zespołu. Tylko odczyt.
-import { h, clear, apiCached } from '../ui.js';
+import { h, clear, api } from '../ui.js';
+import { getSnapshot, putSnapshot } from '../snapStore.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
@@ -21,15 +23,33 @@ export function mountBn(el, ctx) {
   const viewBtn = h('button', { class: 'btn', title: 'Zmiana widoku: lista / kafelki', onclick: () => { view = view === 'tiles' ? 'list' : 'tiles'; try { localStorage.setItem('zks.bn.view', view); } catch { /* bez pamięci */ } paintView(); draw(); } });
   const paintView = () => { viewBtn.textContent = view === 'tiles' ? '☰ Lista' : '▦ Kafelki'; list.className = view === 'tiles' ? 'tool-grid max4' : 'tool-list'; };
   paintView();
-  const refreshBtn = h('button', { class: 'btn', onclick: () => refresh() }, 'Odśwież BN');
+  const refreshBtn = h('button', { class: 'btn', title: 'Połącz z arkuszem BN i pobierz aktualne dane (MASTER / GOD zapisują je w bazie Firebase)', onclick: () => refresh() }, 'Odśwież BN');
 
+  const canStore = grafikAccess(grafikLevelOf(ctx.user)).manage;   // MASTER / GOD zapisują dane BN w bazie Firebase
+  const when = (m) => new Date(m.updatedAt).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  /** Dane BN z bazy Firebase (zapisane trwale); null – brak. */
+  async function loadStored() {
+    try {
+      const snap = await getSnapshot('bn');
+      if (!snap || !snap.data || !Array.isArray(snap.data.rows)) return false;
+      st.rows = snap.data.rows; st.fromCache = false; draw();
+      status.set(`Dane BN z bazy Firebase (${when(snap.meta)}${snap.meta.updatedBy ? ', ' + snap.meta.updatedBy : ''}). „Odśwież BN” łączy z arkuszem BN na żądanie${canStore ? ' i zapisuje nowe dane w bazie' : ' (zapis w bazie – MASTER / GOD)'}.`, 'neutral');
+      return true;
+    } catch (e) { status.set('Baza Firebase: ' + (e.code === 'permission-denied' ? 'brak dostępu (opublikuj reguły z snap_meta / snap_rows)' : e.message), 'error'); return false; }
+  }
+  /** Połączenie z arkuszem BN na żądanie; MASTER / GOD zapisują wynik trwale w Firebase. */
   async function refresh() {
     if (st.loading) return;
     st.loading = true; refreshBtn.disabled = true;
     status.set('Czytanie arkusza BN… przy dużej liczbie wierszy może to potrwać kilka minut.', 'neutral');
     try {
-      await apiCached('getBNbaseData', [], (d, meta) => { st.rows = d.rows || []; st.fromCache = meta.cached; draw(); }, { timeoutMs: 300000 });
-      status.set(st.fromCache ? 'Dane z pamięci komputera. „Odśwież BN” pobiera aktualne z arkusza.' : '', 'neutral');
+      const d = await api('getBNbaseData', [], { timeoutMs: 300000 });
+      st.rows = (d && d.rows) || []; st.fromCache = false; draw();
+      if (canStore && st.rows.length) {
+        status.set('Zapis danych BN w bazie Firebase…', 'neutral');
+        const meta = await putSnapshot('bn', { rows: st.rows }, { user: (ctx.user && (ctx.user.name || ctx.user.email)) || '', info: `zespoły: ${st.rows.length}` });
+        status.set(`Dane BN pobrane z arkusza i zapisane w bazie Firebase (${when(meta)}).`, 'neutral');
+      } else status.set(canStore ? 'Arkusz BN nie zwrócił wierszy.' : 'Dane BN z arkusza (tylko na tym komputerze – zapis w bazie: MASTER / GOD).', 'neutral');
     } catch (e) { status.set(e.message, 'error'); }
     st.loading = false; refreshBtn.disabled = false;
   }
@@ -108,5 +128,5 @@ export function mountBn(el, ctx) {
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Assembled Tool Viewer'), h('span', { class: 'grow' }), viewBtn, refreshBtn), status, filtersBox, list);
   loadIndex();
-  refresh();
+  loadStored().then((ok) => { if (!ok && !st.rows.length) refresh(); });   // pierwszy raz (brak danych w bazie) – odczyt z arkusza i zapis w bazie
 }

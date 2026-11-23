@@ -279,6 +279,10 @@ var API_FUNCS = {
   ndContourData: {
     run: function () { return nd_contourData_(); }
   },
+  // Bazy w Firebase (Baza.gs): odczyt kart PSWT / POM / Badania 2026 na żądanie (przycisk „Odśwież z arkusza”)
+  baseSheet: {
+    run: function (a) { return base_sheet_(a[0]); }
+  },
   ndSaveContoursV: {
     write: true,
     run: function (a, ctx) { return nd_saveContoursV_(a[0], ctx); }

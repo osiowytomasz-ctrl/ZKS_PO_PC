@@ -36,6 +36,8 @@ const mountPlan = lazy(() => import('./views/plan.js'), 'mountPlan');
 const mountHelp = lazy(() => import('./views/help.js'), 'mountHelp');
 const mountBuilder = lazy(() => import('./views/builder.js'), 'mountBuilder');
 const mountBn = lazy(() => import('./views/bn.js'), 'mountBn');
+const mountProducts = lazy(() => import('./views/products.js'), 'mountProducts');
+const mountMeasuring = lazy(() => import('./views/measuring.js'), 'mountMeasuring');
 
 /** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
 export const MODULES = [
@@ -60,6 +62,8 @@ export const MODULES = [
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
   { id: 'kontury', title: 'Kontury', style: 'green', inToolRoom: true, mount: mountContours },
   { id: 'czesci', title: 'Części', style: 'green', inToolRoom: true, mount: mountParts },
+  { id: 'produkty', title: 'Produkty', style: 'green', inToolRoom: true, mount: mountProducts },
+  { id: 'pomiarowe', title: 'Pomiarowe', style: 'green', inToolRoom: true, mount: mountMeasuring },
   { id: 'zniszczone', title: 'Zniszczone', style: 'green', inToolRoom: true, disabled: true },
   { id: 'pomiarowka', title: 'Pomiarówka', style: 'green', inToolRoom: true, disabled: true },
 ];

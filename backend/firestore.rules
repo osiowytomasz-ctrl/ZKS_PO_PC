@@ -112,6 +112,16 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if grManage();
     }
+    // Migawki danych z arkusza (BN, produkty PSWT, narzędzia pomiarowe POM + Badania 2026): czyta każdy zalogowany,
+    // zapisuje (przycisk „Odśwież z arkusza”) MASTER / GOD. snap_meta/{klucz}, snap_rows/{klucz}_{i} (fragmenty JSON).
+    match /snap_meta/{key} {
+      allow read: if request.auth != null;
+      allow write: if grManage();
+    }
+    match /snap_rows/{chunk} {
+      allow read: if request.auth != null;
+      allow write: if grManage();
+    }
     match /nd_rows/{chunk} {
       allow read: if request.auth != null;
       allow write: if grManage();
