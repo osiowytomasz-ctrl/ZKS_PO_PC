@@ -197,3 +197,5 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .bell-item { padding: 4px 2px; border-bottom: 1px solid #eee; cursor: pointer; }
 .bell-item:hover { background: #f3f7ff; }
 .bell-item.new { background: #fff8e1; }
+.presence-dev { white-space: nowrap; }
+.presence-dev.stale { opacity: .45; }

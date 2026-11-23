@@ -12,11 +12,13 @@ export function mountPresence(ctx) {
   const old = document.getElementById('presence-widget');
   if (old) return old._api;
   const st = { open: false, tab: 'list', states: new Map(), error: '', uid: '', sdk: null, db: null, form: { status: '', note: '', until: '' }, formDirty: false, hist: { range: 7, name: '', rows: null, loading: false },
+    devs: new Map(),
     chat: { conv: C.GENERAL, docs: new Map(), watching: new Set(), inbox: {}, seen: new Set(), ready: false, text: '', cleaned: false, read: {} } };
   const READ_KEY = 'zks.chat.read';
   try { st.chat.read = JSON.parse(localStorage.getItem(READ_KEY) || '{}') || {}; } catch { st.chat.read = {}; }
   const user = () => ctx.user || {};
   const mayHistory = () => P.canSeeHistory(user().name);
+  const mayDevices = () => P.canSeeDevices(user().name);   // wersja oprogramowania i rodzaj urządzenia przy nazwisku – tylko wskazana osoba
   const root = h('div', { id: 'presence-widget', class: 'presence' });
   const panel = h('div', { class: 'presence-panel', style: { display: 'none' } });
   const pill = h('button', { class: 'presence-pill', title: 'Status i dostępność pracowników', onclick: () => toggle() });
@@ -59,6 +61,13 @@ export function mountPresence(ctx) {
     note.onkeydown = until.onkeydown = (e) => { if (e.key === 'Enter') save(); };
     return h('div', { class: 'presence-form' }, h('b', {}, 'Mój status'), chips, note, h('div', { class: 'row', style: { gap: '6px', marginTop: '4px' } }, until, h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: save }, 'Zapisz')));
   }
+  /** Ikony urządzeń z wersją oprogramowania (🖥 PC, 🤖 Android) – tylko dla osoby z DEVICE_USERS. */
+  function deviceBadges(uid) {
+    if (!mayDevices()) return [];
+    const now = Date.now();
+    return P.devicesFor(uid, st.devs, now).map((d) => h('span', { class: 'presence-dev' + (d.stale ? ' stale' : ''), title: `${d.platform === 'pc' ? 'Program na komputer (PC)' : 'Aplikacja na Androida'}, wersja ${d.ver || '?'} · ostatnio: ${d.seenAt ? P.timeText(d.seenAt, now) : '—'}${d.stale ? ' (dawno nieużywane)' : ''}` },
+      ' ' + (d.platform === 'pc' ? '🖥' : '🤖'), h('span', { class: 'muted', style: { fontSize: '10px' } }, d.ver ? 'v' + d.ver : '')));
+  }
   function listView() {
     const now = Date.now(), items = P.sortPresence([...st.states.entries()].map(([uid, p]) => ({ ...p, uid })), now);
     const box = h('div', { class: 'presence-list' }, h('b', {}, `Pracownicy (${items.length})`));
@@ -66,7 +75,7 @@ export function mountPresence(ctx) {
     for (const p of items) {
       const stale = P.isStale(p, now), s = P.statusOf(p.status);
       box.append(h('div', { class: 'presence-row' + (stale ? ' stale' : ''), title: stale ? 'Brak aktualizacji od ponad 12 godzin' : '' }, dot(stale ? '#bdbdbd' : s.color, 11),
-        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', {}, h('b', {}, p.name || '—'), ' · ', s.label, p.until ? ` do ${p.until}` : ''), p.note ? h('div', { class: 'muted', style: { fontSize: '11px' } }, p.note) : null),
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('div', {}, h('b', {}, p.name || '—'), ...deviceBadges(p.uid), ' · ', s.label, p.until ? ` do ${p.until}` : ''), p.note ? h('div', { class: 'muted', style: { fontSize: '11px' } }, p.note) : null),
         h('span', { class: 'muted', style: { fontSize: '11px', whiteSpace: 'nowrap' } }, P.timeText(p.updatedAt, now))));
     }
     return box;
@@ -186,10 +195,22 @@ export function mountPresence(ctx) {
       h('div', { class: 'muted', style: { fontSize: '10px', marginTop: '2px' } }, 'Wiadomości są przechowywane najwyżej 3 dni, potem znikają.'));
   }
 
+  /** Zgłoszenie urządzenia (PC): presence_dev/{uid}_pc – wersja programu i czas; ponawiane co 20 minut. */
+  async function reportDevice() {
+    const send = async () => {
+      try {
+        const d = P.makeDevice(user(), 'pc', ctx.version);
+        if (d && st.uid && st.sdk) await st.sdk.setDoc(st.sdk.doc(st.db, 'presence_dev', st.uid + '_pc'), d);
+      } catch { /* bez zgłoszenia – nic nie psuje */ }
+    };
+    await send(); setInterval(send, 20 * 60 * 1000);
+  }
   async function start() {
     try {
       const { sdk, db } = await firebase();
       st.sdk = sdk; st.db = db; st.uid = fbUid();
+      reportDevice();   // zgłoszenie tego komputera (wersja programu); Android zgłasza się sam
+      if (mayDevices()) sdk.onSnapshot(sdk.collection(db, 'presence_dev'), (snap) => { st.devs = new Map(); snap.forEach((d) => st.devs.set(d.id, d.data())); if (st.open && st.tab === 'list') { const l = panel.querySelector('.presence-list'); if (l) l.replaceWith(listView()); } }, () => {});
       watchConv(C.GENERAL); setTimeout(() => { st.chat.ready = true; }, 4000);   // nowe wiadomości po wczytaniu początkowym – powiadomienie
       sdk.onSnapshot(sdk.doc(db, 'chat_inbox', st.uid), (snap) => { const prev = st.chat.inbox; st.chat.inbox = snap.exists() ? snap.data() : {};
         for (const [from, v] of Object.entries(st.chat.inbox)) if (st.chat.ready && (!prev[from] || Number(prev[from].ts) < Number(v.ts)) && !(st.open && st.tab === 'chat' && st.chat.conv === convOfPeer(from))) toast(`✉ ${v.n || 'Wiadomość'}: ${v.x}`);

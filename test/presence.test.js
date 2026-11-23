@@ -27,3 +27,14 @@ test('nieaktualny status, sortowanie listy, dni dziennika i wpisy', () => {
   const docs = { '2026-11-23': { e: { a: { name: 'A', ts: 5 }, b: { name: 'B', ts: 9 } } }, '2026-11-22': { e: { c: { name: 'A', ts: 2 } } } };
   assert.deepEqual(P.logEntries(docs).map((e) => e.ts), [9, 5, 2]); assert.deepEqual(P.logEntries(docs, 'A').map((e) => e.ts), [5, 2]);
 });
+
+test('wersja i urządzenie przy nazwisku: tylko Osiowy Tomasz; urządzenia osoby (PC przed Androidem), dawno nieużywane', () => {
+  assert.ok(P.canSeeDevices('Osiowy Tomasz')); assert.ok(P.canSeeDevices(' osiowy  tomasz ')); assert.ok(!P.canSeeDevices('Skupnik Adam')); assert.ok(!P.canSeeDevices('Kumała Łukasz')); assert.ok(!P.canSeeDevices(''));
+  const now = 1e12;
+  assert.deepEqual(P.makeDevice({ name: 'Jan K', email: 'j@x.pl' }, 'pc', '1.93.0', now), { name: 'Jan K', email: 'j@x.pl', platform: 'pc', ver: '1.93.0', seenAt: now });
+  assert.equal(P.makeDevice({ name: 'X' }, 'ios', '1'), null);
+  const devs = new Map([['u1_android', { platform: 'android', ver: '1.38.0', seenAt: now - 1000 }], ['u1_pc', { platform: 'pc', ver: '1.93.0', seenAt: now - 8 * 86400000 }], ['u2_pc', { platform: 'pc', ver: '1.0', seenAt: now }]]);
+  const d = P.devicesFor('u1', devs, now);
+  assert.deepEqual(d.map((x) => [x.platform, x.ver, x.stale]), [['pc', '1.93.0', true], ['android', '1.38.0', false]]);
+  assert.deepEqual(P.devicesFor('u3', devs, now), []);
+});
