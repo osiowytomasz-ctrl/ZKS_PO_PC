@@ -17,7 +17,8 @@ test('wynik wysyłki Grafiku: z kolejki znikają tylko zapisane, reszta ma powó
   assert.deepEqual(r.ok, ['a']);
   assert.deepEqual(r.failed.map((x) => x.key), ['b', 'c', 'd']);
   assert.match(r.failed[1].why, /po nazwisku/);
-  assert.deepEqual(splitResults(['a', 'b'], undefined).ok, ['a', 'b']);   // starszy serwer
+  const old = splitResults(['a', 'b'], undefined);   // stary serwer bez wyników: nic nie uznajemy za zapisane
+  assert.deepEqual(old.ok, []); assert.match(old.failed[0].why, /starą wersję/);
 });
 test('kolejka Grafiku: nazwisko do weryfikacji wiersza', () => {
   const it = grafikQueueItems([{ pid: 'P', iso: '2026-11-22', code: 'x' }], { P: 9 }, 1, { P: 'Wlazłowski Paweł' });

@@ -1736,7 +1736,8 @@ function api_grafikWriteBack_(changes) {
     if (k && k.indexOf('****') < 0) (byName[k] = byName[k] || []).push(GR_FIRST_ROW + i);
   });
   // wynik dla każdej pozycji (ta sama kolejność): 'ok' | 'nodate' (brak kolumny z tą datą) | 'norow' (brak wiersza) | 'name' (nie ma takiej osoby w karcie G) | 'dup' (kilka osób o tym nazwisku, żadna nie pod wskazanym wierszem)
-  var results = changes.map(function (ch) {
+  var checks = [];
+  var results = changes.map(function (ch, idx) {
     var col = cols.dateCol[ch && ch.iso], row = Number(ch && ch.row);
     if (col == null) { missing.push(ch && ch.iso); return 'nodate'; }
     if (ch.name) {
@@ -1749,6 +1750,7 @@ function api_grafikWriteBack_(changes) {
     var ri = row - GR_FIRST_ROW, cell = null;
     if (ch.value !== undefined && ch.value !== null && String(curVals[ri][col]) !== String(ch.value)) {
       cell = sheet.getRange(row, col + 1); cell.setValue(String(ch.value)); written++;
+      checks.push({ i: idx, ri: ri, col: col, want: String(ch.value).trim() });
     }
     if (ch.note !== undefined && ch.note !== null && String(curNotes[ri][col]) !== String(ch.note)) {
       (cell || sheet.getRange(row, col + 1)).setNote(String(ch.note)); written++;
@@ -1756,8 +1758,13 @@ function api_grafikWriteBack_(changes) {
     return 'ok';
   });
   SpreadsheetApp.flush();
+  // weryfikacja zapisu: ponowny odczyt komórek, które zapisaliśmy ('noset' – komórka nie przyjęła wartości: formuła, ochrona, inny format)
+  if (checks.length && allRange) {
+    var after = allRange.getDisplayValues();
+    checks.forEach(function (c) { if (String(after[c.ri][c.col]).trim() !== c.want) results[c.i] = 'noset'; });
+  }
   api_grBump_();
-  return { written: written, results: results, missing: missing.slice(0, 20) };
+  return { v: 3, written: written, results: results, missing: missing.slice(0, 20) };
 }
 
 

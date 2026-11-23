@@ -40,15 +40,15 @@ export async function watchQueue(name, cb) {
 }
 
 /** Wysłanie kolejki do arkusza; wynik: { sent, rest } (rest – zmiany dopisane w trakcie wysyłki). */
-const WHY = { nodate: 'brak kolumny daty w karcie G', norow: 'brak wiersza w karcie G', name: 'nie znaleziono tej osoby (po nazwisku) w karcie G', dup: 'w karcie G jest kilka osób o tym nazwisku' };
+const WHY = { nodate: 'brak kolumny daty w karcie G', norow: 'brak wiersza w karcie G', name: 'nie znaleziono tej osoby (po nazwisku) w karcie G', dup: 'w karcie G jest kilka osób o tym nazwisku', noset: 'komórka nie przyjęła wartości (formuła, ochrona lub format)', old: 'Apps Script ma starą wersję Api.gs – wklej nowy i wdróż „Nowa wersja”' };
 /**
- * Wynik wysyłki Grafiku: [results] z serwera (po jednym na pozycję: 'ok' | 'nodate' | 'norow' | 'name'; starszy serwer – brak tablicy = wszystko zapisane).
+ * Wynik wysyłki Grafiku: [results] z serwera (po jednym na pozycję: 'ok' | 'nodate' | 'norow' | 'name'; brak tablicy = stara wersja serwera: nic nie uznajemy za zapisane).
  * Zwraca { ok: [klucze zapisane], failed: [{ key, why }] } – z kolejki wolno usunąć tylko zapisane.
  */
 export function splitResults(keys, results) {
   const ok = [], failed = [];
   keys.forEach((k, i) => {
-    const r = Array.isArray(results) ? results[i] : 'ok';
+    const r = Array.isArray(results) ? results[i] : 'old';
     if (r === 'ok' || r === undefined) ok.push(k); else failed.push({ key: k, why: WHY[r] || String(r) });
   });
   return { ok, failed };
@@ -107,7 +107,7 @@ export async function sendQueue(name, extra = {}) {
     const part = list.slice(i, i + 400);
     if (name === 'grafik') {
       const r = await api('grafikWriteBack', [part.map(({ row, iso, value, note, name: who }) => ({ row, iso, ...(who ? { name: who } : {}), ...(value !== undefined ? { value } : {}), ...(note !== undefined ? { note } : {}) }))], { timeoutMs: 180000 });
-      if (r && Array.isArray(r.results)) results.push(...r.results); else results.push(...part.map(() => 'ok'));
+      if (r && Array.isArray(r.results)) results.push(...r.results); else results.push(...part.map(() => 'old'));   // serwer bez wyników na pozycję = stara wersja Api.gs
     } else {
       await api('savePlanData', [part.map(({ row, col, value }) => ({ row, col, value }))], { timeoutMs: 180000 });
       results.push(...part.map(() => 'ok'));
