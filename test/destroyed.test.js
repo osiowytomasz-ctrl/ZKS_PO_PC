@@ -25,3 +25,12 @@ test('narzędzia z historią: stan z najnowszego wpisu, suma strat, sortowanie',
   assert.equal(D.wearColor(10), '#00c853'); assert.equal(D.wearColor(50), '#ffd600'); assert.equal(D.wearColor(90), '#d50000'); assert.equal(D.wearColor(null), '#bdbdbd');
   assert.match(D.money(1200), /1\s?200,00 zł/);
 });
+
+test('formularz zniszczonego narzędzia: wymagane pola, procent, data', () => {
+  const now = new Date(2026, 10, 23);
+  assert.equal(D.todayKey(now), '2026-11-23');
+  assert.equal(D.makeZnEntry({ code: ' ', pct: 50 }, now).error, 'Podaj numer narzędzia.');
+  assert.match(D.makeZnEntry({ code: 'FA1', pct: '' }, now).error, /procent/); assert.match(D.makeZnEntry({ code: 'FA1', pct: 150 }, now).error, /procent/); assert.match(D.makeZnEntry({ code: 'FA1', pct: 'abc' }, now).error, /procent/);
+  assert.match(D.makeZnEntry({ code: 'FA1', pct: 10, date: '2026-02-31' }, now).error, /data/i); assert.match(D.makeZnEntry({ code: 'FA1', pct: 10, date: '23.11.2026' }, now).error, /datę/);
+  assert.deepEqual(D.makeZnEntry({ code: ' FA1 ', pct: '50,5%', who: ' C_Par ', damage: ' złamany ', cause: ' kolizja ' }, now), { entry: { code: 'FA1', pct: 50.5, who: 'C_Par', date: '2026-11-23', damage: 'złamany', cause: 'kolizja' } });
+});

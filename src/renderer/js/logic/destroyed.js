@@ -67,3 +67,22 @@ export function sortGroups(groups, mode = 'date', dir = 1) {
 /** Kolor paska zużycia: zielony do 40%, żółty do 70%, czerwony powyżej. */
 export const wearColor = (p) => (p == null ? '#bdbdbd' : p < 40 ? '#00c853' : p < 70 ? '#ffd600' : '#d50000');
 export const money = (n) => (n == null || !Number.isFinite(n) ? '' : n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł');
+
+/** Dzisiejsza data jako „rrrr-mm-dd” (czas lokalny) – domyślna data wpisu. */
+export const todayKey = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+/**
+ * Wpis zniszczonego narzędzia z formularza oględzin: { code, pct, who, date, damage, cause } → { entry } do wysłania albo { error }.
+ * Numer narzędzia i procent zniszczenia (0–100) są wymagane; data „rrrr-mm-dd” (puste = dziś).
+ */
+export function makeZnEntry(f, now = new Date()) {
+  const code = String((f && f.code) ?? '').trim();
+  if (!code) return { error: 'Podaj numer narzędzia.' };
+  const raw = String((f && f.pct) ?? '').replace('%', '').replace(',', '.').trim(), pct = raw === '' ? NaN : Number(raw);
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) return { error: 'Podaj procent zniszczenia (0–100).' };
+  const date = String((f && f.date) ?? '').trim() || todayKey(now);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return { error: 'Podaj datę oględzin.' };
+  const dt = new Date(+m[1], +m[2] - 1, +m[3]);
+  if (dt.getFullYear() !== +m[1] || dt.getMonth() !== +m[2] - 1 || dt.getDate() !== +m[3]) return { error: 'Nieprawidłowa data.' };
+  return { entry: { code, pct: Math.round(pct * 10) / 10, who: String((f && f.who) ?? '').trim(), date, damage: String((f && f.damage) ?? '').trim(), cause: String((f && f.cause) ?? '').trim() } };
+}

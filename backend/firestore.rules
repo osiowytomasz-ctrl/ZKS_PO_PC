@@ -114,13 +114,14 @@ service cloud.firestore {
     }
     // Migawki danych z arkusza (BN, produkty PSWT, narzędzia pomiarowe POM + Badania 2026): czyta każdy zalogowany,
     // zapisuje (przycisk „Odśwież z arkusza”) MASTER / GOD. snap_meta/{klucz}, snap_rows/{klucz}_{i} (fragmenty JSON).
+    // Migawka karty ZN (zniszczone narzędzia – klucz `zn`) może zapisać każdy zalogowany: narzędziowiec dopisuje wpis w arkuszu i od razu odświeża wspólną kopię.
     match /snap_meta/{key} {
       allow read: if request.auth != null;
-      allow write: if grManage();
+      allow write: if grManage() || key == 'zn';
     }
     match /snap_rows/{chunk} {
       allow read: if request.auth != null;
-      allow write: if grManage();
+      allow write: if grManage() || chunk.matches('zn_[0-9]+');
     }
     match /nd_rows/{chunk} {
       allow read: if request.auth != null;

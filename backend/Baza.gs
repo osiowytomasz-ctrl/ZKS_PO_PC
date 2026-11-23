@@ -32,3 +32,55 @@ function base_sheet_(key) {
   }
   return out;
 }
+
+/**
+ * Dopisanie zniszczonego narzędzia do karty ZN (Narzędziownia → Zniszczone → „Dodaj zniszczone narzędzie”): narzędziowiec po oględzinach wpisuje numer narzędzia,
+ * procent zniszczenia, kto / gdzie, datę, opis zniszczeń i przyczynę – tak jak w karcie ZN. Kolumny z formułami (D–G opis / cena / firma / oznaczenie, J miesiąc, K kwota strat)
+ * zostają w arkuszu: wpis trafia do pierwszego wiersza bez numeru narzędzia (puste wiersze z formułami), a gdy ich brak – do nowego wiersza z formułami skopiowanymi z poprzedniego.
+ *   Api.gs: znAddEntry: { write: true, run: function (a, ctx) { return zn_addEntry_(a[0], ctx); } },
+ * Wejście: { code, pct (0–100), who, date ('rrrr-mm-dd' lub 'dd.mm.rrrr'; puste = dziś), damage, cause }. Wynik: { row, lp }.
+ */
+function zn_addEntry_(e, ctx) {
+  e = e || {};
+  var code = String(e.code || '').trim();
+  if (!code) throw new Error('Podaj numer narzędzia.');
+  if (code.length > 60) throw new Error('Numer narzędzia jest za długi.');
+  var pct = Number(String(e.pct == null ? '' : e.pct).replace(',', '.').replace('%', ''));
+  if (!isFinite(pct) || pct < 0 || pct > 100) throw new Error('Procent zniszczenia musi być liczbą od 0 do 100.');
+  var date = zn_parseDate_(e.date);
+  var who = String(e.who || '').trim().slice(0, 120), damage = String(e.damage || '').trim().slice(0, 2000), cause = String(e.cause || '').trim().slice(0, 1000);
+  var sh = SpreadsheetApp.getActive().getSheetByName(BASE_ALLOWED.ZN);
+  if (!sh) throw new Error('Karta „ZN” nie istnieje w arkuszu.');
+  var last = Math.max(sh.getLastRow(), 2);
+  var vals = last >= 3 ? sh.getRange(3, 1, last - 2, 3).getValues() : [];   // A lp, B nr narz., C procent
+  var row = 0, maxLp = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var lp = Number(vals[i][0]); if (isFinite(lp) && lp > maxLp) maxLp = lp;
+    if (!row && String(vals[i][1]).trim() === '' && String(vals[i][2]).trim() === '') row = 3 + i;   // pierwszy pusty wiersz z formułami
+  }
+  if (!row) {   // brak wolnych wierszy – nowy wiersz z formułami (D–G, J, K) z poprzedniego
+    row = last + 1;
+    if (last >= 3) { sh.getRange(last, 4, 1, 4).copyTo(sh.getRange(row, 4, 1, 4)); sh.getRange(last, 10, 1, 2).copyTo(sh.getRange(row, 10, 1, 2)); }
+  }
+  sh.getRange(row, 1).setValue(maxLp + 1);
+  sh.getRange(row, 2).setValue(code);
+  sh.getRange(row, 3).setValue(pct / 100).setNumberFormat('0%');
+  sh.getRange(row, 8).setValue(who);
+  sh.getRange(row, 9).setValue(date).setNumberFormat('dd.MM.yyyy');
+  sh.getRange(row, 12).setValue(damage);
+  sh.getRange(row, 13).setValue(cause);
+  sh.getRange(row, 2).setNote('Dodano w programie: ' + String((ctx && (ctx.name || ctx.email)) || '') + ', ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy HH:mm'));
+  return { row: row, lp: maxLp + 1 };
+}
+/** Data z „rrrr-mm-dd” albo „dd.mm.rrrr”; puste – dziś; nieprawidłowa – błąd. */
+function zn_parseDate_(v) {
+  var t = String(v || '').trim();
+  if (!t) { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t), y, mo, d;
+  if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(t))) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else throw new Error('Data musi mieć postać rrrr-mm-dd albo dd.mm.rrrr.');
+  var dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) throw new Error('Nieprawidłowa data.');
+  return dt;
+}

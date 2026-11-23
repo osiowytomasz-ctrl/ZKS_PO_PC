@@ -283,6 +283,11 @@ var API_FUNCS = {
   baseSheet: {
     run: function (a) { return base_sheet_(a[0]); }
   },
+  // Dopisanie zniszczonego narzędzia do karty ZN (Baza.gs) – narzędziowiec po oględzinach; każdy zalogowany
+  znAddEntry: {
+    write: true,
+    run: function (a, ctx) { return zn_addEntry_(a[0], ctx); }
+  },
   ndSaveContoursV: {
     write: true,
     run: function (a, ctx) { return nd_saveContoursV_(a[0], ctx); }

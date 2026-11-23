@@ -3,7 +3,6 @@
 // Dane karty ZN: odczyt z arkusza raz, zapis w bazie Firebase (klucz „zn”), potem na życzenie (przycisk „Odśwież z karty ZN”; zapis w bazie: MASTER / GOD).
 import { h, clear, api, toast, modal } from '../ui.js';
 import { getSnapshot, putSnapshot } from '../snapStore.js';
-import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import { ndLoad } from '../ndStore.js';
 import { normCode, wearPercent } from '../logic/tooltrack.js';
@@ -15,7 +14,7 @@ import { naturalCompare } from '../logic/common.js';
 const when = (m) => new Date(m.updatedAt).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function mountDestroyed(el, ctx) {
-  const canStore = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  const canStore = true;   // wspólna kopia karty ZN w bazie: zapisuje każdy zalogowany (narzędziowiec dopisujący wpis od razu ją odświeża); reguły Firestore: klucz `zn`
   const st = { values: null, meta: null, groups: [], index: null, params: {}, cat: null, q: '', grp: '', firma: '', year: '', min: 0, sort: 'date', dir: 1, noPct: false, track: true, loading: false, stop: null };
   const status = h('span', { class: 'muted' }), info = h('span', { class: 'muted' });
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } });
@@ -26,7 +25,8 @@ export function mountDestroyed(el, ctx) {
   const dirBtn = h('button', { class: 'btn', title: 'Kierunek sortowania', onclick: () => { st.dir = -st.dir; dirBtn.textContent = st.dir > 0 ? '↑' : '↓'; draw(); } }, '↑');
   const search = h('input', { type: 'search', placeholder: 'Szukaj: numer, opis, firma, kto, przyczyna…', style: { width: '260px', padding: '4px 8px' }, oninput: () => { st.q = search.value.trim().toLowerCase(); draw(); } });
   const mkChk = (label, key, tip) => { const i = h('input', { type: 'checkbox', checked: st[key], onchange: () => { st[key] = i.checked; draw(); } }); return h('label', { class: 'row', style: { gap: '4px' }, title: tip }, i, label); };
-  const refreshBtn = h('button', { class: 'btn', title: 'Połącz z kartą ZN w arkuszu' + (canStore ? ' (zapis w bazie Firebase)' : ' (zapis w bazie – MASTER / GOD)'), onclick: () => refresh() }, 'Odśwież z karty ZN');
+  const refreshBtn = h('button', { class: 'btn', title: 'Połącz z kartą ZN w arkuszu i zapisz aktualne dane w bazie Firebase', onclick: () => refresh() }, 'Odśwież z karty ZN');
+  const addBtn = h('button', { class: 'btn primary', title: 'Dopisz zniszczone narzędzie po oględzinach (wpis do karty ZN)', onclick: () => addDialog('') }, '+ Dodaj zniszczone narzędzie');
 
   const toolOf = (code) => (st.index ? st.index.tool(code) : null);
   /** Grupy do listy: narzędzia z karty ZN oraz (opcjonalnie) narzędzia z zużyciem z ToolTrack bez wpisu w ZN. */
@@ -85,7 +85,36 @@ export function mountDestroyed(el, ctx) {
     const m = modal(`Zniszczone · ${String(g.code).toUpperCase()}${g.pct != null ? ' · ' + Math.round(g.pct) + '%' : ''}`, h('div', {},
       h('div', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start' } }, thumb(g.code, 120, 240), h('div', { style: { flex: 1, minWidth: 0 } }, kv)),
       h('h4', { style: { margin: '10px 0 4px' } }, `Historia (${g.events})${g.loss ? ' · suma strat ' + D.money(g.loss) : ''}`), hist,
-      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+      h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => { m.close(); addDialog(g.code); } }, '+ Dodaj wpis'), h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+  }
+
+  /** Formularz oględzin: narzędziowiec wpisuje zniszczone narzędzie tak jak w karcie ZN (numer, procent, kto / gdzie, data, opis zniszczeń, przyczyna). */
+  function addDialog(code0) {
+    const codes = (st.cat && st.cat.tools ? st.cat.tools : []).map((t) => String(t.productCode ?? '').trim()).filter(Boolean).sort(naturalCompare);
+    const who = [...new Set(D.parseZn(st.values || []).flatMap((e) => String(e.who).split(/\r?\n/)).map((x) => x.trim()).filter(Boolean))].sort(naturalCompare);
+    const code = h('input', { type: 'text', list: 'zn-codes', value: code0, placeholder: 'np. FA025', style: { width: '100%' }, autocomplete: 'off' });
+    const pct = h('input', { type: 'number', min: 0, max: 100, step: 5, placeholder: '0–100', style: { width: '90px' } });
+    const whoIn = h('input', { type: 'text', list: 'zn-who', placeholder: 'np. C_Par', style: { width: '100%' }, autocomplete: 'off' });
+    const date = h('input', { type: 'date', value: D.todayKey() });
+    const damage = h('textarea', { rows: 3, placeholder: 'Oględziny: co jest uszkodzone (np. utrata 2 rzędów z 5, uszkodzone gniazda)', style: { width: '100%' } });
+    const cause = h('textarea', { rows: 2, placeholder: 'Przyczyna (np. kolizja, zbyt wysoki posuw)', style: { width: '100%' } });
+    const note = h('div', { class: 'muted', style: { minHeight: '18px', fontSize: '12px' } });
+    const showTool = () => { const t = toolOf(code.value.trim()); note.textContent = t ? [t.columnP, t.name, t.columnO, [t.columnD, t.columnE].filter(Boolean).join('/'), t.columnF ? 'Φ' + t.columnF : '', t.columnJ ? 'L' + t.columnJ : ''].filter((x) => String(x || '').trim()).join(' · ') : (code.value.trim() ? 'Numeru nie ma w katalogu narzędzi – wpis zostanie dodany z tym numerem.' : ''); };
+    code.addEventListener('input', showTool); showTool();
+    const quick = h('span', { style: { display: 'inline-flex', gap: '4px', marginLeft: '6px' } }, ...[20, 30, 50, 70, 100].map((v) => h('button', { class: 'btn small', onclick: () => { pct.value = v; } }, v + '%')));
+    const row = (label, el2) => h('label', { style: { display: 'block', margin: '6px 0' } }, h('div', { class: 'muted', style: { fontSize: '12px' } }, label), el2);
+    const save = h('button', { class: 'btn primary', onclick: async () => {
+      const r = D.makeZnEntry({ code: code.value, pct: pct.value, who: whoIn.value, date: date.value, damage: damage.value, cause: cause.value });
+      if (r.error) { note.textContent = r.error; note.style.color = '#c62828'; return; }
+      save.disabled = true; note.style.color = ''; note.textContent = 'Zapisywanie w karcie ZN…';
+      try { const res = await api('znAddEntry', [r.entry]); m.close(); toast(`Dodano do karty ZN (wiersz ${res && res.row})`); await refresh(); }
+      catch (e) { save.disabled = false; note.style.color = '#c62828'; note.textContent = /Nieznana funkcja|UNKNOWN_FN/i.test(e.message || '') ? 'W Apps Script brak funkcji znAddEntry – wgraj nowe Baza.gs i Api.gs oraz wdróż API.' : e.message; }
+    } }, 'Zapisz w karcie ZN');
+    const m = modal('Dodaj zniszczone narzędzie', h('div', {},
+      h('datalist', { id: 'zn-codes' }, ...codes.map((c) => h('option', { value: c }))), h('datalist', { id: 'zn-who' }, ...who.map((c) => h('option', { value: c }))),
+      row('Numer narzędzia', code), row('Stan zniszczenia (%)', h('div', {}, pct, quick)), row('Kto / gdzie', whoIn), row('Data oględzin', date), row('Opis zniszczeń (oględziny)', damage), row('Przyczyna', cause), note,
+      h('div', { class: 'actions' }, save, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'))), { wide: true });
+    setTimeout(() => (code0 ? pct.focus() : code.focus()), 0);
   }
 
   function draw() {
@@ -118,15 +147,15 @@ export function mountDestroyed(el, ctx) {
     try {
       const d = await api('baseSheet', ['ZN'], { timeoutMs: 300000 }), data = { sheet: d.sheet, values: d.values || [] };
       st.values = data.values;
-      if (canStore) { st.meta = await putSnapshot('zn', data, { user: (ctx.user && (ctx.user.name || ctx.user.email)) || '', info: `wierszy: ${data.values.length}` }); status.textContent = `Karta ZN zapisana w bazie Firebase (${when(st.meta)}).`; toast('Karta ZN zapisana w bazie Firebase'); }
-      else status.textContent = 'Karta ZN z arkusza (tylko na tym komputerze – zapis w bazie: MASTER / GOD).';
+      try { st.meta = await putSnapshot('zn', data, { user: (ctx.user && (ctx.user.name || ctx.user.email)) || '', info: `wierszy: ${data.values.length}` }); status.textContent = `Karta ZN zapisana w bazie Firebase (${when(st.meta)}).`; }
+      catch { status.textContent = 'Karta ZN z arkusza (nie zapisano w bazie – brak dostępu; opublikuj reguły Firestore).'; }
       draw();
     } catch (e) { status.textContent = 'Błąd: ' + (/Nieznana karta|Nieznana funkcja|UNKNOWN_FN/i.test(e.message || '') ? 'w Apps Script brak karty ZN w Baza.gs – wgraj nowy Baza.gs i wdróż API.' : e.message); }
     st.loading = false; refreshBtn.disabled = false;
   }
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px'; el.style.height = '100%';
   el.append(h('div', { class: 'row panel', style: { flexWrap: 'wrap', gap: '6px', alignItems: 'center' } }, h('b', {}, 'Zniszczone narzędzia'), search, grpSel, firmaSel, yearSel, minSel, sortSel, dirBtn,
-    mkChk('też bez procentu', 'noPct', 'Pokaż także narzędzia z wpisem w ZN bez procentu zniszczenia'), mkChk('z ToolTrack', 'track', 'Dodaj narzędzia ze zużyciem z ToolTrack, których nie ma w karcie ZN'), h('span', { class: 'grow' }), info, status, refreshBtn),
+    mkChk('też bez procentu', 'noPct', 'Pokaż także narzędzia z wpisem w ZN bez procentu zniszczenia'), mkChk('z ToolTrack', 'track', 'Dodaj narzędzia ze zużyciem z ToolTrack, których nie ma w karcie ZN'), h('span', { class: 'grow' }), info, status, addBtn, refreshBtn),
     h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0 } }, grid));
   clear(grid).append(h('div', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie…'));
   loadAux().then(() => (st.values ? draw() : null));

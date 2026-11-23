@@ -82,7 +82,7 @@ function addZakupyItem(data) {
 
 
   sheet.getRange(row, 3).setValue(kod);              // C
-  sheet.getRange(row, 4).setValue(ilosc);            // D
+  sheet.getRange(row, 9).setValue(ilosc);            // I ilość zamówiona (kolumna D to ilość zakupiona – wypełnia ją dopiero realizacja zakupu)
   if (data.cena) sheet.getRange(row, 6).setValue(data.cena); // F (tylko kopia po częściowym zakupie)
   sheet.getRange(row, 7).setValue(data.zmw || '');   // G
   sheet.getRange(row, 8).setValue(new Date());       // H Zamówiono
