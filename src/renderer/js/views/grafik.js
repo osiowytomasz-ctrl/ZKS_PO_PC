@@ -530,7 +530,7 @@ export function mountGrafik(el, ctx) {
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     ...groupBtns,
     // wysyłka do karty G – na żądanie (MASTER, GOD); świeci, gdy są zmiany do wysłania
-    acc.manage ? syncButton('grafik', 'G', { h, toast, confirmBox }) : null,
+    acc.manage ? syncButton('grafik', 'G', { h, toast, confirmBox }, { range: true }) : null,
     (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
     h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => setZoom(st.zoom - 10) }, '−'), zoomLabel, h('button', { class: 'btn small', onclick: () => setZoom(st.zoom + 10) }, '+'),
     acc.importG ? h('button', { class: 'btn small', title: 'Zastąp grafik w bazie danymi z karty G arkusza (tylko GOD)', onclick: doImport }, 'Import z G') : null,

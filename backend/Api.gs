@@ -1723,7 +1723,11 @@ function api_grafikWriteBack_(changes) {
   if (!sheet) throw new Error('Arkusz G nie istnieje!');
   var cols = api_grafikColumns_(sheet), written = 0, missing = [];
   var lastRow = sheet.getLastRow();
-  var names = lastRow >= GR_FIRST_ROW ? sheet.getRange(GR_FIRST_ROW, 2, lastRow - GR_FIRST_ROW + 1, 1).getDisplayValues() : [];
+  var nRows = lastRow >= GR_FIRST_ROW ? lastRow - GR_FIRST_ROW + 1 : 0;
+  // jeden odczyt całej karty (wartości i komentarze) – komórki bez zmiany nie są zapisywane, więc wysyłka zakresu jest szybka
+  var allRange = nRows ? sheet.getRange(GR_FIRST_ROW, 1, nRows, sheet.getLastColumn()) : null;
+  var curVals = allRange ? allRange.getDisplayValues() : [], curNotes = allRange ? allRange.getNotes() : [];
+  var names = curVals.map(function (r) { return [r[1]]; });
   var norm = function (x) { return String(x == null ? '' : x).replace(/\s+/g, ' ').trim().toLowerCase(); };
   // wynik dla każdej pozycji (ta sama kolejność): 'ok' | 'nodate' (brak kolumny daty) | 'norow' (brak wiersza) | 'name' (w wierszu inna osoba – przesunięty arkusz)
   var results = changes.map(function (ch) {
@@ -1731,9 +1735,13 @@ function api_grafikWriteBack_(changes) {
     if (col == null) { missing.push(ch && ch.iso); return 'nodate'; }
     if (!(row >= GR_FIRST_ROW) || row > lastRow) return 'norow';
     if (ch.name && norm(names[row - GR_FIRST_ROW][0]).indexOf(norm(ch.name)) !== 0) return 'name';
-    var cell = sheet.getRange(row, col + 1);
-    if (ch.value !== undefined && ch.value !== null) { cell.setValue(String(ch.value)); written++; }
-    if (ch.note !== undefined && ch.note !== null) { cell.setNote(String(ch.note)); written++; }
+    var ri = row - GR_FIRST_ROW, cell = null;
+    if (ch.value !== undefined && ch.value !== null && String(curVals[ri][col]) !== String(ch.value)) {
+      cell = sheet.getRange(row, col + 1); cell.setValue(String(ch.value)); written++;
+    }
+    if (ch.note !== undefined && ch.note !== null && String(curNotes[ri][col]) !== String(ch.note)) {
+      (cell || sheet.getRange(row, col + 1)).setNote(String(ch.note)); written++;
+    }
     return 'ok';
   });
   SpreadsheetApp.flush();

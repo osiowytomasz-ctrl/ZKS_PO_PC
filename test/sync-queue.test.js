@@ -23,3 +23,18 @@ test('kolejka Grafiku: nazwisko do weryfikacji wiersza', () => {
   const it = grafikQueueItems([{ pid: 'P', iso: '2026-11-22', code: 'x' }], { P: 9 }, 1, { P: 'Wlazłowski Paweł' });
   assert.equal(it['P~2026-11-22'].name, 'Wlazłowski Paweł');
 });
+
+import { grafikRange, grafikRangeItems } from '../src/renderer/js/syncStore.js';
+test('zakres Grafiku: tydzień wstecz i w przód (15 dni), także na przełomie miesięcy i roku', () => {
+  const r = grafikRange(new Date(2026, 0, 3));
+  assert.equal(r.days.length, 15); assert.equal(r.from, '2025-12-27'); assert.equal(r.to, '2026-01-10');
+  assert.equal(grafikRange(new Date(2026, 10, 22)).from, '2026-11-15');
+});
+test('pozycje zakresu: każda osoba z wierszem × każdy dzień, puste = wyczyszczenie, separatory pomijane', () => {
+  const people = [{ id: 'a', row: 5, name: 'Jan Kowalski' }, { id: 'sep6', row: 6, sep: true, name: '****' }, { id: 'nowy', name: 'Bez wiersza' }];
+  const months = { '2026-11': { c: { a: { 22: 'x', '23': 'a8' } }, n: { a: { 22: 'uwaga' } } } };
+  const it = grafikRangeItems(people, months, ['2026-11-22', '2026-11-24'], 1);
+  assert.deepEqual(Object.keys(it), ['a~2026-11-22', 'a~2026-11-24']);
+  assert.deepEqual(it['a~2026-11-22'], { row: 5, iso: '2026-11-22', name: 'Jan Kowalski', value: 'x', note: 'uwaga', ts: 1 });
+  assert.equal(it['a~2026-11-24'].value, ''); assert.equal(it['a~2026-11-24'].note, '');
+});
