@@ -199,3 +199,7 @@ td.wf-edit { background: #fff !important; color: #000 !important; box-shadow: in
 .bell-item.new { background: #fff8e1; }
 .presence-dev { white-space: nowrap; }
 .presence-dev.stale { opacity: .45; }
+
+/* Tabele danych z arkusza (views/sheetTable.js): nagłówek przypięty przy przewijaniu */
+.sheet-tbl thead th { position: sticky; top: 0; z-index: 2; background: #eceff1; }
+.sheet-tbl td { max-width: 320px; white-space: pre-wrap; }

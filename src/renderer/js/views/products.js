@@ -16,9 +16,11 @@ export function mountProducts(el, ctx) {
   let loading = false;
 
   function show(data, meta) {
-    const headers = data.headers || [], cols = headers.map((t, i) => ({ key: String(i), idx: i, title: `${colName(i)} · ${String(t || '').trim() || 'kolumna ' + colName(i)}` }));
-    table.setData(cols, data.rows || [], (r, c) => String(r[c.idx] ?? ''));
-    status.textContent = meta ? `Baza Firebase: ${when(meta)}${meta.updatedBy ? ', ' + meta.updatedBy : ''} · ${meta.info || ''}` : 'Dane z arkusza (tylko na tym komputerze).';
+    const headers = data.headers || [], BLANK = { 0: 'Nr', 1: 'Kod produktu' };   // kolumny A i B karty PSWT nie mają nagłówka
+    const clean = (t) => String(t || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();   // nagłówki z zawijaniem wierszy
+    const cols = headers.map((t, i) => ({ key: String(i), idx: i, title: `${colName(i)} · ${clean(t) || BLANK[i] || 'kolumna ' + colName(i)}` }));
+    table.setData(cols, data.rows || [], (r, c) => String(r[c.idx] ?? '').replace(/\r\n?/g, '\n'), { defaultVisible: cols.length });   // wszystkie kolumny karty (A–AU i dalej) widoczne od razu
+    status.textContent = meta ? `Baza Firebase: ${when(meta)}${meta.updatedBy ? ', ' + meta.updatedBy : ''} · ${meta.info || ''}` : `Dane z arkusza (tylko na tym komputerze) · produktów: ${(data.rows || []).length}, kolumn: ${headers.length} (A–${colName(headers.length - 1)})`;
   }
   async function loadStored() {
     try { const snap = await getSnapshot('pswt'); if (snap && snap.data) { show(snap.data, snap.meta); return true; } } catch (e) { status.textContent = 'Baza Firebase: ' + (e.code === 'permission-denied' ? 'brak dostępu (opublikuj reguły z snap_meta / snap_rows)' : e.message); }

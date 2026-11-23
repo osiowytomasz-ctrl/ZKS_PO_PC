@@ -4,7 +4,7 @@ import { h, clear, filterHeader, columnFilterDialog, modal } from '../ui.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { updateSorts, sortLabels } from '../logic/common.js';
 
-const PAGE = 250;
+const PAGE = 500;
 
 /**
  * Tworzy tabelę: { el, setData(columns, rows, getValue, opts), info } – [storageKey] – klucz zapamiętania widocznych kolumn,
@@ -54,8 +54,8 @@ export function sheetTable({ storageKey = '', defaultVisible = 14, rowStyle = nu
       }
     };
     more();
-    clear(body); body.append(h('table', { class: 't', style: { width: 'max-content', minWidth: '100%' } }, h('thead', {}, thead), tbody));
-    if (rows.length > st.shown) body.append(h('div', { style: { padding: '6px' } }, h('button', { class: 'btn', onclick: () => { st.shown += PAGE; draw(); } }, `Pokaż kolejne (${rows.length - st.shown})`)));
+    clear(body); body.append(h('table', { class: 't sheet-tbl', style: { width: 'max-content', minWidth: '100%' } }, h('thead', {}, thead), tbody));
+    if (rows.length > st.shown) body.append(h('div', { style: { padding: '6px', display: 'flex', gap: '6px' } }, h('button', { class: 'btn', onclick: () => { st.shown += PAGE; draw(); } }, `Pokaż kolejne (${Math.min(PAGE, rows.length - st.shown)})`), h('button', { class: 'btn', onclick: () => { st.shown = rows.length; draw(); } }, `Pokaż wszystkie (${rows.length - st.shown})`)));
     info.textContent = `Pozycji: ${rows.length}${rows.length !== st.rows.length ? ' z ' + st.rows.length : ''}`;
     clearBtn.disabled = !Object.keys(st.filters).length && !st.sorts.length && !st.q;
   }
