@@ -40,24 +40,28 @@ const mountDestroyed = lazy(() => import('./views/destroyed.js'), 'mountDestroye
 const mountProducts = lazy(() => import('./views/products.js'), 'mountProducts');
 const mountMeasuring = lazy(() => import('./views/measuring.js'), 'mountMeasuring');
 
-/** Moduły w kolejności z ekranu głównego (jak w aplikacji na Androida). */
+/**
+ * Moduły w kolejności przycisków górnego paska: Skaner, Grafik, Plan, Harmonogram, Mistrz, Narzędziownia, Help (potem zakładki Braki i Tablica).
+ * [color] – pastelowe tło przycisku w pasku. Kompetencje są w module Mistrz (inMistrz), Zakupy w Narzędziowni (inToolRoom).
+ */
 export const MODULES = [
-  { id: 'skaner', title: 'Skaner', mount: mountScanner },
-  { id: 'grafik', title: 'Grafik', style: 'green-outline', perm: 'grafik', mount: mountGrafik },
-  { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', mount: mountCompetence, visible: () => grafikAccess(grafikLevelOf(ctx.user)).competence },
-  // Mistrz PO: zakładki arkusza Mistrz_po z bazy Firebase (kolumny liczone liczy program); od CLERIK, import od MASTER
-  { id: 'mistrz', title: 'Mistrz PO', perm: 'grafik', mount: mountMistrz, visible: () => grafikAccess(grafikLevelOf(ctx.user)).cells },
-  { id: 'plan', title: 'Plan', perm: 'plan', mount: mountPlan },
-  { id: 'narzedziownia', title: 'Narzędziownia', style: 'green', mount: mountToolRoom },
-  { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', mount: mountZakupy },
+  { id: 'skaner', title: 'Skaner', color: '#ffd1dc', mount: mountScanner },
+  { id: 'grafik', title: 'Grafik', color: '#ffe0b2', perm: 'grafik', mount: mountGrafik },
+  { id: 'plan', title: 'Plan', color: '#fff4b0', perm: 'plan', mount: mountPlan },
   // Harmonogram z bazy Firebase (Grafik też z bazy – gr_meta, gr_days); dawny widok z arkusza Google usunięty.
-  { id: 'harmonogram-fb', title: 'Harmonogram', mount: mountHarmLive },
-  { id: 'help', title: 'Help', mount: mountHelp },
+  { id: 'harmonogram-fb', title: 'Harmonogram', color: '#d4efb9', mount: mountHarmLive },
+  // Mistrz: zakładki arkusza Mistrz_po z bazy Firebase (kolumny liczone liczy program); od CLERIK, import od MASTER; w środku przycisk Kompetencje
+  { id: 'mistrz', title: 'Mistrz', color: '#b9ecd9', perm: 'grafik', mount: mountMistrz, visible: () => grafikAccess(grafikLevelOf(ctx.user)).cells },
+  { id: 'narzedziownia', title: 'Narzędziownia', color: '#bfe3f7', mount: mountToolRoom },
+  { id: 'help', title: 'Help', color: '#d6d2f8', mount: mountHelp },
+  // Kompetencje: otwierane przyciskiem w module Mistrz (nie ma ich w górnym pasku)
+  { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', inMistrz: true, mount: mountCompetence, visible: () => grafikAccess(grafikLevelOf(ctx.user)).competence },
   { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', inHelp: true, web: 'symulator-num.html' },
   { id: 'pomiary', title: 'Pomiary', inHelp: true, web: 'karta-pomiaru.html', gas: true },
   // Symulator, SymulatorNUM i Pomiary mają przyciski na ekranie Help (inHelp), nie na ekranie głównym.
   // Przyciski ekranu Narzędziownia (nie ma ich na ekranie głównym).
+  { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', inToolRoom: true, mount: mountZakupy },
   { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', inToolRoom: true, mount: mountBuilder },
   { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
@@ -72,7 +76,7 @@ export const MODULES = [
 export const ctx = {
   version: '',         // numer wersji programu PC (np. 1.1.0)
   user: null,          // { email, name, roles, permissions }
-  homeTab: 'braki',    // ekran główny: Braki albo Workflow (przyciski w górnym pasku)
+  homeTab: 'braki',    // ekran główny: Braki albo Tablica (Workflow) (przyciski w górnym pasku)
   userError: null,
   go,
   home: () => go('home'),
@@ -109,27 +113,27 @@ function backTarget(id) {
   const mod = MODULES.find((m) => m.id === id);
   if (mod && mod.inToolRoom) return 'narzedziownia';
   if (mod && mod.inHelp) return 'help';
+  if (mod && mod.inMistrz) return 'mistrz';
   return 'home';
 }
 
 /**
- * Górny pasek: logo i przyciski modułów (dawniej na ekranie głównym) oraz zakładki Braki i Workflow – widoczne na każdym ekranie,
+ * Górny pasek: logo i przyciski modułów (dawniej na ekranie głównym) oraz zakładki Braki i Tablica – widoczne na każdym ekranie,
  * więc między modułami przechodzi się jednym kliknięciem. Moduły z Narzędziowni i Helpu mają dodatkowo „← Wróć” i swój tytuł.
  */
 function topbar(title, showBack) {
   const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO (PC) wersja ${ctx.version}` : '');
-  const sub = MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp));
+  const sub = MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp || m.inMistrz));
   const activeMain = sub ? backTarget(current) : current;
-  const navBtn = (label, onclick, { active = false, style = '', disabled = false, title: tip = '' } = {}) =>
-    h('button', { class: 'nav ' + style + (active ? ' on' : ''), disabled, title: tip || label, onclick }, label);
+  const navBtn = (label, onclick, { active = false, style = '', color = '', disabled = false, title: tip = '' } = {}) =>
+    h('button', { class: 'nav ' + style + (active ? ' on' : ''), style: color ? { background: color } : {}, disabled, title: tip || label, onclick }, label);
   const nav = h('div', { class: 'nav-bar' });
-  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && (!x.visible || x.visible()))) {
+  for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && !x.inMistrz && (!x.visible || x.visible()))) {
     const denied = m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
-    nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: m.style || '', disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
+    nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: 'pastel', color: m.color, disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
   }
-  nav.append(h('span', { class: 'nav-sep' }));
-  for (const [tab, label] of [['braki', 'Braki'], ['workflow', 'Workflow']]) {
-    nav.append(navBtn(label, () => { ctx.homeTab = tab; go('home'); }, { active: current === 'home' && (ctx.homeTab || 'braki') === tab, title: label === 'Braki' ? 'Braki części' : 'Workflow – zadania' }));
+  for (const [tab, label, color] of [['braki', 'Braki', '#f8c8e8'], ['workflow', 'Tablica', '#e8d5b5']]) {
+    nav.append(navBtn(label, () => { ctx.homeTab = tab; go('home'); }, { active: current === 'home' && (ctx.homeTab || 'braki') === tab, style: 'pastel', color, title: label === 'Braki' ? 'Braki części' : 'Tablica – zadania (Workflow)' }));
   }
   return h('div', { class: 'topbar' },
     h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),

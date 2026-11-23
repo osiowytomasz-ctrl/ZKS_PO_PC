@@ -24,7 +24,7 @@ WIDTHS.opsArch = WIDTHS.ops; WIDTHS.docsArch = WIDTHS.docs; WIDTHS.dlistArch = W
 
 export function mountMistrz(el, ctx) {
   const acc = ctx.grafikAcc ? ctx.grafikAcc() : { cells: false, manage: false };
-  if (!acc.cells) { el.append(h('div', { class: 'panel' }, 'Mistrz PO: brak dostępu (wymagany poziom CLERIK, MASTER lub GOD w kolumnie „Grafik dostęp”).')); return () => {}; }
+  if (!acc.cells) { el.append(h('div', { class: 'panel' }, 'Mistrz: brak dostępu (wymagany poziom CLERIK, MASTER lub GOD w kolumnie „Grafik dostęp”).')); return () => {}; }
   const st = { tab: lsGet('mp.tab', 'ops'), meta: null, data: {}, calc: {}, marks: new Map(), loaded: false, error: '', search: '', shown: PAGE, filters: {}, sorts: [] };
   const user = (ctx.user && ctx.user.email) || '';
   const body = h('div', { style: { flex: '1', minHeight: 0, overflow: 'auto', background: '#fff', border: '1px solid var(--border)' } });
@@ -184,7 +184,8 @@ export function mountMistrz(el, ctx) {
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'panel', style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz PO'), search,
+    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search,
+      acc.competence ? h('button', { class: 'btn small', title: 'Kompetencje, uprawnienia i dane pracowników', onclick: () => ctx.go('kompetencje') }, 'Kompetencje') : null,
       h('button', { class: 'btn small', title: 'Wczytaj ponownie dane z bazy', onclick: load }, 'Odśwież'),
       acc.manage ? h('button', { class: 'btn small', title: 'Dane wpisywane z arkusza Google Mistrz_po do bazy (zastępuje dane w bazie)', onclick: () => runImport('sheet') }, 'Import z arkusza') : null,
       acc.manage ? h('button', { class: 'btn small', title: 'Dane wpisywane z pobranego pliku .xlsx do bazy (zastępuje dane zakładek z pliku)', onclick: () => runImport('file') }, 'Import z pliku .xlsx…') : null,

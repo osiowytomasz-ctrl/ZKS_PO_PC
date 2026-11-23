@@ -23,6 +23,8 @@ input, select, textarea { font: inherit; }
 .topbar button.nav.green { background: var(--tool-green); border-color: var(--tool-green-border); color: #000; font-weight: 700; }
 .topbar button.nav.accent { background: linear-gradient(#fffbe0, #ffeb3b 60%, #ffe600); color: #000; font-weight: 700; border-color: #c9b600; }
 .topbar button.nav.on.green, .topbar button.nav.on.accent { box-shadow: 0 0 0 2px #fff; }
+.topbar button.nav.pastel { color: #000; border-color: rgba(0,0,0,.35); }
+.topbar button.nav.pastel.on { font-weight: 700; border-color: #000; box-shadow: 0 0 0 2px #fff; }
 .topbar button.nav:disabled { opacity: .4; cursor: not-allowed; }
 .topbar .sub { display: inline-flex; gap: 6px; align-items: center; margin-left: 6px; }
 .topbar .sub b { font-size: 14px; }
