@@ -40,7 +40,7 @@ export async function watchQueue(name, cb) {
 }
 
 /** Wysłanie kolejki do arkusza; wynik: { sent, rest } (rest – zmiany dopisane w trakcie wysyłki). */
-const WHY = { nodate: 'brak kolumny daty w karcie G', norow: 'brak wiersza w karcie G', name: 'w wierszu karty G jest inna osoba (zmieniona kolejność – zaimportuj Grafik z arkusza)' };
+const WHY = { nodate: 'brak kolumny daty w karcie G', norow: 'brak wiersza w karcie G', name: 'nie znaleziono tej osoby (po nazwisku) w karcie G', dup: 'w karcie G jest kilka osób o tym nazwisku' };
 /**
  * Wynik wysyłki Grafiku: [results] z serwera (po jednym na pozycję: 'ok' | 'nodate' | 'norow' | 'name'; starszy serwer – brak tablicy = wszystko zapisane).
  * Zwraca { ok: [klucze zapisane], failed: [{ key, why }] } – z kolejki wolno usunąć tylko zapisane.

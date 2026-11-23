@@ -1727,14 +1727,25 @@ function api_grafikWriteBack_(changes) {
   // jeden odczyt całej karty (wartości i komentarze) – komórki bez zmiany nie są zapisywane, więc wysyłka zakresu jest szybka
   var allRange = nRows ? sheet.getRange(GR_FIRST_ROW, 1, nRows, sheet.getLastColumn()) : null;
   var curVals = allRange ? allRange.getDisplayValues() : [], curNotes = allRange ? allRange.getNotes() : [];
-  var names = curVals.map(function (r) { return [r[1]]; });
   var norm = function (x) { return String(x == null ? '' : x).replace(/\s+/g, ' ').trim().toLowerCase(); };
-  // wynik dla każdej pozycji (ta sama kolejność): 'ok' | 'nodate' (brak kolumny daty) | 'norow' (brak wiersza) | 'name' (w wierszu inna osoba – przesunięty arkusz)
+  // indeks osób karty G: nazwisko (bez „UT= …”, jak w api_grafikExport_) → wiersze; osobę i dzień szukamy za każdym razem po nazwisku i dacie,
+  // numer wiersza z urządzenia jest tylko podpowiedzią (wiersze w arkuszu mogą się przesuwać)
+  var byName = {};
+  curVals.forEach(function (r, i) {
+    var shown = String(r[1] || '').trim(), m = shown.match(/^(.*?)\s+UT=/), k = norm(m ? m[1] : shown);
+    if (k && k.indexOf('****') < 0) (byName[k] = byName[k] || []).push(GR_FIRST_ROW + i);
+  });
+  // wynik dla każdej pozycji (ta sama kolejność): 'ok' | 'nodate' (brak kolumny z tą datą) | 'norow' (brak wiersza) | 'name' (nie ma takiej osoby w karcie G) | 'dup' (kilka osób o tym nazwisku, żadna nie pod wskazanym wierszem)
   var results = changes.map(function (ch) {
-    var row = Number(ch && ch.row), col = cols.dateCol[ch && ch.iso];
+    var col = cols.dateCol[ch && ch.iso], row = Number(ch && ch.row);
     if (col == null) { missing.push(ch && ch.iso); return 'nodate'; }
-    if (!(row >= GR_FIRST_ROW) || row > lastRow) return 'norow';
-    if (ch.name && norm(names[row - GR_FIRST_ROW][0]).indexOf(norm(ch.name)) !== 0) return 'name';
+    if (ch.name) {
+      var cand = byName[norm(ch.name)] || [];
+      if (!cand.length) return 'name';
+      if (cand.length === 1) row = cand[0];
+      else if (cand.indexOf(row) >= 0) { /* wiersz z urządzenia jest jednym z kandydatów */ }
+      else return 'dup';
+    } else if (!(row >= GR_FIRST_ROW) || row > lastRow) return 'norow';
     var ri = row - GR_FIRST_ROW, cell = null;
     if (ch.value !== undefined && ch.value !== null && String(curVals[ri][col]) !== String(ch.value)) {
       cell = sheet.getRange(row, col + 1); cell.setValue(String(ch.value)); written++;
