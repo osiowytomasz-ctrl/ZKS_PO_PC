@@ -1,3 +1,4 @@
+import { bellButton, startWfNotify } from './views/wfBell.js';
 import { h, clear, api, apiCached, toast } from './ui.js';
 import { preload } from './catalog.js';
 import { permissionsSummary } from './logic/common.js';
@@ -130,7 +131,8 @@ function topbar(title, showBack) {
     nav,
     sub ? h('span', { class: 'sub' }, h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć'), h('b', {}, title)) : null,
     h('span', { class: 'grow' }),
-    h('span', { class: 'who' }, who),
+    ctx.user ? bellButton(ctx) : null,
+        h('span', { class: 'who' }, who),
     current !== 'settings' ? h('button', { onclick: () => go('settings') }, 'Ustawienia') : null);
 }
 
@@ -171,6 +173,7 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   if (reopen) setTimeout(() => toast('Naprawiono pamięć lokalną bazy – dane pobrane z serwera od nowa'), 500);
   if (cfg.url && cfg.key) {
     preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
+    startWfNotify(ctx);   // dzwoneczek Workflow
     import('./views/presence.js').then(({ mountPresence }) => mountPresence(ctx)).catch(() => {});   // status i dostępność pracowników (prawy dolny róg)
     import('./prefetch.js').then(({ startBackgroundRefresh }) => startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none')).catch(() => {});
   }

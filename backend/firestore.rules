@@ -131,6 +131,20 @@ service cloud.firestore {
       allow delete: if isGod();
     }
 
+    // Komunikator (okno statusu): rozmowy chat/{rozmowa}__{rrrr-mm-dd} = { t: początek dnia (ms), m: wiadomości }, przechowywane najwyżej 3 dni.
+    // Rozmowa ogólna (`all__…`) – każdy zalogowany; prywatna (`dm_{uid}_{uid}__…`) – tylko dwie osoby (uid w identyfikatorze). Starsze niż 3 dni dni są nieczytelne
+    // (nawet gdy dokument jeszcze istnieje) i można je usunąć; skrzynka (chat_inbox/{uid}) – powiadomienia o rozmowach prywatnych: czyta tylko właściciel, dopisuje każdy.
+    function chatOk(id) { return request.auth != null && (id.matches('all__.*') || (id.matches('dm_.*') && id.matches('.*' + request.auth.uid + '.*'))); }
+    match /chat/{id} {
+      allow read: if chatOk(id) && (resource == null || resource.data.t > request.time.toMillis() - 4 * 86400000);
+      allow create, update: if chatOk(id) && request.resource.data.keys().hasOnly(['t', 'm']);
+      allow delete: if chatOk(id) && (resource.data.t < request.time.toMillis() - 3 * 86400000 || isGod());
+    }
+    match /chat_inbox/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null;
+    }
+
     // Plan: wspólny układ tabeli (szerokości kolumn, wysokości wierszy, czcionka) – czyta i zmienia każdy z dostępem do Planu
     match /plan_layout/{doc} {
       allow read, write: if planLvl() in ['read', 'write'];
