@@ -50,6 +50,8 @@ input, select, textarea { font: inherit; }
 /* przyciski w module mają kolor przycisku modułu (--modcolor ustawia app.js); wybrany – zielona poświata */
 .screen.themed .btn:not(.primary):not(.danger):not(:disabled) { background: var(--modcolor); border-color: rgba(0,0,0,.4); }
 .screen.themed .btn:not(.primary):not(.danger):not(:disabled):hover { filter: brightness(.94); }
+.screen.themed .mod, .screen.themed .mod.green, .screen.themed .mod.accent { background: var(--modcolor); border-color: rgba(0,0,0,.4); color: #000; font-weight: 400; }
+.screen.themed .mod:disabled { opacity: .4; }
 .btn.glow, .screen.themed .btn.glow:not(:disabled) { font-weight: 700; border-color: #00b050; box-shadow: 0 0 8px 2px #00c853; }
 .topbar .nav-bar2 button.btn { color: #000; background: var(--modcolor, #ddd); }
 .btn.small { padding: 2px 8px; font-size: 12px; }

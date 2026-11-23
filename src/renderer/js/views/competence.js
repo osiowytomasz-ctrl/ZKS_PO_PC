@@ -2,6 +2,7 @@
 // jak arkusz „MK”. Obsługa jak w Excelu: klik / Shift / przeciąganie – zaznaczenie, strzałki, Tab, Enter, pisanie w komórce, F2 / dwuklik,
 // Delete, Ctrl+C / Ctrl+V (zgodne z Excelem), Ctrl+Z / Ctrl+Y. Filtry i sortowanie jak w Harmonogramie. Nazwisko w kolorze stanowiska
 // z Grafiku (miejsce pracy → stanowisko Harmonogramu). Czyta i zmienia osoba z prawem do Grafiku (odczyt / zapis).
+import { drawMistrzNav } from './mistrzNav.js';
 import { h, clear, toast, modal, confirmBox, columnFilterDialog } from '../ui.js';
 import * as K from '../logic/competence.js';
 import { placeStation } from '../logic/grafikFb.js';
@@ -98,8 +99,8 @@ export function mountCompetence(el, ctx) {
   let grid = [], cols = [];
   function draw() {
     if (!st.data || !st.gReady) return;
-    for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' primary' : '');
-    { const n = peopleList().filter((p) => K.personAlert(p, perms(), isoToday())).length; alertBtn.className = 'btn small' + (st.onlyAlerts ? ' primary' : ''); alertBtn.textContent = `⚠ Terminy (${n})`; }
+    for (const b of groupBtns) b.className = 'btn small' + (st.groups[b.dataset.g] ? ' glow' : '');
+    { const n = peopleList().filter((p) => K.personAlert(p, perms(), isoToday())).length; alertBtn.className = 'btn small' + (st.onlyAlerts ? ' glow' : ''); alertBtn.textContent = `⚠ Terminy (${n})`; }
     if (!peopleList().length) {
       clear(body);
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Brak pracowników: zaimportuj Grafik z karty G (moduł Grafik → „Import z G”) albo dodaj pracownika.'),
@@ -610,6 +611,7 @@ export function mountCompetence(el, ctx) {
   // tylko osoby z uprawnieniem, którego termin minął albo mija w ciągu 30 dni
   const alertBtn = h('button', { class: 'btn small', title: 'Pokaż tylko pracowników z terminem do odnowienia: uprawnienia – do 3 miesięcy, badania i BHP – do miesiąca, albo po terminie', onclick: () => { st.onlyAlerts = !st.onlyAlerts; if (st.onlyAlerts) { st.groups.med = true; st.groups.perms = true; lsSet('kp.groups', st.groups); } draw(); } }, '⚠ Terminy');
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
+  drawMistrzNav(ctx, 'dane', () => ctx.go('mistrz'));   // przyciski główne Mistrza w nagłówku, Dane Pracowników wybrane
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kompetencje'), ...groupBtns, alertBtn, broom,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     canWrite ? h('button', { class: 'btn small', onclick: () => addPerson() }, 'Dodaj pracownika') : null,

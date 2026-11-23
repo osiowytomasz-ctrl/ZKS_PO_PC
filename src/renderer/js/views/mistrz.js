@@ -4,6 +4,7 @@
 // Dostęp: przeglądanie od CLERIK, import od MASTER (kolumna „Grafik dostęp”).
 import { h, clear, toast, modal, columnFilterDialog } from '../ui.js';
 import * as M from '../logic/mistrz.js';
+import { drawMistrzNav } from './mistrzNav.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { loadMistrz, importFromSheet, importFromXlsx, loadMarks, setMark, detailKey } from '../mistrzStore.js';
 import { qrSvg } from '../logic/qr.js';
@@ -25,13 +26,12 @@ WIDTHS.opsArch = WIDTHS.ops; WIDTHS.docsArch = WIDTHS.docs; WIDTHS.dlistArch = W
 export function mountMistrz(el, ctx) {
   const acc = ctx.grafikAcc ? ctx.grafikAcc() : { cells: false, manage: false };
   if (!acc.cells) { el.append(h('div', { class: 'panel' }, 'Mistrz: brak dostępu (wymagany poziom CLERIK, MASTER lub GOD w kolumnie „Grafik dostęp”).')); return () => {}; }
-  const st = { tab: M.sheetByKey(lsGet('mp.tab', 'ops')) ? lsGet('mp.tab', 'ops') : 'ops', meta: null, data: {}, calc: {}, marks: new Map(), loaded: false, error: '', search: '', shown: PAGE, filters: {}, sorts: [] };
+  const st = { tab: M.tabInMenu(lsGet('mp.tab', 'ops')) ? lsGet('mp.tab', 'ops') : 'ops', meta: null, data: {}, calc: {}, marks: new Map(), loaded: false, error: '', search: '', shown: PAGE, filters: {}, sorts: [] };
   const user = (ctx.user && ctx.user.email) || '';
   const body = h('div', { style: { flex: '1', minHeight: 0, overflow: 'auto', background: '#fff', border: '1px solid var(--border)' } });
   const info = h('span', { class: 'muted', style: { fontSize: '12px' } });
   const printSlot = h('span');
-  const tabs = h('div', { class: 'row', style: { gap: '4px', flexWrap: 'wrap' } });
-  const navTop = ctx.nav2 || null;   // drugi rząd nagłówka: przyciski główne modułu
+  const tabs = h('div', { style: { display: 'inline-flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' } });
   const search = h('input', { type: 'search', placeholder: 'Szukaj w zakładce…', style: { width: '220px' }, oninput: () => { st.search = search.value; st.shown = PAGE; draw(); } });
 
   async function load() {
@@ -60,22 +60,10 @@ export function mountMistrz(el, ctx) {
     document.body.append(input); input.click();
   }
 
-  /** Przyciski główne w nagłówku (Dane Pracowników | Rejestr KTK | Rejestr Detali | Archiwa) i podrzędne pod nagłówkiem; wybrane – zielona poświata. */
+  /** Przyciski główne w nagłówku (wspólne z Kompetencjami) i podrzędne w pasku narzędzi, obok pola szukania; wybrane – zielona poświata. */
   function drawTabs() {
     const group = M.groupOfTab(st.tab);
-    if (navTop) {
-      clear(navTop);
-      for (const g of M.MENU) {
-        if (g.module && !(ctx.grafikAcc ? ctx.grafikAcc().competence : false)) continue;
-        navTop.append(h('button', { class: 'btn small' + (!g.module && g.key === group ? ' glow' : ''), title: g.module ? 'Dane pracowników, kompetencje i uprawnienia' : g.label,
-          onclick: () => {
-            if (g.module) return ctx.go(g.module);
-            const last = lsGet('mp.tab.' + g.key, g.tabs[0][0]);
-            st.tab = g.tabs.some(([k]) => k === last) ? last : g.tabs[0][0]; lsSet('mp.tab', st.tab);
-            st.shown = PAGE; st.filters = {}; st.sorts = []; search.value = ''; st.search = ''; draw();
-          } }, g.label));
-      }
-    }
+    drawMistrzNav(ctx, group, (g, tab) => { st.tab = tab; st.shown = PAGE; st.filters = {}; st.sorts = []; search.value = ''; st.search = ''; draw(); });
     clear(tabs);
     const g = M.MENU.find((x) => x.key === group);
     for (const [key, label] of g.tabs) {
@@ -201,11 +189,10 @@ export function mountMistrz(el, ctx) {
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'panel', style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search,
+    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search, tabs,
       h('button', { class: 'btn small', title: 'Wczytaj ponownie dane z bazy', onclick: load }, 'Odśwież'),
       acc.manage ? h('button', { class: 'btn small', title: 'Dane wpisywane z arkusza Google Mistrz_po do bazy (zastępuje dane w bazie)', onclick: () => runImport('sheet') }, 'Import z arkusza') : null,
       printSlot, h('span', { class: 'grow' }), info),
-    tabs,
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kolumny ƒ liczy program z danych w bazie (jak formuły arkusza). Wpisy na razie robi się w arkuszu – potem import aktualizuje bazę.')),
     body);
   draw();

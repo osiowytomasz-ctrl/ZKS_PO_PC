@@ -34,6 +34,10 @@ const mountParts = lazy(() => import('./views/parts.js'), 'mountParts');
 const mountHarmLive = lazy(() => import('./views/harmLive.js'), 'mountHarmLive');
 const mountPlan = lazy(() => import('./views/plan.js'), 'mountPlan');
 const mountHelp = lazy(() => import('./views/help.js'), 'mountHelp');
+const mountHelpFeed = lazy(() => import('./views/help.js'), 'mountHelpFeed');
+const mountHelpChords = lazy(() => import('./views/help.js'), 'mountHelpChords');
+const mountHelpCoords = lazy(() => import('./views/help.js'), 'mountHelpCoords');
+const mountHelpLinear = lazy(() => import('./views/help.js'), 'mountHelpLinear');
 const mountBuilder = lazy(() => import('./views/builder.js'), 'mountBuilder');
 const mountBn = lazy(() => import('./views/bn.js'), 'mountBn');
 const mountDestroyed = lazy(() => import('./views/destroyed.js'), 'mountDestroyed');
@@ -59,9 +63,13 @@ export const MODULES = [
   { id: 'symulator', title: 'Symulator', inHelp: true, web: 'symulator.html' },
   { id: 'symulatornum', title: 'SymulatorNUM', inHelp: true, web: 'symulator-num.html' },
   { id: 'pomiary', title: 'Pomiary', inHelp: true, web: 'karta-pomiaru.html', gas: true },
+  // każdy kalkulator Help to osobny kafelek i osobna aplikacja
+  { id: 'help-posuw', title: 'Posuw dla Rply i Ra', inHelp: true, mount: mountHelpFeed },
+  { id: 'help-ciecwy', title: 'Cięciwy na podziale', inHelp: true, mount: mountHelpChords },
+  { id: 'help-wspolrzedne', title: 'Współrzędne otworów', inHelp: true, mount: mountHelpCoords },
+  { id: 'help-fmm', title: 'F° na Fmm', inHelp: true, mount: mountHelpLinear },
   // Symulator, SymulatorNUM i Pomiary mają przyciski na ekranie Help (inHelp), nie na ekranie głównym.
   // Przyciski ekranu Narzędziownia (nie ma ich na ekranie głównym).
-  { id: 'zakupy', title: 'Zakupy', style: 'accent', perm: 'zakupy', inToolRoom: true, mount: mountZakupy },
   { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', inToolRoom: true, mount: mountBuilder },
   { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
@@ -71,6 +79,7 @@ export const MODULES = [
   { id: 'pomiarowe', title: 'Pomiarowe', style: 'green', inToolRoom: true, mount: mountMeasuring },
   { id: 'zniszczone', title: 'Zniszczone', style: 'green', inToolRoom: true, mount: mountDestroyed },
   { id: 'pomiarowka', title: 'Pomiarówka', style: 'green', inToolRoom: true, disabled: true },
+  { id: 'zakupy', title: 'Zakupy', perm: 'zakupy', inToolRoom: true, mount: mountZakupy },
 ];
 
 /** Kolory pastelowe zakładek Braki i Tablica (ekran główny). */
@@ -126,8 +135,9 @@ function backTarget(id) {
  */
 function topbar(title, showBack) {
   const who = (ctx.user ? `Zalogowano: ${ctx.user.name || ctx.user.email}` : '') + (ctx.version ? `${ctx.user ? '  ·  ' : ''}ZKS PO (PC) wersja ${ctx.version}` : '');
-  const sub = MODULES.find((m) => m.id === current && (m.inToolRoom || m.inHelp || m.inMistrz));
-  const activeMain = sub ? backTarget(current) : current;
+  const curMod = MODULES.find((m) => m.id === current);
+  const sub = curMod && curMod.inHelp ? curMod : null;   // „← Wróć” i tytuł tylko w kafelkach Help; Mistrz i Narzędziownia mają przyciski w drugim rzędzie nagłówka
+  const activeMain = curMod && (curMod.inToolRoom || curMod.inHelp || curMod.inMistrz) ? backTarget(current) : current;
   const navBtn = (label, onclick, { active = false, style = '', color = '', disabled = false, title: tip = '' } = {}) =>
     h('button', { class: 'nav ' + style + (active ? ' on' : ''), style: color ? { background: color } : {}, disabled, title: tip || label, onclick }, label);
   const nav = h('div', { class: 'nav-bar' });
@@ -140,6 +150,13 @@ function topbar(title, showBack) {
   }
   // nagłówek dwa razy wyższy: logo (90% wysokości) po lewej, po prawej dwa rzędy – moduły i (pod nimi) przyciski główne wybranego modułu
   ctx.nav2 = h('div', { class: 'nav-bar nav-bar2' });
+  // Narzędziownia: przyciski podmodułów w drugim rzędzie (jak w Mistrzu), w kolorze przycisku modułu; wybrany – zielona poświata
+  if (activeMain === 'narzedziownia') {
+    for (const m of MODULES.filter((x) => x.inToolRoom)) {
+      const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
+      ctx.nav2.append(h('button', { class: 'btn small' + (m.id === current ? ' glow' : ''), disabled: !!m.disabled || !!denied, title: m.disabled ? 'Moduł w budowie' : denied ? `${m.title}: brak uprawnień` : m.title, onclick: () => go(m.id) }, m.title));
+    }
+  }
   return h('div', { class: 'topbar' },
     h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),
     h('div', { class: 'tb-main' },
@@ -155,6 +172,13 @@ function topbar(title, showBack) {
 }
 
 export function go(id) {
+  // Narzędziownia otwiera ostatnio używany podmoduł (przyciski podmodułów są w nagłówku)
+  if (id === 'narzedziownia') {
+    let last = null; try { last = localStorage.getItem('zks.toolroom.last'); } catch { /* bez pamięci */ }
+    const ok = (x) => MODULES.some((m) => m.id === x && m.inToolRoom && !m.disabled);
+    id = ok(last) ? last : 'toolbuilder';
+  }
+  { const m = MODULES.find((x) => x.id === id); if (m && m.inToolRoom) { try { localStorage.setItem('zks.toolroom.last', id); } catch { /* bez pamięci */ } } }
   try { sessionStorage.setItem('zks.current', id); } catch { /* bez pamięci sesji */ }
   if (cleanup) { try { cleanup(); } catch (e) { /* ignorujemy */ } cleanup = null; }
   current = id;

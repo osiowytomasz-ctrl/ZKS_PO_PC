@@ -52,10 +52,12 @@ export const sheetByKey = (k) => SHEETS.find((s) => s.key === k);
  */
 export const MENU = [
   { key: 'dane', label: 'Dane Pracowników', module: 'kompetencje' },
-  { key: 'ktk', label: 'Rejestr KTK', tabs: [['ops', 'Rejestr operacji'], ['docs', 'Rejestr dokumentacji'], ['zkom', 'Z.kom']] },
+  { key: 'ktk', label: 'Rejestr KTK', tabs: [['ops', 'Rejestr operacji'], ['docs', 'Rejestr dokumentacji']] },
   { key: 'detali', label: 'Rejestr Detali', tabs: [['dlist', 'Lista detali'], ['dreg', 'Rejestr detali']] },
   { key: 'archiwa', label: 'Archiwa', tabs: [['opsArch', 'Archiwum rejestru operacji'], ['docsArch', 'Archiwum rejestru dokumentacji'], ['dlistArch', 'Archiwum rejestru detali']] },
 ];
+/** Zakładka arkusza dostępna w menu (Z.kom nie ma przycisku). */
+export const tabInMenu = (tab) => MENU.some((g) => g.tabs && g.tabs.some(([k]) => k === tab));
 /** Grupa menu zawierająca zakładkę [tab] (domyślnie pierwsza grupa z zakładkami). */
 export const groupOfTab = (tab) => (MENU.find((g) => g.tabs && g.tabs.some(([k]) => k === tab)) || MENU.find((g) => g.tabs)).key;
 

@@ -2,18 +2,33 @@ import { h, clear, field } from '../ui.js';
 import * as K from '../logic/help.js';
 import { MODULES } from '../app.js';
 
-/** Help: u góry przyciski Symulator, SymulatorNUM i Pomiary (inHelp), pod nimi kalkulatory. */
-export function mountHelp(el, ctx) {
-  const inp = (ph, value = '') => h('input', { type: 'text', placeholder: ph, value, spellcheck: 'false' });
-  const out = () => h('div', { style: { whiteSpace: 'pre-wrap', margin: '6px 0', fontFamily: 'monospace' } });
-  const show = (box, text, err) => { box.textContent = text; box.style.color = err ? '#b00020' : '#1b5e20'; };
-  const card = (title, ...c) => h('div', { class: 'panel', style: { marginBottom: '12px' } }, h('h2', {}, title), ...c);
+/**
+ * Help: kafelki – Symulator, SymulatorNUM, Pomiary oraz osobny kafelek (i osobny ekran) dla każdego kalkulatora:
+ * Posuw dla Rply i Ra, Cięciwy na podziale, Współrzędne otworów na podziale, F° na Fmm. Kafelki mają kolor przycisku Help.
+ */
+const inp = (ph, value = '') => h('input', { type: 'text', placeholder: ph, value, spellcheck: 'false' });
+const out = () => h('div', { style: { whiteSpace: 'pre-wrap', margin: '6px 0', fontFamily: 'monospace' } });
+const show = (box, text, err) => { box.textContent = text; box.style.color = err ? '#b00020' : '#1b5e20'; };
+const card = (title, ...c) => h('div', { class: 'panel', style: { marginBottom: '12px' } }, h('h2', {}, title), ...c);
+const page = (el, node) => el.append(h('div', { style: { maxWidth: '760px', margin: '0 auto' } }, node, h('p', { class: 'muted' }, 'Pola przyjmują wyrażenia jak w arkuszu, np. pi*100, 360/8, sqrt(2).')));
 
+/** Ekran Help: siatka kafelków (każdy mały help to osobna aplikacja). */
+export function mountHelp(el, ctx) {
+  const modules = h('div', { class: 'grid-modules', style: { maxWidth: '760px' } },
+    ...MODULES.filter((m) => m.inHelp).map((m) => h('button', { class: 'mod ' + (m.style || ''), disabled: !!m.disabled, onclick: () => ctx.go(m.id) }, m.title)));
+  el.append(h('div', { style: { maxWidth: '760px', margin: '0 auto' } }, modules));
+}
+
+export function mountHelpFeed(el, ctx) {
   // Posuw Ra / R
   const ra = inp('np. 1.6', '1.6'), rr = inp('np. 0.8', '0.8'), o1 = out();
   const feedCard = card('Posuw dla Rply i Ra', h('div', { class: 'row' }, field('Ra [µm]', ra), field('R płytki [mm]', rr)),
     h('button', { class: 'btn primary', onclick: () => { const r = K.feed(ra.value, rr.value); show(o1, r.text, r.isError); } }, 'Oblicz posuw'), o1);
 
+  page(el, feedCard);
+}
+
+export function mountHelpChords(el, ctx) {
   // Cięciwy
   const dia = inp('Ø podziału', '100'), n = inp('n otworów', '8'), alpha = inp('α [°]', ''), lock = h('input', { type: 'checkbox' });
   alpha.disabled = true;
@@ -30,6 +45,10 @@ export function mountHelp(el, ctx) {
       show(o2, r.lines.map((l) => `1 → ${l.z ?? '?'}: ${l.text}${l.isError ? '' : ' [mm]'}`).join('\n'), false);
     } }, 'Oblicz'), o2);
 
+  page(el, chordCard);
+}
+
+export function mountHelpCoords(el, ctx) {
   // Współrzędne
   const cd = inp('Ø', '100'), cn = inp('n', '6'), cs = inp('kąt startowy [°]', '0'), ca = inp('α [°]', ''), cl = h('input', { type: 'checkbox' });
   ca.disabled = true; cl.addEventListener('change', () => { ca.disabled = !cl.checked; });
@@ -48,14 +67,15 @@ export function mountHelp(el, ctx) {
         g.fillStyle = 'red'; g.fillText('N' + p.index, 140 + p.x * sc * 1.1 - 8, 140 - p.y * sc * 1.1 + 4); g.fillStyle = '#000'; }
     } }, 'Oblicz'), canvas, o3);
 
+  page(el, coordCard);
+}
+
+export function mountHelpLinear(el, ctx) {
   // F° → Fmm
   const fa = inp('F° [°/min]', '360'), fd = inp('Ø [mm]', '100'), o4 = out();
   const linCard = card('F° na Fmm', h('div', { class: 'row' }, field('F° [°/min]', fa), field('Ø [mm]', fd)),
     h('button', { class: 'btn primary', onclick: () => { const r = K.linearFeed(fa.value, fd.value); show(o4, r.text, r.isError); } }, 'Oblicz Fmm'), o4);
 
-  const modules = h('div', { class: 'grid-modules', style: { maxWidth: '760px' } },
-    ...MODULES.filter((m) => m.inHelp).map((m) => h('button', { class: 'mod ' + (m.style || ''), disabled: !!m.disabled, onclick: () => ctx.go(m.id) }, m.title)));
-
-  el.append(h('div', { style: { maxWidth: '760px', margin: '0 auto' } }, modules,
-    h('p', { class: 'muted' }, 'Pola przyjmują wyrażenia jak w arkuszu, np. pi*100, 360/8, sqrt(2).'), feedCard, chordCard, coordCard, linCard));
+  page(el, linCard);
 }
+

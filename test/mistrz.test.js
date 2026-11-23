@@ -67,7 +67,7 @@ test('Kolory jak formatowanie warunkowe arkusza', async () => {
 test('menu Mistrza: grupy i zakładki podrzędne, każda zakładka arkusza dostępna', () => {
   assert.deepEqual(MENU.map((g) => g.label), ['Dane Pracowników', 'Rejestr KTK', 'Rejestr Detali', 'Archiwa']);
   const keys = MENU.flatMap((g) => (g.tabs || []).map(([k]) => k));
-  assert.deepEqual([...keys].sort(), SHEETS.map((s) => s.key).sort());
+  assert.deepEqual([...keys].sort(), SHEETS.map((s) => s.key).filter((k) => k !== 'zkom').sort());   // Z.kom bez przycisku
   assert.equal(groupOfTab('dlist'), 'detali'); assert.equal(groupOfTab('docsArch'), 'archiwa'); assert.equal(groupOfTab('nieznana'), 'ktk');
   assert.equal(MENU[0].module, 'kompetencje');
 });
