@@ -1,7 +1,7 @@
 // Mistrz PO: formuły arkusza liczone w programie (dane wymyślone – bez danych z pliku produkcyjnego).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeOps, computeDocs, computeDetailReg, computeDetailList, computeZkom, computeAll, rowsFromGrid, xlsxValue, looseKey, sheetByKey, sheetColumns, cellText, detailQr, stamp } from '../src/renderer/js/logic/mistrz.js';
+import { computeOps, computeDocs, computeDetailReg, computeDetailList, computeZkom, computeAll, rowsFromGrid, xlsxValue, looseKey, sheetByKey, sheetColumns, cellText, detailQr, stamp, MENU, SHEETS, groupOfTab } from '../src/renderer/js/logic/mistrz.js';
 
 const row = (n, v) => ({ row: n, v });
 const op = (n, A, B, C, D, E, I) => row(n, { A, B, C, D, E, I });
@@ -62,4 +62,12 @@ test('Kolory jak formatowanie warunkowe arkusza', async () => {
   assert.deepEqual(cellColor('ops', { D: '1', E: 10 }, 'E', { D: '1', E: 40 }), ['#ff00ff', '']);
   assert.deepEqual(cellColor('docs', { C: 'A', K: '1 / 4', M: 0.25 }, 'B'), ['#ff9900', '']); assert.deepEqual(cellColor('docs', { C: 'A', K: 'Ar :4 / 4', M: 1 }, 'B'), ['#666666', '#ffffff']);
   assert.deepEqual(cellColor('dreg', { J: 4, K: 4 }, 'A'), ['#93c47d', '#000000']); assert.deepEqual(cellColor('dlist', { B: 'x', L: 0.5 }, 'C'), ['#ff0000', '#ffffff']);
+});
+
+test('menu Mistrza: grupy i zakładki podrzędne, każda zakładka arkusza dostępna', () => {
+  assert.deepEqual(MENU.map((g) => g.label), ['Dane Pracowników', 'Rejestr KTK', 'Rejestr Detali', 'Archiwa']);
+  const keys = MENU.flatMap((g) => (g.tabs || []).map(([k]) => k));
+  assert.deepEqual([...keys].sort(), SHEETS.map((s) => s.key).sort());
+  assert.equal(groupOfTab('dlist'), 'detali'); assert.equal(groupOfTab('docsArch'), 'archiwa'); assert.equal(groupOfTab('nieznana'), 'ktk');
+  assert.equal(MENU[0].module, 'kompetencje');
 });

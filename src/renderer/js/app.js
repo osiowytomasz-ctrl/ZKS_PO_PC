@@ -73,6 +73,9 @@ export const MODULES = [
   { id: 'pomiarowka', title: 'Pomiarówka', style: 'green', inToolRoom: true, disabled: true },
 ];
 
+/** Kolory pastelowe zakładek Braki i Tablica (ekran główny). */
+const TAB_COLORS = { braki: '#f8c8e8', workflow: '#e8d5b5' };
+
 export const ctx = {
   version: '',         // numer wersji programu PC (np. 1.1.0)
   user: null,          // { email, name, roles, permissions }
@@ -132,17 +135,23 @@ function topbar(title, showBack) {
     const denied = m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
     nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: 'pastel', color: m.color, disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
   }
-  for (const [tab, label, color] of [['braki', 'Braki', '#f8c8e8'], ['workflow', 'Tablica', '#e8d5b5']]) {
+  for (const [tab, label, color] of [['braki', 'Braki', TAB_COLORS.braki], ['workflow', 'Tablica', TAB_COLORS.workflow]]) {
     nav.append(navBtn(label, () => { ctx.homeTab = tab; go('home'); }, { active: current === 'home' && (ctx.homeTab || 'braki') === tab, style: 'pastel', color, title: label === 'Braki' ? 'Braki części' : 'Tablica – zadania (Workflow)' }));
   }
+  // nagłówek dwa razy wyższy: logo (90% wysokości) po lewej, po prawej dwa rzędy – moduły i (pod nimi) przyciski główne wybranego modułu
+  ctx.nav2 = h('div', { class: 'nav-bar nav-bar2' });
   return h('div', { class: 'topbar' },
     h('img', { class: 'brand', src: 'img/logo.png', alt: 'ZKS PO', title: 'ZKS PO – Braki części', onclick: () => { ctx.homeTab = 'braki'; go('home'); } }),
-    nav,
-    sub ? h('span', { class: 'sub' }, h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć'), h('b', {}, title)) : null,
-    h('span', { class: 'grow' }),
-    ctx.user ? bellButton(ctx) : null,
+    h('div', { class: 'tb-main' },
+      h('div', { class: 'tb-row' },
+        nav,
+        h('span', { class: 'grow' }),
+        ctx.user ? bellButton(ctx) : null,
         h('span', { class: 'who' }, who),
-    current !== 'settings' ? h('button', { onclick: () => go('settings') }, 'Ustawienia') : null);
+        current !== 'settings' ? h('button', { onclick: () => go('settings') }, 'Ustawienia') : null),
+      h('div', { class: 'tb-row' },
+        sub ? h('span', { class: 'sub' }, h('button', { onclick: () => go(backTarget(current)), title: 'Wróć' }, '← Wróć'), h('b', {}, title)) : null,
+        ctx.nav2)));
 }
 
 export function go(id) {
@@ -163,6 +172,12 @@ export function go(id) {
     else if (mod && mod.web) mount = (el, c) => mountWeb(el, c, mod);
     else mount = (el, c) => mountPlaceholder(el, c, mod);
   }
+  // przyciski w module mają kolor przycisku modułu (podmoduły Narzędziowni, Helpu i Mistrza – kolor modułu nadrzędnego)
+  const own = MODULES.find((m) => m.id === id);
+  const parent = own && (own.inToolRoom || own.inHelp || own.inMistrz) ? MODULES.find((m) => m.id === backTarget(id)) : own;
+  const modColor = id === 'home' ? (ctx.homeTab === 'workflow' ? TAB_COLORS.workflow : TAB_COLORS.braki) : parent && parent.color;
+  root.style.setProperty('--modcolor', modColor || '');
+  if (modColor) screen.classList.add('themed');
   root.append(topbar(title, id !== 'home'), screen);
   document.title = id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
   const result = mount(screen, ctx);

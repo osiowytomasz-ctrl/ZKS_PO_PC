@@ -46,6 +46,19 @@ export const SHEETS = [
 ];
 export const sheetByKey = (k) => SHEETS.find((s) => s.key === k);
 
+/**
+ * Menu modułu Mistrz: przyciski główne (w nagłówku) i podrzędne (pod nagłówkiem, tam gdzie dawniej były zakładki).
+ * „Dane Pracowników” otwiera moduł Kompetencje ([module]); pozostałe grupy pokazują zakładki arkusza (key z SHEETS).
+ */
+export const MENU = [
+  { key: 'dane', label: 'Dane Pracowników', module: 'kompetencje' },
+  { key: 'ktk', label: 'Rejestr KTK', tabs: [['ops', 'Rejestr operacji'], ['docs', 'Rejestr dokumentacji'], ['zkom', 'Z.kom']] },
+  { key: 'detali', label: 'Rejestr Detali', tabs: [['dlist', 'Lista detali'], ['dreg', 'Rejestr detali']] },
+  { key: 'archiwa', label: 'Archiwa', tabs: [['opsArch', 'Archiwum rejestru operacji'], ['docsArch', 'Archiwum rejestru dokumentacji'], ['dlistArch', 'Archiwum rejestru detali']] },
+];
+/** Grupa menu zawierająca zakładkę [tab] (domyślnie pierwsza grupa z zakładkami). */
+export const groupOfTab = (tab) => (MENU.find((g) => g.tabs && g.tabs.some(([k]) => k === tab)) || MENU.find((g) => g.tabs)).key;
+
 /** Kolumny zakładki w kolejności liter (wpisywane i liczone) – jak w pliku. */
 export function sheetColumns(sh) {
   const letters = [...new Set([...sh.input, ...Object.keys(sh.calc)])].sort((a, b) => colNum(a) - colNum(b));
