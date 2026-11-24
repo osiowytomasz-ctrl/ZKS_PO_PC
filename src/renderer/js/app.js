@@ -211,6 +211,8 @@ export function go(id) {
 window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.reason && e.reason.message || e.reason), true); });
 
 (async () => {
+  // adres API trzymany jest w bazie: przy starcie przyjmujemy nowszy (PC administratora go zapisuje) – patrz linkStore.js
+  try { await window.zks.syncLink(false); } catch { /* bez połączenia zostaje adres lokalny */ }
   const cfg = await window.zks.getSettings();
   try { ctx.version = (await window.zks.appVersion?.()) || ''; } catch { ctx.version = ''; }
   if (cfg.url && cfg.key) await ctx.loadUser();
@@ -222,6 +224,9 @@ window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.rea
   if (cfg.url && cfg.key) {
     preload(); apiCached('getProductCodes', [], () => {}).catch(() => {});
     startWfNotify(ctx);   // dzwoneczek Workflow
+    // administrator (GOD): lokalny adres API różny od zapisanego w bazie trafia do bazy (jedno miejsce prawdy dla PC i telefonów)
+    if (ctx.user && grafikLevelOf(ctx.user) === 'god') import('./linkStore.js').then(({ publishIfDiffers }) => publishIfDiffers(cfg.url, ctx.user.name || ctx.user.email))
+      .then((r) => { if (r && r.changed) toast(`Adres API zapisany w bazie (wersja ${r.ver}) – inne programy pobiorą go przy starcie`); }).catch(() => {});
     import('./views/presence.js').then(({ mountPresence }) => mountPresence(ctx)).catch(() => {});   // status i dostępność pracowników (prawy dolny róg)
     import('./prefetch.js').then(({ startBackgroundRefresh }) => startBackgroundRefresh(() => !ctx.user || (ctx.user.permissions || {}).grafik !== 'none')).catch(() => {});
   }

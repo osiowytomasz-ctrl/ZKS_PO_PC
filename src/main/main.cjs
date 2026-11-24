@@ -5,6 +5,7 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 const crypto = require('crypto');
 const { callApi } = require('./apiCore.cjs');
+const AL = require('./apiLink.cjs');
 const { createStore } = require('./settings.cjs');
 
 const WEB_SCHEME = 'zks-web';
@@ -98,6 +99,22 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(file).toString());
   });
 
+  // Adres API z bazy (app_config/api): przyjmowany przy starcie i po nieudanym połączeniu (patrz apiLink.cjs)
+  let lastRelink = 0;
+  const syncLink = async (force = false) => {
+    const r = await AL.fetchRemoteLink((u, o) => net.fetch(u, o));
+    if (!r.ok) return { ok: false, changed: false };
+    const cur = store.load();
+    if (r.link && AL.shouldAdopt(r.link, cur, force)) {
+      store.save({ url: AL.normalizeLink(r.link.url), key: cur.key, linkVer: r.link.ver });
+      return { ok: true, changed: true, link: r.link };
+    }
+    if (r.link && AL.normalizeLink(r.link.url) === AL.normalizeLink(cur.url) && r.link.ver !== cur.linkVer) store.save({ url: cur.url, key: cur.key, linkVer: r.link.ver });
+    return { ok: true, changed: false, link: r.link };
+  };
+  ipcMain.handle('link:sync', (_e, force) => syncLink(!!force));
+  ipcMain.handle('link:remote', async () => (await AL.fetchRemoteLink((u, o) => net.fetch(u, o))));
+  ipcMain.handle('link:check', (_e, text) => AL.checkLink(text));
   ipcMain.handle('settings:get', () => store.load());
   ipcMain.handle('settings:save', (_e, cfg) => { store.save(cfg || {}); return true; });
   ipcMain.handle('api:call', (_e, fn, args, opts) => {
@@ -106,7 +123,14 @@ app.whenReady().then(() => {
     }
     const timeoutMs = opts && Number.isFinite(opts.timeoutMs) ? Math.min(opts.timeoutMs, 600000) : undefined;
     const list = Array.isArray(args) ? args : [];
-    return callApi(store.load(), fn, list, { fetch: (u, o) => net.fetch(u, o), timeoutMs }).then((r) => {
+    const run = () => callApi(store.load(), fn, list, { fetch: (u, o) => net.fetch(u, o), timeoutMs });
+    // samonaprawa: po błędzie połączenia / odpowiedzi nie-API sprawdzamy, czy w bazie jest nowszy adres (najwyżej raz na 2 minuty) i ponawiamy
+    const heal = (r) => {
+      if (r.ok || !/^(NETWORK|BAD_URL|BAD_RESPONSE|HTTP_)/.test(r.code || '') || Date.now() - lastRelink < 120000) return Promise.resolve(r);
+      lastRelink = Date.now();
+      return syncLink(true).then((s) => (s.changed ? run() : r));
+    };
+    return run().then(heal).then((r) => {
       if (r.ok && opts && opts.cache) {
         try {
           const f = cacheFile(fn, (opts && Array.isArray(opts.cacheArgs)) ? opts.cacheArgs : list);

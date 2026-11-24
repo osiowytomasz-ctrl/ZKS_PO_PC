@@ -1,4 +1,4 @@
-import { h, field, api, toast, confirmBox } from '../ui.js';
+import { h, field, api, toast, confirmBox, modal } from '../ui.js';
 import { permissionsSummary } from '../logic/common.js';
 import { firebase, resetFirestoreCache } from '../fb.js';
 import { defaultRange } from '../logic/grafik.js';
@@ -11,6 +11,7 @@ import { importKartyFromSheet } from '../pomiaryStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
 import { openUsersAdmin } from './usersAdmin.js';
+import { publishLink, readLinkHistory } from '../linkStore.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -19,12 +20,30 @@ export async function mountSettings(el, ctx) {
   const show = h('input', { type: 'checkbox', onchange: () => { key.type = show.checked ? 'text' : 'password'; } });
   const status = h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } });
 
+  const isAdmin = () => grafikLevelOf(ctx.user) === 'god';
+  // Adres API jest w bazie: zwykły użytkownik go nie wpisuje (program pobiera go sam przy starcie i po błędzie połączenia),
+  // zapisuje go administrator (GOD) z programu PC. Pole jest zablokowane tylko, gdy wiemy, że to nie administrator.
+  const linkInfo = h('div', { class: 'muted', style: { fontSize: '12px', margin: '2px 0 6px' } });
+  const paintLink = async () => {
+    let r = null; try { r = await window.zks.remoteLink(); } catch { /* bez połączenia */ }
+    const l = r && r.ok ? r.link : null;
+    const locked = !!l && !!ctx.user && !isAdmin();
+    url.disabled = locked;
+    linkInfo.textContent = !r || !r.ok ? 'Adres z bazy: brak połączenia z bazą – używany jest adres zapamiętany w programie.'
+      : !l ? 'Adres z bazy: jeszcze nie zapisany. Administrator (GOD) wpisuje go tu raz i zapisuje – potem wszystkie programy pobierają go z bazy.'
+      : `Adres z bazy: wersja ${l.ver}, zapisał ${l.updatedBy || '—'}, ${l.updatedAt ? new Date(l.updatedAt).toLocaleString('pl-PL') : ''}. ` + (locked ? 'Program pobiera go automatycznie – nie trzeba nic wpisywać.' : '');
+  };
   const save = async () => {
+    if (url.value.trim()) {
+      const c = await window.zks.checkLink(url.value);
+      if (!c.ok) { status.className = 'err'; status.textContent = c.error; throw new Error(c.error); }
+      url.value = c.url;
+    }
     await window.zks.saveSettings({ url: url.value, key: key.value });
     toast('Zapisano ustawienia');
   };
   const check = async () => {
-    await save();
+    try { await save(); } catch { return; }
     status.className = 'muted'; status.textContent = 'Sprawdzanie połączenia…';
     try {
       const user = await ctx.loadUser({ fresh: true });
@@ -32,6 +51,16 @@ export async function mountSettings(el, ctx) {
       status.className = ''; status.style.color = '#1b5e20';
       const gl = user.grafikLevel ? `${String(user.grafikLevel).toUpperCase()} (z kolumny „Grafik dostęp”)` : `serwer nie podaje poziomu – w Apps Script nie ma nowej wersji Api.gs i Firebase.gs (program przyjmuje ${grafikAccess(grafikLevelOf(user)).label} z kolumny „Grafik”)`;
       status.textContent = `Połączono jako ${user.name || user.email} (${user.email}).\nUprawnienia: ${permissionsSummary(user.permissions)}\nGrafik i Kompetencje: ${gl}`;
+      if (isAdmin()) {
+        // administrator: poprawny, działający adres zapisujemy w bazie (bez duplikatów) – stąd czytają go wszystkie programy
+        try {
+          const c = await window.zks.checkLink(url.value);
+          const r = await publishLink(c.url, user.name || user.email);
+          await window.zks.syncLink(false);
+          status.textContent += r.changed ? `\nAdres API zapisany w bazie (wersja ${r.ver}). Inne programy pobiorą go przy starcie.` : `\nAdres API jest już zapisany w bazie (wersja ${r.ver}).`;
+        } catch (e2) { status.textContent += '\nNie udało się zapisać adresu w bazie: ' + (e2.code || '') + ' ' + (e2.message || e2); }
+      }
+      paintLink();
     } catch (e) {
       status.className = 'err'; status.textContent = e.message;
     }
@@ -79,6 +108,10 @@ export async function mountSettings(el, ctx) {
     h('h2', {}, 'Połączenie z serwerem'),
     h('p', { class: 'muted' }, 'Adres i klucz są te same co w aplikacji na telefonie. Klucz jest przechowywany w pliku szyfrowanym przez system (gdy system to umożliwia) i jest wysyłany wyłącznie w treści żądania do podanego adresu.'),
     field('Adres API (…/exec)', url),
+    linkInfo,
+    isAdmin() ? h('button', { class: 'btn small', style: { marginBottom: '6px' }, title: 'Ostatnie zapisane adresy API (kto i kiedy)', onclick: async () => {
+      try { const hist = await readLinkHistory(10); const m = modal('Historia adresów API', h('div', {}, ...(hist.length ? hist.map((x) => h('div', { style: { fontFamily: 'monospace', fontSize: '12px', margin: '4px 0', wordBreak: 'break-all' } }, `v${x.ver} · ${new Date(x.ts).toLocaleString('pl-PL')} · ${x.by || '—'}\n${x.url}`)) : [h('p', {}, 'Brak wpisów.')]), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true }); }
+      catch (e) { toast('Nie wczytano historii: ' + (e.message || e), true); } } }, 'Historia adresów') : null,
     field('Klucz użytkownika', key),
     h('label', { class: 'row muted' }, show, 'Pokaż klucz'),
     h('div', { class: 'row', style: { marginTop: '10px' } },
@@ -93,6 +126,7 @@ export async function mountSettings(el, ctx) {
         await resetFirestoreCache('ręcznie z Ustawień', true);
       } }, 'Wyczyść pamięć bazy')),
     status, speed, fbOut,
+    (paintLink(), null),
     // Dostęp: klucze do programu (administrator) i kody do Grafiku na telefonie (MASTER, GOD)
     cfg.url && cfg.key && (grafikAccess(grafikLevelOf(ctx.user)).manage) ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Dostęp'),
       h('p', { class: 'muted' }, 'Klucze dostępu do programu (PC i Android) nadaje administrator. Kody iPhone – osobiste kody pracowników do Grafiku i Planu do wglądu w przeglądarce telefonu (strona …/exec?p=grafik).'),

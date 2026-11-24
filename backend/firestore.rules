@@ -25,6 +25,7 @@ service cloud.firestore {
     function grl() { return request.auth == null ? 'none' : tok().get('grl', grlLegacy()); }
     function grView() { return grl() in ['tourist', 'clerik', 'master', 'god']; }
     function grCells() { return grl() in ['clerik', 'master', 'god']; }      // wpisy zmian i komentarze
+    function isGrGod() { return grl() == 'god'; }                            // administrator (adres API)
     function grManage() { return grl() in ['master', 'god']; }               // pracownicy, urlopy, Kompetencje, święta
     function grRead() { return grView() || planLvl() in ['read', 'write'] || canView(); }
     // tylko nowe klucze w mapie ops (bez zmiany i usuwania istniejących operacji)
@@ -191,6 +192,25 @@ service cloud.firestore {
     // Kompetencje operatorów (kp/main: dane, uprawnienia, matryca umiejętności) – dane kadrowe: tylko MASTER i GOD Grafiku
     match /kp/{doc} {
       allow read, write: if grManage();
+    }
+
+    // Adres API (wdrożenie Apps Script) – jedno miejsce prawdy dla PC i telefonów. Odczyt bez logowania (program musi znać adres, żeby się
+    // zalogować; adres nie jest tajny – dane chroni klucz użytkownika). Zapis tylko GOD, adres musi wyglądać jak wdrożenie Apps Script.
+    function apiLinkOk() {
+      return request.resource.data.url is string
+        && request.resource.data.url.matches('https://script\\.google\\.com/.*/exec')
+        && request.resource.data.ver is int;
+    }
+    match /app_config/{doc} {
+      allow read: if true;
+      allow create, update: if isGrGod() && doc == 'api' && apiLinkOk();
+      allow delete: if false;
+    }
+    // historia adresów: tylko dopisywanie (bez zmian i usuwania), odczyt GOD
+    match /app_config_history/{ver} {
+      allow read: if isGrGod();
+      allow create: if isGrGod() && request.resource.data.url is string;
+      allow update, delete: if false;
     }
 
     // test połączenia z Ustawień aplikacji PC

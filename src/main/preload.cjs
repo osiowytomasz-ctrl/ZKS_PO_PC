@@ -4,6 +4,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('zks', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (cfg) => ipcRenderer.invoke('settings:save', cfg),
+  syncLink: (force) => ipcRenderer.invoke('link:sync', !!force),       // przyjęcie adresu API z bazy (jeśli nowszy)
+  remoteLink: () => ipcRenderer.invoke('link:remote'),                  // aktualny wpis z bazy: { ok, link }
+  checkLink: (text) => ipcRenderer.invoke('link:check', text),         // składnia adresu: { ok, url | error }
   call: (fn, args, opts) => ipcRenderer.invoke('api:call', fn, args || [], opts || {}),
   cacheGet: (fn, args) => ipcRenderer.invoke('cache:get', fn, args || []),
   cacheClear: () => ipcRenderer.invoke('cache:clear'),
