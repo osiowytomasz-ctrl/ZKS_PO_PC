@@ -24,7 +24,8 @@ export function parseTsv(text) {
  * [body] – przewijany kontener (tabela rysowana w środku). Opcje:
  *  - text(row, col) – tekst komórki; editable(row, col) – czy wolno edytować;
  *  - commit(changes) → Promise<[{ ok, text?, error? }]> – zapis; changes = [{ row, col, text, expect }] (expect – dotychczasowy tekst);
- *  - onRowHeader(row) – kliknięcie numeru wiersza; listId – id datalisty podpowiedzi dla kolumn z `list: true`.
+ *  - onRowHeader(row) – kliknięcie numeru wiersza; listId – id datalisty podpowiedzi dla kolumn z `list: true`;
+ *  - kolumna może mieć start(tekst, wpisanyZnak) → { value, caret } (początkowa treść edycji; caret null – zaznacz całość, -1 – na końcu).
  * Zwraca { render(cols, rows, thead), repaint(), active() }.
  */
 export function createCellGrid({ body, text, editable, commit, onRowHeader, listId, readOnlyNote = 'Tylko odczyt' }) {
@@ -91,13 +92,16 @@ export function createCellGrid({ body, text, editable, commit, onRowHeader, list
     if (!editable(row, col)) { toast(readOnlyNote); return; }
     const td = cellEl(s.r1, s.c1); if (!td) return;
     const r = td.getBoundingClientRect(), b = body.getBoundingClientRect();
-    const input = h('input', { value: typed != null ? typed : text(row, col), list: col.list ? listId : null, autocomplete: 'off', style: {
+    // kolumna może narzucić początkową treść i pozycję kursora (np. ZMW: numer wpisuje się przed „/MM/RR”)
+    const init = col.start ? col.start(text(row, col), typed) : { value: typed != null ? typed : text(row, col), caret: typed != null ? -1 : null };
+    const input = h('input', { value: init.value, list: col.list ? listId : null, autocomplete: 'off', style: {
       position: 'absolute', zIndex: 10, left: r.left - b.left + body.scrollLeft + 'px', top: r.top - b.top + body.scrollTop + 'px',
       width: Math.max(r.width, 90) + 'px', height: r.height + 'px', boxSizing: 'border-box', border: '2px solid #0b57d0', padding: '0 4px', font: 'inherit', background: '#fff' } });
     st.editing = { r: s.r1, c: s.c1, input };
     body.style.position = body.style.position || 'relative';
     body.append(input); input.focus();
-    if (typed == null) input.select(); else input.setSelectionRange(input.value.length, input.value.length);
+    if (init.caret === null || init.caret === undefined) input.select();
+    else { const c = init.caret < 0 ? input.value.length : Math.min(init.caret, input.value.length); input.setSelectionRange(c, c); }
     const finish = (commitIt, move) => {
       if (!st.editing || st.editing.input !== input) return;
       const { r: rr, c: cc } = st.editing; st.editing = null; const v = input.value; input.remove(); body.focus();

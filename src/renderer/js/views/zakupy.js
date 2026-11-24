@@ -153,7 +153,7 @@ export function mountZakupy(el, ctx) {
   function realizeDialog(row) {
     const kod = codeField(row.columnC);
     const mk = (v) => h('input', { type: 'text', value: v });
-    const ilosc = mk(row.columnD), zakup = h('input', { type: 'date', value: toIsoDate(row.columnB) }), cena = mk(row.columnF), pz = mk(row.columnE);
+    const ilosc = mk(row.columnD), zakup = h('input', { type: 'date', value: toIsoDate(row.columnB) || todayIso() }), cena = mk(row.columnF), pz = mk(row.columnE);
     pz.placeholder = 'numer PZ albo x (odebrane bez PZ)';
     const uwagi = h('textarea', { rows: 2 }, row.columnL);
     const err = h('div', { class: 'err' });
@@ -200,6 +200,7 @@ export function mountZakupy(el, ctx) {
       err, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), saveBtn)), { wide: true });
   }
 
+  const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // data zakupu uzupełnia się sama (dziś)
   const toIsoDate = (raw) => { const d = parseDate(raw); return d ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}` : ''; };
   const isoToPl = (iso) => { const [y, mo, d] = iso.split('-'); return `${d}.${mo}.${y}`; };
 
@@ -211,21 +212,29 @@ export function mountZakupy(el, ctx) {
   async function addDialog() {
     await ensureCodes();
     let draft = loadDraft();
-    const widths = { kod: 140, ilosc: 70, zmw: 110, opis: 260, uwagi: 220 };
+    const widths = { kod: 150, ilosc: 80, zmw: 120, opis: 300, uwagi: 240 };
     const labels = { kod: 'Kod', ilosc: 'Ilość', zmw: 'ZMW', opis: 'Opis', uwagi: 'Uwagi' };
     const status = h('div', { class: 'muted', style: { minHeight: '18px' } });
     const dl = h('datalist', { id: 'draftcodes' }, ...(st.codes || []).slice(0, 3000).map((c) => h('option', { value: c })));
-    const tbody = h('tbody', {});
+    // tabela jak w Arkuszach Google (bez filtrowania i sortowania): zaznaczanie, strzałki / Tab / Enter, wpisanie znaku zaczyna edycję, F2 / dwuklik,
+    // Delete, Ctrl+C / X / V (także wklejanie bloku z arkusza), Ctrl+Z / Y; wiersz z zaznaczeniem ma zieloną poświatę
+    const body = h('div', { class: 'table-wrap', style: { maxHeight: '55vh', margin: '6px 0', position: 'relative' } });
+    const cols = Z.DRAFT_FIELDS.map((f) => ({ key: f, title: labels[f], left: f === 'kod' || f === 'opis' || f === 'uwagi', list: f === 'kod',
+      // ZMW: wpisywany numer ląduje przed „/MM/RR”, o ile komórka ma jeszcze sam szablon
+      ...(f === 'zmw' ? { start: (cur, typed) => (Z.isZmwEmpty(cur) ? { value: (typed || '') + cur, caret: typed ? typed.length : 0 } : { value: typed != null ? typed : cur, caret: typed != null ? -1 : null }) } : {}) }));
+    const dgrid = createCellGrid({
+      body, listId: 'draftcodes',
+      text: (row, col) => String(row[col.key] ?? ''),
+      editable: () => true,
+      commit: async (changes) => {
+        for (const ch of changes) ch.row[ch.col.key] = ch.text;
+        saveDraft(draft); status.className = 'muted'; status.textContent = `Wypełnione wiersze: ${Z.filledCount(draft)}`;
+        return changes.map((ch) => ({ ok: true, text: ch.text }));
+      },
+    });
     const draw = () => {
-      clear(tbody);
-      draft.forEach((r, i) => {
-        tbody.append(h('tr', {}, h('td', {}, String(i + 1)), ...Z.DRAFT_FIELDS.map((f) => {
-          const inp = h('input', { type: 'text', value: r[f], list: f === 'kod' ? 'draftcodes' : null, style: { width: widths[f] + 'px', padding: '3px 4px', border: '1px solid #bbb' },
-            oninput: () => { draft[i] = { ...draft[i], [f]: inp.value }; saveDraft(draft); } });
-          return h('td', {}, inp);
-        })));
-      });
-      status.textContent = `Wypełnione wiersze: ${Z.filledCount(draft)}`;
+      dgrid.render(cols, draft, h('tr', {}, ...cols.map((c) => h('th', { style: { width: widths[c.key] + 'px' } }, c.title))));
+      status.className = 'muted'; status.textContent = `Wypełnione wiersze: ${Z.filledCount(draft)}`;
     };
     let m;
     const send = h('button', { class: 'btn primary', onclick: async () => {
@@ -252,11 +261,11 @@ export function mountZakupy(el, ctx) {
       if (sent > 0) load();
       if (failure) { status.className = 'err'; status.textContent = summary; } else { m.close(); toast(summary); }
     } }, 'Wyślij');
-    m = modal('Dodaj zakupy', h('div', {}, h('div', { class: 'muted' }, 'Wpisane dane są zapamiętywane i znikają dopiero po wysłaniu albo wyczyszczeniu. Kod może być pusty; wymagana jest ilość. ZMW: dopisz numer przed „/MM/RR”.'),
-      h('div', { class: 'table-wrap', style: { maxHeight: '55vh', margin: '6px 0' } }, dl, h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, '#'), ...Z.DRAFT_FIELDS.map((f) => h('th', {}, labels[f])))), tbody)),
+    m = modal('Dodaj zakupy', h('div', {}, h('div', { class: 'muted' }, 'Tabela działa jak Arkusze Google (zaznaczanie, wpisywanie, Enter / Tab / strzałki, kopiuj / wklej, cofnij Ctrl+Z). Wpisane dane są zapamiętywane i znikają dopiero po wysłaniu albo wyczyszczeniu. Kod może być pusty; wymagana jest ilość. ZMW: dopisz numer przed „/MM/RR”.'),
+      body, dl,
       status, h('div', { class: 'actions' },
         h('button', { class: 'btn', onclick: async () => { if (await confirmBox('Wyczyścić tabelę?', 'Usunąć wszystkie wpisane dane z tabeli? Tego nie można cofnąć.', 'Usuń')) { draft = Z.emptyDraft(); saveDraft(draft); draw(); } } }, 'Wyczyść'),
-        h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'), send)), { wide: true });
+        h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'), send)), { wide: true, onClose: () => dgrid.destroy() });
     m.root.style.maxWidth = '94vw'; m.root.style.width = '1000px';
     draw();
   }
