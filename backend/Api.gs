@@ -594,7 +594,8 @@ function api_permsFromRow_(row, permCols, email) {
 
 /**
  * Uprawnienie do Zakupów wynika z poziomu w kolumnie „Narzędziownia” (Zakupy są częścią Narzędziowni; pusta komórka = jak „Grafik dostęp”; nie z osobnej kolumny Zakupy): MASTER i GOD – 'write' (wprowadzanie zamówień i
- * zatwierdzanie zakupów), CLERIK, TOURIST i brak – 'none' (moduł Zakupy jest wtedy niewidoczny w programie). Zwraca kopię uprawnień.
+ * zatwierdzanie zakupów), CLERIK, TOURIST i brak – 'none' (moduł Zakupy jest wtedy niewidoczny w programie). GOD w „Grafik dostęp” dostaje też zapis
+ * w Planie i Grafiku. Zwraca kopię uprawnień.
  */
 function api_zakupyFromLevel_(user) {
   var perms = {};
@@ -602,6 +603,9 @@ function api_zakupyFromLevel_(user) {
   var level = typeof api_toolroomLevel_ === 'function' ? api_toolroomLevel_({ email: user.email, permissions: user.perms })
     : (typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none');
   perms.zakupy = (level === 'master' || level === 'god') ? 'write' : 'none';
+  // GOD w „Grafik dostęp” ma dostęp do wszystkiego: Plan i Grafik z zapisem niezależnie od kolumn „Plan” i „Grafik” (np. „Brak” w Plan nie odcina administratora)
+  var gl = typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none';
+  if (gl === 'god') { perms.plan = 'write'; perms.grafik = 'write'; }
   return perms;
 }
 
