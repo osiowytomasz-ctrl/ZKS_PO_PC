@@ -11,6 +11,7 @@
  *   plan: 'none'|'read'|'write', grafik: 'none'|'read'|'write',
  *   harm: 'god'|'master'|'clerik'|'tourist'|'none' — poziom dostępu do Harmonogramu.
  *   grl:  'god'|'master'|'clerik'|'tourist'|'none' — poziom Grafiku i Kompetencji (kolumna „Grafik dostęp”, opis niżej).
+ *   tl:   'god'|'master'|'clerik'|'tourist'|'none' — poziom w Narzędziowni (kolumna „Narzędziownia”; pusta komórka = jak „Grafik dostęp”).
  *
  * Poziomy Harmonogramu (kolumna „Harmonogram” w zakładce Uzytkownicy):
  *   GOD     – przeglądanie, dodawanie, edycja, usuwanie, kolory i czcionki operacji, kolory stanowisk, święta
@@ -115,6 +116,36 @@ function api_requireGrafikLevel_(ctx, min) {
   return lv;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Poziom w Narzędziowni (kolumna „Narzędziownia” → claim `tl` w tokenie, pole `toolroomLevel` w api_whoami). Osobny od Grafiku: narzędziowiec ma
+// tu np. GOD, a inne uprawnienia gdzie indziej. Uprawnienia będą rozwijane szczegółowo (na razie opis w src/renderer/js/logic/toolroomAccess.js):
+//   GOD – wszystko w Narzędziowni, w tym edycja konturów i układu płytek; MASTER – przegląda wszystko, składa narzędzia, pożycza (ToolTrack), Zakupy;
+//   CLERIK – ToolBuilder, Assem.Tool, ToolTrack, Części; TOURIST i brak – bez Narzędziowni i Zakupów.
+// Pusta komórka (albo brak kolumny): poziom jest taki jak w „Grafik dostęp” (żeby nic się nie zmieniło, dopóki kolumna nie jest wypełniona).
+// ---------------------------------------------------------------------------------------------------------------------
+var TOOLROOM_LEVEL_COLUMN = 'Narzędziownia';
+
+function api_toolroomLevel_(ctx) {
+  var email = String((ctx && ctx.email) || '').trim().toLowerCase();
+  var level = api_levelColumn_(TOOLROOM_LEVEL_COLUMN)[email];
+  if (level) return level;
+  return api_grafikLevel_(ctx);
+}
+
+/** Jednorazowo (z edytora): kolumna „Narzędziownia” z listą wyboru GOD / MASTER / CLERIK / TOURIST / ---. Pusta komórka = poziom z „Grafik dostęp”. */
+function api_setupToolroomLevelColumn() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
+  if (!sheet) throw new Error('Brak zakładki ' + API_USERS_SHEET);
+  var lastCol = sheet.getLastColumn();
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+  var col = header.indexOf(TOOLROOM_LEVEL_COLUMN.toLowerCase()) + 1;
+  if (!col) { col = lastCol + 1; sheet.getRange(1, col).setValue(TOOLROOM_LEVEL_COLUMN).setFontWeight('bold'); }
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(['GOD', 'MASTER', 'CLERIK', 'TOURIST', '---'], true).setAllowInvalid(false).build();
+  sheet.getRange(2, col, rows, 1).setDataValidation(rule);
+  return 'Kolumna „' + TOOLROOM_LEVEL_COLUMN + '” w kolumnie ' + col + ' zakładki ' + API_USERS_SHEET;
+}
+
 /** Jednorazowo (z edytora): kolumna „Grafik dostęp” z listą wyboru GOD / MASTER / CLERIK / TOURIST / ---. */
 function api_setupGrafikLevelColumn() {
   var sheet = SpreadsheetApp.getActive().getSheetByName(API_USERS_SHEET);
@@ -141,6 +172,7 @@ function api_firebaseToken_(ctx) {
   var perms = (ctx && ctx.permissions) || {};
   var harm = api_harmLevel_(ctx);
   var grl = api_grafikLevel_(ctx);
+  var tl = api_toolroomLevel_(ctx);
   var uid = Utilities.base64EncodeWebSafe(
     Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(ctx.email || ctx.name || 'user'))
   ).replace(/=+$/, '').slice(0, 28);
@@ -153,11 +185,11 @@ function api_firebaseToken_(ctx) {
     iat: now,
     exp: now + 3600,
     uid: uid,
-    claims: { plan: perms.plan || 'none', grafik: perms.grafik || 'none', harm: harm, grl: grl, name: ctx.name || '' }
+    claims: { plan: perms.plan || 'none', grafik: perms.grafik || 'none', harm: harm, grl: grl, tl: tl, name: ctx.name || '' }
   }));
   var unsigned = header + '.' + payload;
   var sig = api_b64url_(Utilities.computeRsaSha256Signature(unsigned, key));
-  return { token: unsigned + '.' + sig, projectId: projectId, expiresAt: (now + 3600) * 1000, uid: uid, harm: harm, grl: grl };
+  return { token: unsigned + '.' + sig, projectId: projectId, expiresAt: (now + 3600) * 1000, uid: uid, harm: harm, grl: grl, tl: tl };
 }
 
 /** Test z edytora: wpisz e-mail i uruchom – w dzienniku poziom, jaki dostanie ta osoba. */

@@ -4,6 +4,7 @@
 import { h, clear, api } from '../ui.js';
 import { getSnapshot, putSnapshot } from '../snapStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { toolroomAccess, toolroomLevelOf } from '../logic/toolroomAccess.js';
 import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
@@ -25,7 +26,7 @@ export function mountBn(el, ctx) {
   paintView();
   const refreshBtn = h('button', { class: 'btn', title: 'Połącz z arkuszem BN i pobierz aktualne dane (MASTER / GOD zapisują je w bazie Firebase)', onclick: () => refresh() }, 'Odśwież BN');
 
-  const canStore = grafikAccess(grafikLevelOf(ctx.user)).manage;   // MASTER / GOD zapisują dane BN w bazie Firebase
+  const canStore = toolroomAccess(toolroomLevelOf(ctx.user)).manage;   // MASTER / GOD zapisują dane BN w bazie Firebase
   const when = (m) => new Date(m.updatedAt).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   /** Dane BN z bazy Firebase (zapisane trwale); null – brak. */
   async function loadStored() {

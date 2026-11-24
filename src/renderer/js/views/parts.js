@@ -9,7 +9,7 @@ import { naturalCompare } from '../logic/common.js';
 import { lazyFill, contrast, plateBase, savePlateBase, plateEdge, savePlateEdge } from './toolViews.js';
 import { openPlateEditor } from './plateEditor.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
-import { toolroomAccess } from '../logic/toolroomAccess.js';
+import { toolroomAccess, toolroomLevelOf } from '../logic/toolroomAccess.js';
 import { ndLoad } from '../ndStore.js';
 import { normCode } from '../logic/tooltrack.js';
 import * as V from '../logic/partsView.js';
@@ -31,7 +31,7 @@ export function insertSvg(path, { w = 150, hgt = 120, dims = false } = {}) {
 }
 
 export function mountParts(el, ctx) {
-  const canSave = toolroomAccess(grafikLevelOf(ctx.user)).editPlates;   // układ płytek i parametry – tylko GOD
+  const canSave = toolroomAccess(toolroomLevelOf(ctx.user)).editPlates;   // układ płytek i parametry – tylko GOD
   const st = { index: null, parts: [], q: '', onlyContour: true, company: '', u: '', t: '', sort: 'code', dir: 1, params: {}, stopFill: null };
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' } });
   const info = h('span', { class: 'muted' });

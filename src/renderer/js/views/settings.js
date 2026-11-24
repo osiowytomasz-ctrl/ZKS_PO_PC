@@ -12,7 +12,7 @@ import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
 import { openUsersAdmin } from './usersAdmin.js';
 import { publishLink, readLinkHistory } from '../linkStore.js';
-import { toolroomAccess } from '../logic/toolroomAccess.js';
+import { toolroomAccess, toolroomLevelOf, appAccess } from '../logic/toolroomAccess.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -24,7 +24,7 @@ export async function mountSettings(el, ctx) {
   // poziom: z zalogowanego użytkownika, a gdy serwer nie odpowiada – ostatnio zapamiętany (żeby administrator z nieaktualnym adresem mógł go poprawić)
   let remembered = 'none'; try { remembered = localStorage.getItem('zks.level') || 'none'; } catch { /* bez pamięci */ }
   const levelNow = ctx.user ? grafikLevelOf(ctx.user) : remembered;
-  const acc = toolroomAccess(levelNow);
+  const acc = appAccess(levelNow);   // zakres Ustawień i adres API wg poziomu z „Grafik dostęp”
   const isAdmin = () => acc.apiLink;
   // adres API widzi i zmienia tylko GOD; reszta go nie widzi (program pobiera go z bazy). Wyjątek: gdy w ogóle nie ma adresu, pole jest potrzebne do pierwszego uruchomienia
   const showUrl = acc.apiLink || !cfg.url;
@@ -153,7 +153,7 @@ export async function mountSettings(el, ctx) {
     !limited && cfg.url && cfg.key ? holidaysPanel() : null,
     !limited && cfg.url && cfg.key ? stationsPanel() : null,
     limited ? null : toolLookPanel(),
-    !limited && cfg.url && cfg.key && grafikAccess(grafikLevelOf(ctx.user)).manage ? ndPanel(ctx) : null,
+    !limited && cfg.url && cfg.key && toolroomAccess(toolroomLevelOf(ctx.user)).editContours ? ndPanel(ctx) : null,
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
     !limited && cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
       h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),

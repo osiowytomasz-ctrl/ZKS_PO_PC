@@ -3,7 +3,7 @@ import { h, clear, api, apiCached, toast } from './ui.js';
 import { preload } from './catalog.js';
 import { permissionsSummary } from './logic/common.js';
 import { grafikAccess, grafikLevelOf } from './logic/grafikAccess.js';
-import { toolroomAccess } from './logic/toolroomAccess.js';
+import { toolroomAccess, toolroomLevelOf, appAccess } from './logic/toolroomAccess.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
 import { mountToolRoom } from './views/toolroom.js';
@@ -49,15 +49,15 @@ const mountMeasuring = lazy(() => import('./views/measuring.js'), 'mountMeasurin
  * Moduły w kolejności przycisków górnego paska: Skaner, Grafik, Plan, Harmonogram, Mistrz, Narzędziownia, Help (potem zakładki Braki i Tablica).
  * [color] – pastelowe tło przycisku w pasku. Kompetencje są w module Mistrz (inMistrz), Zakupy w Narzędziowni (inToolRoom).
  */
-/** Dostęp do Narzędziowni, Harmonogramu, Zakupów i Ustawień wg poziomu użytkownika (logic/toolroomAccess.js). */
-export const tra = () => toolroomAccess(grafikLevelOf(ctx.user));
+/** Dostęp do Narzędziowni i Zakupów wg poziomu z kolumny „Narzędziownia” (logic/toolroomAccess.js). */
+export const tra = () => toolroomAccess(toolroomLevelOf(ctx.user));
 
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', color: '#ffd1dc', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', color: '#ffe0b2', perm: 'grafik', mount: mountGrafik },
   { id: 'plan', title: 'Plan', color: '#fff4b0', perm: 'plan', mount: mountPlan },
   // Harmonogram z bazy Firebase (Grafik też z bazy – gr_meta, gr_days); dawny widok z arkusza Google usunięty.
-  { id: 'harmonogram-fb', title: 'Harmonogram', color: '#d4efb9', mount: mountHarmLive, lock: () => !tra().harmonogram },   // TOURIST – przycisk niedostępny
+  { id: 'harmonogram-fb', title: 'Harmonogram', color: '#d4efb9', mount: mountHarmLive, lock: () => !appAccess(grafikLevelOf(ctx.user)).harmonogram },   // TOURIST – przycisk niedostępny
   // Mistrz: zakładki arkusza Mistrz_po z bazy Firebase (kolumny liczone liczy program); od CLERIK, import od MASTER; w środku przycisk Kompetencje
   { id: 'mistrz', title: 'Mistrz', color: '#b9ecd9', perm: 'grafik', mount: mountMistrz, visible: () => grafikAccess(grafikLevelOf(ctx.user)).cells },
   { id: 'narzedziownia', title: 'Narzędziownia', color: '#bfe3f7', mount: mountToolRoom, visible: () => tra().enter },   // TOURIST – bez przycisku i bez wejścia

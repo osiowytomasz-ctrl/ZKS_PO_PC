@@ -593,13 +593,14 @@ function api_permsFromRow_(row, permCols, email) {
 }
 
 /**
- * Uprawnienie do Zakupów wynika z poziomu w kolumnie „Grafik dostęp” (nie z osobnej kolumny Zakupy): MASTER i GOD – 'write' (wprowadzanie zamówień i
+ * Uprawnienie do Zakupów wynika z poziomu w kolumnie „Narzędziownia” (Zakupy są częścią Narzędziowni; pusta komórka = jak „Grafik dostęp”; nie z osobnej kolumny Zakupy): MASTER i GOD – 'write' (wprowadzanie zamówień i
  * zatwierdzanie zakupów), CLERIK, TOURIST i brak – 'none' (moduł Zakupy jest wtedy niewidoczny w programie). Zwraca kopię uprawnień.
  */
 function api_zakupyFromLevel_(user) {
   var perms = {};
   Object.keys(user.perms || {}).forEach(function (k) { perms[k] = user.perms[k]; });
-  var level = typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none';
+  var level = typeof api_toolroomLevel_ === 'function' ? api_toolroomLevel_({ email: user.email, permissions: user.perms })
+    : (typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none');
   perms.zakupy = (level === 'master' || level === 'god') ? 'write' : 'none';
   return perms;
 }
@@ -637,7 +638,9 @@ function api_whoami_(ctx) {
     roles: ctx.roles,
     permissions: ctx.permissions,
     // poziom Grafiku i Kompetencji (Firebase.gs: kolumna „Grafik dostęp”)
-    grafikLevel: typeof api_grafikLevel_ === 'function' ? api_grafikLevel_(ctx) : null
+    grafikLevel: typeof api_grafikLevel_ === 'function' ? api_grafikLevel_(ctx) : null,
+    // poziom w Narzędziowni (Firebase.gs: kolumna „Narzędziownia”; pusta komórka = jak „Grafik dostęp”)
+    toolroomLevel: typeof api_toolroomLevel_ === 'function' ? api_toolroomLevel_(ctx) : null
   };
 }
 

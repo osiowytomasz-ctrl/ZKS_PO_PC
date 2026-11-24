@@ -3,13 +3,14 @@
 import { h, clear, api, toast } from '../ui.js';
 import { getSnapshot, putSnapshot } from '../snapStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { toolroomAccess, toolroomLevelOf } from '../logic/toolroomAccess.js';
 import { colName } from '../logic/planGrid.js';
 import { sheetTable } from './sheetTable.js';
 
 const when = (m) => new Date(m.updatedAt).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function mountProducts(el, ctx) {
-  const canStore = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  const canStore = toolroomAccess(toolroomLevelOf(ctx.user)).manage;
   const table = sheetTable({ storageKey: 'products', defaultVisible: 14 });
   const status = h('span', { class: 'muted' });
   const refreshBtn = h('button', { class: 'btn', title: 'Połącz z kartą PSWT w arkuszu i pobierz aktualne dane' + (canStore ? ' (zapis w bazie Firebase)' : ' (zapis w bazie – MASTER / GOD)'), onclick: () => refresh() }, 'Odśwież z arkusza PSWT');

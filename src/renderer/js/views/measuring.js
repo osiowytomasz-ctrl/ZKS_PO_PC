@@ -4,6 +4,7 @@
 import { h, clear, api, toast, modal } from '../ui.js';
 import { getSnapshot, putSnapshot } from '../snapStore.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { toolroomAccess, toolroomLevelOf } from '../logic/toolroomAccess.js';
 import { colName } from '../logic/planGrid.js';
 import * as M from '../logic/measuring.js';
 import { sheetTable } from './sheetTable.js';
@@ -14,7 +15,7 @@ const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { r
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* bez pamięci */ } };
 
 export function mountMeasuring(el, ctx) {
-  const canStore = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  const canStore = toolroomAccess(toolroomLevelOf(ctx.user)).manage;
   const st = { pom: null, bad: null, meta: null, unit: lsGet('zks.pom.unit', 'auto'), flip: lsGet('zks.pom.flip', '0') === '1', loading: false };
   const status = h('span', { class: 'muted' }), legendBox = h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', alignItems: 'center' } });
   const legendColor = (i) => { const l = st.bad && st.bad.legend && st.bad.legend[i]; return l && l.bg && !/^#?fff(fff)?$/i.test(l.bg) ? { bg: l.bg, fg: l.fg || '#000', text: l.text } : { bg: FALLBACK[i], fg: '#000', text: l ? l.text : '' }; };
