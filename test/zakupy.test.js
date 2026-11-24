@@ -29,7 +29,8 @@ test('edycja: normalizacja daty, PZ i pustych wartości', () => {
   assert.deepEqual(Z.normalizeEdit('zakup', ''), { ok: true, value: '' });
   assert.equal(Z.normalizeEdit('zakup', 'jutro').ok, false);
   assert.deepEqual(Z.normalizeEdit('zmw', ' 12/11/26 '), { ok: true, value: '12/11/26' });
-  assert.equal(Z.normalizeEdit('iloscZamowiona', '1').ok, false);
+  assert.deepEqual(Z.normalizeEdit('iloscZamowiona', ' 2,5 '), { ok: true, value: '2,5' }); assert.equal(Z.normalizeEdit('iloscZamowiona', 'abc').ok, false);   // edycja zamówienia (PPM)
+  assert.equal(Z.normalizeEdit('zamowiono', '1').ok, false);
   assert.ok(Z.editableView('bought') && Z.editableView('nopz') && !Z.editableView('ordered') && !Z.editableView('archive'));
 });
 test('po zmianie PZ pozycja przechodzi między widokami', () => {

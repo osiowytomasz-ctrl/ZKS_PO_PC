@@ -117,6 +117,7 @@ function mp_permsFor_(ctx) {
     var lv = levels[mp_str_(ctx.email).toLowerCase().trim()] || 'none';
     perms.level = lv;
     perms.manage = MP_LEVELS.indexOf(lv) >= MP_LEVELS.indexOf('master');
+    if (perms.manage) perms.details = true;   // MASTER i GOD zawsze mogą dodawać i edytować Listę detali (poza listą z Setup)
   }
   return perms;
 }
@@ -653,7 +654,10 @@ function mp_addDetail_(form, ctx) {
   });
   if (dup) throw new Error('Taki detal jest już na liście (wiersz ' + dup.row + ', ilość zlecona ' + mp_cell_(dup, 'G') + ').');
 
-  var newRow = mp_append_('dlist', { B: komis, D: rysunek, E: pozycja, F: komplet, G: ilosc }, d);
+  var row = { B: komis, D: rysunek, E: pozycja, F: komplet, G: ilosc };
+  if (mp_str_(form.nazwa).trim()) row.C = mp_str_(form.nazwa).trim();      // nazwa elementu (opcjonalnie)
+  if (mp_str_(form.uwagi).trim()) row.O = mp_str_(form.uwagi).trim();      // uwagi (opcjonalnie)
+  var newRow = mp_append_('dlist', row, d);
   return { status: 'success', message: 'Dodano detal do listy w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
 }
 
@@ -682,6 +686,42 @@ function mp_recountDetails_() {
   });
   Object.keys(byChunk).forEach(function (id) { mp_fsPatchChunk_('dlist', id, byChunk[id]); });
   return { checked: list.length, changed: changed, message: 'Przeliczono sztuki zrobione: zmieniono ' + changed + ' z ' + list.length + ' pozycji Listy detali.' };
+}
+
+/**
+ * Edycja jednego wiersza Listy detali (po potwierdzeniu w programie): form = { row, patch: { kolumna: wartość }, expect: { kolumna: dotychczasowa wartość } }.
+ * Edytowalne kolumny: B komis, C nazwa, D nr rysunku, E nr poz., F komplet, G ilość zlecona (całkowita ≥ 1), O uwagi. Zapis tylko, gdy edytowane pola nadal mają
+ * wartości z `expect` (inaczej ktoś zmienił wiersz – odśwież listę). Pozycja nie może dublować innej (komis, rysunek, pozycja, komplet). Uprawnienie details.
+ */
+function mp_updateDetail_(form, ctx) {
+  mp_require_(ctx, 'details');
+  form = form || {};
+  var row = Number(form.row), patch = form.patch || {}, expect = form.expect || {};
+  var allowed = { B: 1, C: 1, D: 1, E: 1, F: 1, G: 1, O: 1 };
+  var cols = Object.keys(patch);
+  if (!isFinite(row) || row < MP_DEF.dlist.first || Math.floor(row) !== row) throw new Error('Nieprawidłowy numer wiersza.');
+  if (!cols.length) throw new Error('Brak zmian do zapisania.');
+  cols.forEach(function (c) { if (!allowed[c]) throw new Error('Tej kolumny nie można edytować: ' + c); });
+  var d = mp_loadKey_('dlist'), target = null;
+  d.rows.forEach(function (r) { if (r.row === row) target = r; });
+  if (!target) throw new Error('Wiersz nie istnieje. Odśwież listę.');
+  cols.forEach(function (c) {
+    if (mp_str_(target.v[c]).trim() !== mp_str_(expect[c]).trim()) throw new Error('Wiersz zmienił się od ostatniego odczytu (kolumna ' + c + '). Odśwież listę.');
+  });
+  var next = {};
+  Object.keys(target.v).forEach(function (c) { next[c] = target.v[c]; });
+  cols.forEach(function (c) { next[c] = mp_str_(patch[c]).trim(); });
+  if (!next.B || !next.D || !next.E || !next.F) throw new Error('Uzupełnij komis, nr rysunku, nr pozycji i nr kompletu.');
+  if ('G' in patch) {
+    var q = Number(mp_str_(next.G).replace(',', '.'));
+    if (mp_str_(next.G) === '' || isNaN(q) || q < 1 || Math.floor(q) !== q) throw new Error('Ilość zlecona musi być liczbą całkowitą większą lub równą 1.');
+    next.G = q;
+  }
+  var key = [next.B, next.D, next.E, next.F].join('|'), dup = null;
+  d.rows.forEach(function (r) { if (!dup && r.row !== row && [mp_cell_(r, 'B'), mp_cell_(r, 'D'), mp_cell_(r, 'E'), mp_cell_(r, 'F')].join('|') === key) dup = r; });
+  if (dup) throw new Error('Taki detal jest już na liście (wiersz ' + dup.row + ').');
+  mp_update_('dlist', target, next);
+  return { status: 'success', message: 'Zapisano zmiany w wierszu ' + row + ' Listy detali przez ' + mp_shortName_(ctx.email) };
 }
 
 // ---------------------------------------------------------------------------

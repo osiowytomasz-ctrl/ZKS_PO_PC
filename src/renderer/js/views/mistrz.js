@@ -5,6 +5,8 @@
 import { h, clear, toast, modal, columnFilterDialog, confirmBox, api } from '../ui.js';
 import * as M from '../logic/mistrz.js';
 import { drawMistrzNav } from './mistrzNav.js';
+import { createCellGrid } from './cellGrid.js';
+import * as DD from '../logic/detailDraft.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { loadMistrz, importFromSheet, importFromXlsx, exportToSheet, loadMarks, setMark, detailKey } from '../mistrzStore.js';
 import { qrSvg } from '../logic/qr.js';
@@ -96,6 +98,73 @@ export function mountMistrz(el, ctx) {
     catch (e) { wait.close(); toast('Eksport nieudany: ' + (e.message || e), 'error'); }
   }
 
+  // ---- Lista detali: dodawanie pozycji (tabela jak „Dodaj zakupy”) i edycja wiersza (PPM + potwierdzenie) ----
+  let canList = !!acc.manage;   // uprawnienie do dodawania / edycji Listy detali (Setup „details” albo MASTER, GOD) – z API mp_getPermissions
+  api('mp_getPermissions', []).then((p) => { canList = !!(p && (p.details || p.manage)) || !!acc.manage; draw(); }).catch(() => {});
+  const DRAFT_KEY = 'zks_mp_detail_draft';
+  const loadDraft = () => { try { return DD.parseDraft(localStorage.getItem(DRAFT_KEY) || '[]'); } catch { return DD.emptyDraft(); } };
+  const saveDraft = (d) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* bez zapisu tabela zostaje w pamięci */ } };
+
+  function addDialog() {
+    let draft = loadDraft();
+    const widths = { komis: 110, rysunek: 140, pozycja: 80, komplet: 90, ilosc: 100, nazwa: 220, uwagi: 200 };
+    const status = h('div', { class: 'muted', style: { minHeight: '18px' } });
+    const body2 = h('div', { class: 'table-wrap', style: { maxHeight: '55vh', margin: '6px 0', position: 'relative' } });
+    const cols = DD.DRAFT_FIELDS.map((f) => ({ key: f, title: DD.LABELS[f], left: f === 'nazwa' || f === 'uwagi' || f === 'rysunek' }));
+    const dgrid = createCellGrid({
+      body: body2,
+      text: (row, col) => String(row[col.key] ?? ''),
+      editable: () => true,
+      commit: async (changes) => { for (const ch of changes) ch.row[ch.col.key] = ch.text; saveDraft(draft); paintStatus(); return changes.map((ch) => ({ ok: true, text: ch.text })); },
+    });
+    const paintStatus = () => { status.className = 'muted'; status.textContent = `Wypełnione wiersze: ${DD.filledCount(draft)}`; };
+    const draw2 = () => { dgrid.render(cols, draft, h('tr', {}, ...cols.map((c) => h('th', { style: { width: widths[c.key] + 'px' } }, c.title)))); paintStatus(); };
+    let m;
+    const send = h('button', { class: 'btn primary', onclick: async () => {
+      const problem = DD.validateDraft(draft);
+      if (problem) { status.className = 'err'; status.textContent = problem; return; }
+      if (!(await confirmBox('Dodać detale do listy?', `Dodać ${DD.filledCount(draft)} poz. do Listy detali?`, 'Dodaj'))) return;
+      send.disabled = true;
+      let sent = 0, failure = null;
+      for (let i = 0; i < draft.length; i++) {
+        const r = draft[i];
+        if (DD.isBlankRow(r)) continue;
+        try { await api('mp_addDetail', [DD.toForm(r)]); sent++; draft[i] = DD.blankRow(); saveDraft(draft); }   // wysłane znikają od razu – nic nie pójdzie drugi raz
+        catch (e) { failure = `Wiersz ${i + 1}: ${e.message}` + (e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież listę i sprawdź, zanim spróbujesz ponownie.' : ''); break; }
+      }
+      draft = DD.compactDraft(draft); saveDraft(draft); draw2(); send.disabled = false;
+      if (sent > 0) load();
+      if (failure) { status.className = 'err'; status.textContent = `Dodano pozycje: ${sent}. ${failure}`; } else { m.close(); toast(`Dodano pozycje do Listy detali: ${sent}.`); }
+    } }, 'Dodaj do listy');
+    m = modal('Dodaj detale do listy', h('div', {}, h('div', { class: 'muted' }, 'Tabela działa jak Arkusze Google (zaznaczanie, wpisywanie, Enter / Tab / strzałki, kopiuj / wklej, cofnij Ctrl+Z); wpisane dane są zapamiętywane i znikają dopiero po dodaniu albo wyczyszczeniu. Wymagane: komis, nr rysunku, nr poz., komplet i ilość zlecona (liczba całkowita ≥ 1); nazwa i uwagi są opcjonalne.'),
+      body2, status, h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: async () => { if (await confirmBox('Wyczyścić tabelę?', 'Usunąć wszystkie wpisane dane z tabeli? Tego nie można cofnąć.', 'Usuń')) { draft = DD.emptyDraft(); saveDraft(draft); draw2(); } } }, 'Wyczyść'),
+        h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'), send)), { wide: true, onClose: () => dgrid.destroy() });
+    m.root.style.maxWidth = '94vw'; m.root.style.width = '1100px';
+    draw2();
+  }
+
+  /** PPM na wierszu Listy detali: pytanie o edycję, potem okno edycji tego jednego wiersza (zapis przez API mp_updateDetail z kontrolą poprzedniej wartości). */
+  async function editRow(row) {
+    const v = row.v;
+    if (!(await confirmBox('Edycja wiersza', `Edytować wiersz ${row.row} Listy detali?\nKomis: ${v.B ?? ''}  ·  rysunek: ${v.D ?? ''}  ·  poz.: ${v.E ?? ''}  ·  komplet: ${v.F ?? ''}`, 'Edytuj'))) return;
+    const fields = [['B', 'Komis'], ['C', 'Nazwa elementu'], ['D', 'Nr rysunku'], ['E', 'Nr poz.'], ['F', 'Komplet'], ['G', 'Ilość zlecona (szt x kpl)'], ['O', 'Uwagi']];
+    const inputs = Object.fromEntries(fields.map(([c]) => [c, h('input', { type: 'text', value: String(v[c] ?? ''), style: { width: '100%' } })]));
+    const err = h('div', { class: 'err' });
+    let m;
+    const save = h('button', { class: 'btn primary', onclick: async () => {
+      const patch = {}, expect = {};
+      for (const [c] of fields) { const now = inputs[c].value.trim(), before = String(v[c] ?? '').trim(); if (now !== before) { patch[c] = now; expect[c] = before; } }
+      if (!Object.keys(patch).length) { m.close(); return; }
+      save.disabled = true; err.textContent = '';
+      try { const r = await api('mp_updateDetail', [{ row: row.row, patch, expect }]); m.close(); toast((r && r.message) || 'Zapisano zmiany.'); await load(); }
+      catch (e) { save.disabled = false; err.textContent = 'Nie zapisano: ' + (e.message || e); }
+    } }, 'Zapisz zmiany');
+    m = modal(`Edycja wiersza ${row.row} – Lista detali`, h('div', {}, ...fields.map(([c, label]) => h('label', { class: 'f', style: { display: 'block', margin: '4px 0' } }, h('div', { class: 'muted' }, label), inputs[c])),
+      err, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), save)), { wide: true });
+  }
+  const addBtn = h('button', { class: 'btn small primary', style: { display: 'none' }, title: 'Dodaj pozycje do Listy detali (tabela jak w „Dodaj zakupy”)', onclick: addDialog }, '+ Dodaj detale');
+
   /** Przeliczenie „szt zrobione” w Liście detali z Rejestru detali (sztuki zlicza i zapisuje w bazie program; MASTER, GOD). */
   async function recount() {
     const wait = modal('Przeliczanie sztuk', h('p', {}, 'Liczenie sztuk zrobionych z Rejestru detali…'), { sticky: true });
@@ -106,6 +175,7 @@ export function mountMistrz(el, ctx) {
 
   function draw() {
     recountBtn.style.display = acc.manage && st.tab === 'dlist' ? '' : 'none';
+    addBtn.style.display = canList && st.tab === 'dlist' ? '' : 'none';
     drawTabs();
     clear(body); clear(printSlot);
     const m = st.meta;
@@ -144,7 +214,8 @@ export function mountMistrz(el, ctx) {
     // kolejność arkusza: kolor luki w numerach operacji porównuje z następnym wierszem pliku
     for (const i of ids.slice(0, st.shown)) {
       const r = rows[i], next = rows[i + 1] || null;
-      tbody.append(h('tr', {}, h('td', { style: { color: '#888', fontSize: '10px' } }, String(src[i].row)), ...cols.map((c) => {
+      tbody.append(h('tr', { title: canList && sh.key === 'dlist' ? 'PPM – edycja wiersza' : '', oncontextmenu: canList && sh.key === 'dlist' ? (e) => { e.preventDefault(); editRow(src[i]); } : undefined },
+        h('td', { style: { color: '#888', fontSize: '10px' } }, String(src[i].row)), ...cols.map((c) => {
         const col = M.cellColor(sh.key, r, c.key, next), t = text(i, c);
         // kod QR: przy detalach niezatwierdzonych – obraz kodu; zatwierdzone – przycisk „QR” (kliknięcie – duży kod)
         if (c.key === 'H' && isList) {
@@ -224,7 +295,7 @@ export function mountMistrz(el, ctx) {
     h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search, tabs,
       h('button', { class: 'btn small', title: 'Wczytaj ponownie dane z bazy', onclick: load }, 'Odśwież'),
       acc.importG ? h('button', { class: 'btn small', title: 'Import tej zakładki z arkusza Google Mistrz_po do bazy (tylko GOD; zastępuje dane zakładki w bazie; trzy pytania o zgodę)', onclick: importTab }, 'Import z arkusza') : null,
-      recountBtn,
+      addBtn, recountBtn,
       acc.manage ? h('button', { class: 'btn small', title: 'Eksport tej zakładki z bazy do arkusza Google Mistrz_po (MASTER, GOD; zastępuje dane wpisywane w zakładce arkusza)', onclick: exportTab }, 'Eksport do arkusza') : null,
       printSlot, h('span', { class: 'grow' }), info),
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kolumny ƒ liczy program z danych w bazie (jak formuły arkusza). Skaner i program zapisują tylko w bazie; arkusz Google aktualizuje się wyłącznie przyciskiem „Eksport do arkusza”.')),

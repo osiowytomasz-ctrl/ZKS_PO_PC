@@ -43,7 +43,7 @@ export function columns(view) {
 /** Widoki z edycją komórek. */
 export const editableView = (view) => view === 'bought' || view === 'nopz';
 /** Kolumny arkusza dla edytowalnych pól widoku (data zakupu B, kod C, ilość D, PZ E, ZMW G, opis K). */
-export const EDIT_COLS = { zakup: 'B', kod: 'C', ilosc: 'D', pz: 'E', zmw: 'G', opis: 'K' };
+export const EDIT_COLS = { zakup: 'B', kod: 'C', ilosc: 'D', pz: 'E', zmw: 'G', iloscZamowiona: 'I', opis: 'K', uwagi: 'L' };   // iloscZamowiona i uwagi – edycja wiersza zamówienia (PPM)
 /** Wartość wpisana w komórce → tekst do arkusza albo błąd. Data: dd.MM.rrrr (puste dozwolone); PZ: „X” zapisujemy jako „x”. */
 export function normalizeEdit(field, text) {
   const t = String(text ?? '').trim();
@@ -53,6 +53,7 @@ export function normalizeEdit(field, text) {
     const d = parseDate(t);
     return d ? { ok: true, value: formatDate(t) } : { ok: false, error: `„${t}” nie jest datą (dd.mm.rrrr).` };
   }
+  if (field === 'iloscZamowiona' && t && parseQuantity(t) === null) return { ok: false, error: `„${t}” nie jest poprawną ilością (liczba większa od zera).` };
   if (field === 'pz') return { ok: true, value: t.toLowerCase() === 'x' ? 'x' : t };
   return { ok: true, value: t };
 }

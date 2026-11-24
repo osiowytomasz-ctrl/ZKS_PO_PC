@@ -213,6 +213,22 @@ test('lista detali: dodawanie tylko z uprawnieniem, bez duplikatów, wpis w bazi
   assert.throws(() => call(env, 'mp_listDetails_', user('op@x.pl')), (e) => e.apiCode === 'FORBIDDEN');
 });
 
+test('lista detali: dodawanie z nazwą i uwagami; edycja wiersza (kontrola poprzedniej wartości, duplikaty, uprawnienia)', () => {
+  const env = makeEnv({ db: { dlist: [R(3, { B: 'K1', D: 'R1', E: 'P1', F: 'KOM', G: 5 }), R(4, { B: 'K1', D: 'R2', E: 'P1', F: 'KOM', G: 2 })] } });
+  call(env, 'mp_addDetail_', { komis: 'K3', rysunek: 'R3', pozycja: '1', komplet: 'A', ilosc: '2', nazwa: 'Tuleja', uwagi: 'pilne' }, user('lista@x.pl'));
+  assert.deepEqual(env.rows('dlist')[2].v, { B: 'K3', D: 'R3', E: '1', F: 'A', G: 2, C: 'Tuleja', O: 'pilne' });
+  const edit = (patch, expect, email = 'lista@x.pl') => call(env, 'mp_updateDetail_', { row: 3, patch, expect }, user(email));
+  assert.throws(() => edit({ G: '7' }, { G: '5' }, 'op@x.pl'), (e) => e.apiCode === 'FORBIDDEN');
+  edit({ G: '7', C: 'Nowa nazwa', O: 'uwaga' }, { G: '5', C: '', O: '' });
+  assert.deepEqual([env.rows('dlist')[0].v.G, env.rows('dlist')[0].v.C, env.rows('dlist')[0].v.O], [7, 'Nowa nazwa', 'uwaga']);
+  assert.throws(() => edit({ G: '9' }, { G: '5' }), /zmienił się od ostatniego odczytu/);           // ktoś zmienił wiersz w międzyczasie
+  assert.throws(() => edit({ G: '0' }, { G: '7' }), /całkowitą/);
+  assert.throws(() => edit({ D: 'R2' }, { D: 'R1' }), /już na liście/);                                // duplikat pozycji z wiersza 4
+  assert.throws(() => edit({ B: '' }, { B: 'K1' }), /Uzupełnij/);
+  assert.throws(() => edit({ H: 'x' }, { H: '' }), /nie można edytować/);
+  assert.throws(() => call(env, 'mp_updateDetail_', { row: 99, patch: { G: '1' }, expect: { G: '' } }, user('lista@x.pl')), /nie istnieje/);
+});
+
 test('paczki po 300 wierszy: dopisywanie przechodzi do nowej paczki, numery wierszy rosną', () => {
   const env = makeEnv();
   const append = vm.runInContext('mp_append_', env.ctx);

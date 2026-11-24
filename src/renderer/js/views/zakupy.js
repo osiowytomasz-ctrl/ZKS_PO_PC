@@ -113,7 +113,7 @@ export function mountZakupy(el, ctx) {
     const tbody = h('tbody', {});
     for (const r of rows) {
       const flagged = st.view === 'ordered' && Z.needsCorrection(r);
-      tbody.append(h('tr', { class: 'click', onclick: () => openRow(r), style: flagged ? { background: '#c62828', color: '#fff' } : null },
+      tbody.append(h('tr', { class: 'click', onclick: () => openRow(r), title: st.view === 'ordered' && canEdit() ? 'PPM – edycja zamówienia' : '', oncontextmenu: st.view === 'ordered' && canEdit() ? (e) => { e.preventDefault(); editOrder(r); } : undefined, style: flagged ? { background: '#c62828', color: '#fff' } : null },
         ...cols.map((c) => h('td', { class: c.key === 'opis' || c.key === 'kod' ? 'left' : '', style: flagged ? { background: '#c62828', color: '#fff' } : null }, Z.display(c.key, Z.value(r, c.key))))));
     }
     clear(body);
@@ -127,6 +127,27 @@ export function mountZakupy(el, ctx) {
     if (editable) { ensureCodes().then(() => realizeDialog(row)); return; }
     const m = modal(st.view === 'archive' ? 'Archiwum: szczegóły' : Z.isNoPz(row) ? 'Odebrane bez PZ: szczegóły' : !Z.lacksPz(row) ? 'Zakupione: szczegóły' : 'Zamówione: szczegóły', h('div', {},
       orderFrame(row), purchaseFrameReadOnly(row), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
+  }
+
+  /** PPM na wierszu Zamówione: pytanie o edycję, potem okno edycji tego jednego zamówienia (zapis przez updateZakupyCells z kontrolą poprzedniej wartości). */
+  async function editOrder(row) {
+    if (!(await confirmBox('Edycja zamówienia', `Edytować to zamówienie?\n${row.columnK || '(bez opisu)'}\nIlość: ${row.columnI}  ·  ZMW: ${row.columnG}`, 'Edytuj'))) return;
+    await ensureCodes();
+    const fields = [['kod', 'Kod produktu'], ['iloscZamowiona', 'Ilość zamówiona'], ['zmw', 'ZMW'], ['opis', 'Opis'], ['uwagi', 'Uwagi']];
+    const inputs = Object.fromEntries(fields.map(([k]) => [k, h('input', { type: 'text', value: Z.value(row, k), style: { width: '100%' }, list: k === 'kod' ? 'zk-codes' : null, autocomplete: 'off' })]));
+    const err = h('div', { class: 'err' });
+    let m;
+    const save = h('button', { class: 'btn primary', onclick: async () => {
+      const changes = fields.map(([k]) => ({ row, col: { key: k }, text: inputs[k].value, expect: Z.value(row, k) })).filter((c) => c.text.trim() !== String(c.expect).trim());
+      if (!changes.length) { m.close(); return; }
+      save.disabled = true; err.textContent = '';
+      const res = await commitCells(changes);
+      const bad = res.filter((x) => !x.ok);
+      if (bad.length) { save.disabled = false; err.textContent = 'Nie zapisano: ' + [...new Set(bad.map((x) => x.error))].join(' · '); load(); return; }
+      m.close(); toast('Zapisano zmiany w zamówieniu.'); load();
+    } }, 'Zapisz zmiany');
+    m = modal('Edycja zamówienia', h('div', {}, ...fields.map(([k, label]) => h('label', { class: 'f', style: { display: 'block', margin: '4px 0' } }, h('div', { class: 'muted' }, label), inputs[k])),
+      err, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), save)), { wide: true });
   }
 
   const frame = (title, ...c) => h('div', { style: { border: '1px solid #bbb', borderRadius: '0', padding: '6px 10px', margin: '6px 0' } }, h('b', { class: 'muted' }, title), ...c);
