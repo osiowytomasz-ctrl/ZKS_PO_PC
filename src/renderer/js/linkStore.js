@@ -24,8 +24,9 @@ export async function publishLink(url, by) {
 /** Ostatnie wpisy historii adresów (najnowsze pierwsze). */
 export async function readLinkHistory(n = 10) {
   const { sdk, db } = await firebase();
-  const snap = await sdk.getDocs(sdk.query(sdk.collection(db, 'app_config_history'), sdk.orderBy('ver', 'desc'), sdk.limit(n)));
-  return snap.docs.map((d) => d.data());
+  // pakiet Firebase w programie nie eksportuje query/orderBy – historia jest mała, sortujemy tutaj
+  const snap = await sdk.getDocs(sdk.collection(db, 'app_config_history'));
+  return snap.docs.map((d) => d.data()).sort((x, y) => (Number(y.ver) || 0) - (Number(x.ver) || 0)).slice(0, n);
 }
 
 /**
