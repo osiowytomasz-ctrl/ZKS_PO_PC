@@ -154,11 +154,11 @@ var MP_DEF = {
   ops:       { name: 'Rejestr operacji',       first: 3, cols: 10, input: 'ABCDEFGHIJ' },
   docs:      { name: 'Rejestr dokumentacji',   first: 3, cols: 10, input: 'ABCDEFGHIJ' },
   dreg:      { name: 'Rejestr detali',         first: 3, cols: 8,  input: 'ABCDEFGH' },
-  dlist:     { name: 'Lista detali',           first: 3, cols: 15, input: 'ABCDEFGMNO' },
+  dlist:     { name: 'Lista detali',           first: 3, cols: 16, input: 'ABCDEFGOP' },   // P – „szt zrobione” (liczy i zapisuje program)
   zkom:      { name: 'Z.kom',                  first: 2, cols: 9,  input: 'ABCDEFGHI' },
   opsArch:   { name: 'Archiwum operacji',      first: 3, cols: 10, input: 'ABCDEFGHIJ' },
   docsArch:  { name: 'Ar. dok',                first: 3, cols: 10, input: 'ABCDEFGHIJ' },
-  dlistArch: { name: 'Archiwum Lista detali',  first: 3, cols: 15, input: 'ABCDEFGMNO' }
+  dlistArch: { name: 'Archiwum Lista detali',  first: 3, cols: 16, input: 'ABCDEFGOP' }
 };
 
 function mp_keyOfSheet_(name) {
@@ -397,7 +397,11 @@ function mp_saveDetail_(form, ctx) {
 
   var t = mp_now_();
   var newRow = mp_append_('dreg', { A: t.date, B: t.time, C: colC, D: colG, E: colH, F: colF, G: extra, H: ctx.email }, reg);
-  return { status: 'success', message: 'Dane zapisane w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
+  // sztuki zlicza i zapisuje program: w wierszu Listy detali kolumna P „szt zrobione” = suma zarejestrowanych sztuk tego detalu
+  var total = registered + extraNum, listRow = null;
+  list.forEach(function (r) { if (!listRow && mp_dkey_([r.v.B, r.v.D, r.v.E, r.v.F]) === detailKey) listRow = r; });
+  if (listRow) mp_update_('dlist', listRow, { P: total });
+  return { status: 'success', message: 'Dane zapisane w bazie (wiersz ' + newRow + ', zrobiono ' + total + ' z ' + ordered + ') przez ' + mp_shortName_(ctx.email) };
 }
 
 // ---------------------------------------------------------------------------
@@ -653,6 +657,33 @@ function mp_addDetail_(form, ctx) {
   return { status: 'success', message: 'Dodano detal do listy w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
 }
 
+/**
+ * Przeliczenie „szt zrobione” (kolumna P Listy detali) dla wszystkich pozycji: suma kolumny G Rejestru detali wg komisu, rysunku, pozycji i kompletu.
+ * Zapisuje tylko zmienione wiersze (jedno zapisanie na paczkę). Zwraca { checked, changed }. Poziom MASTER lub GOD (sprawdza Api.gs).
+ */
+function mp_recountDetails_() {
+  var meta = mp_meta_();
+  var list = mp_loadKey_('dlist', meta).rows, reg = mp_loadKey_('dreg', meta).rows;
+  var done = {};
+  reg.forEach(function (r) {
+    var g = mp_num_(r.v.G);
+    if (isFinite(g)) { var k = mp_dkey_([r.v.C, r.v.D, r.v.E, r.v.F]); done[k] = (done[k] || 0) + g; }
+  });
+  var byChunk = {}, changed = 0, seen = {};
+  list.forEach(function (r) {
+    if (!(mp_cell_(r, 'B') || mp_cell_(r, 'D') || mp_cell_(r, 'E'))) return;
+    var k = mp_dkey_([r.v.B, r.v.D, r.v.E, r.v.F]);
+    var total = seen[k] ? 0 : (done[k] || 0);   // przy zdublowanej pozycji sztuki liczy tylko pierwsza
+    seen[k] = true;
+    if (mp_str_(r.v.P) === String(total)) return;
+    var v = {}; Object.keys(r.v).forEach(function (c) { v[c] = r.v[c]; }); v.P = total;
+    (byChunk[r.chunk] = byChunk[r.chunk] || {})[r.row] = v;
+    changed++;
+  });
+  Object.keys(byChunk).forEach(function (id) { mp_fsPatchChunk_('dlist', id, byChunk[id]); });
+  return { checked: list.length, changed: changed, message: 'Przeliczono sztuki zrobione: zmieniono ' + changed + ' z ' + list.length + ' pozycji Listy detali.' };
+}
+
 // ---------------------------------------------------------------------------
 // Import arkusz → baza (tylko GOD) i eksport baza → arkusz (MASTER, GOD)
 // ---------------------------------------------------------------------------
@@ -678,7 +709,8 @@ function mp_export_(only) {
     if (want && k !== want) return;
     var x = MP_DEF[k], sh = ss.getSheetByName(x.name);
     if (!sh || sh.getLastRow() < 1) return;
-    out[x.name] = sh.getRange(1, 1, sh.getLastRow(), x.cols).getValues().map(function (row) {
+    var w = Math.min(x.cols, sh.getMaxColumns());   // zakładka może nie mieć jeszcze kolumny P („szt zrobione”)
+    out[x.name] = sh.getRange(1, 1, sh.getLastRow(), w).getValues().map(function (row) {
       return row.map(function (v) { return mp_exportValue_(v, tz); });
     });
   });
@@ -711,7 +743,10 @@ function mp_exportToSheet_(only) {
   var n = lastRow - def.first + 1;
   if (n < 1) return { sheet: def.name, rows: 0, message: 'Brak danych do eksportu.' };
 
-  // grupy kolumn wpisywanych (ciągłe zakresy): ABCDEFGMNO → A–G i M–O
+  // zakładka Listy detali dostaje kolumnę P „szt zrobione”, jeśli jej nie ma
+  if (sheet.getMaxColumns() < def.cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), def.cols - sheet.getMaxColumns());
+  if ((key === 'dlist' || key === 'dlistArch') && !mp_str_(sheet.getRange(def.first - 1, 16).getValue())) sheet.getRange(def.first - 1, 16).setValue('szt zrobione');
+  // grupy kolumn wpisywanych (ciągłe zakresy): np. ABCDEFGOP → A–G i O–P
   var groups = [], cur = null;
   def.input.split('').forEach(function (L) {
     var c = L.charCodeAt(0) - 64;

@@ -176,6 +176,11 @@ var API_FUNCS = {
     // Tylko GOD (kolumna „Grafik dostęp”); zapis w bazie robi program, który zastępuje dane importowanej zakładki.
     run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'god'); return mp_export_(a[0]); }
   },
+  mp_recountDetails: {
+    // Moduł Mistrz PO: przeliczenie „szt zrobione” w Liście detali z Rejestru detali (sztuki zlicza i zapisuje w bazie program). MASTER lub GOD.
+    write: true,
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'master'); return mp_recountDetails_(); }
+  },
   mp_exportToSheet: {
     // Moduł Mistrz PO – EKSPORT baza → arkusz dla jednej zakładki (a[0] – klucz albo nazwa). MASTER lub GOD. Zapis w arkuszu tylko na to polecenie.
     write: true,

@@ -21,15 +21,11 @@ export const SHEETS = [
       P: ['Koniec obróbki', 'Data i godzina „Koniec” ostatniej operacji (ilość oper × 10)'] } },
   { key: 'dreg', name: 'Rejestr detali', title: 'Rejestr detali', first: 3, input: 'ABCDEFGH',
     head: { A: 'Data', B: 'G.', C: 'Komis', D: 'nr rysunku', E: 'nr detalu', F: 'kpl.', G: 'szt', H: 'Operator' },
-    calc: { I: ['Progres', 'zrobione / do zrobienia'],
-      J: ['Do zrobienia', 'Suma „szt x kpl” z Listy detali (nr rysunku, nr detalu, kpl.)'],
-      K: ['zrobione', 'Suma „szt” w Rejestrze detali (komis, nr rysunku, nr detalu, kpl.)'] } },
-  { key: 'dlist', name: 'Lista detali', title: 'Detale', first: 3, input: 'ABCDEFGMNO',
-    head: { A: 'lp.', B: 'Komis (xx/yyy)', C: 'Nazwa elementu', D: 'nr rysunku', E: 'nr poz.', F: 'kpl/partia', G: 'szt x kpl', M: 'data+kolor rozp. druku', N: 'potw. wydrukowania', O: 'Uwagi' },
+    calc: {} },   // bez kolumn liczonych: sztuki zlicza program i zapisuje w Liście detali (kolumna „szt zrobione”)
+  { key: 'dlist', name: 'Lista detali', title: 'Detale', first: 3, input: 'ABCDEFGOP', order: 'ABCDEFGHPLO',
+    head: { A: 'lp.', B: 'Komis (xx/yyy)', C: 'Nazwa elementu', D: 'nr rysunku', E: 'nr poz.', F: 'kpl/partia', G: 'szt x kpl', O: 'Uwagi', P: 'szt zrobione' },
     calc: { H: ['qr-code', 'Kod QR detalu (gdy wszystkie pola B–G są wypełnione)'],
-      J: ['klucz', 'nr rysunku + nr poz.'],
-      K: ['szt', '= szt x kpl'],
-      L: ['postęp', 'Suma „szt” z Rejestru detali (komis, nr rysunku, nr poz., kpl) / szt x kpl'] } },
+      L: ['postęp', 'szt zrobione / szt x kpl'] } },
   { key: 'zkom', name: 'Z.kom', title: 'Komisy', first: 2, input: 'ABCDEFGHI',
     head: { A: 'Status', B: 'Komis', C: 'Uwagi kierownik/mistrza/techno', D: 'Stanowisko', E: 'czy w harmonogramie', F: 'Klient', G: 'Temat', H: 'Termin', I: 'Status' },
     calc: {}, aCalc: true },
@@ -40,9 +36,10 @@ export const SHEETS = [
     head: { A: 'Data', B: 'godz', C: 'komis', D: 'nr dok', E: 'rodz', F: 'nazwa', G: 'rys', H: 'id', I: 'ilość oper', J: 'rejestrujący' },
     calc: { K: ['Status', 'jak w Rejestrze dokumentacji'], L: ['klucz', 'Komis + nr dok'], M: ['Stat2', 'Postęp'], N: ['start obróbki', 'Start operacji 10'],
       O: ['czas [h]', 'Koniec − start, w godzinach'], P: ['Koniec obróbki', 'Koniec ostatniej operacji'] } },
-  { key: 'dlistArch', name: 'Archiwum Lista detali', title: 'Lista detali – archiwum', first: 3, input: 'ABCDEFGMNO', archive: true,
-    head: { A: 'lp.', B: 'Komis (xx/yyy)', C: 'Nazwa elementu', D: 'nr rysunku', E: 'nr poz.', F: 'kpl/partia', G: 'szt x kpl', M: 'data+kolor rozp. druku', N: 'potw. wydrukowania', O: 'Uwagi' },
-    calc: { H: ['qr-code', 'Kod QR detalu'], J: ['klucz', 'nr rysunku + nr poz.'], K: ['szt', '= szt x kpl'], L: ['postęp', 'jak w Liście detali'] } },
+  { key: 'dlistArch', name: 'Archiwum Lista detali', title: 'Lista detali – archiwum', first: 3, input: 'ABCDEFGOP', order: 'ABCDEFGHPLO', archive: true,
+    head: { A: 'lp.', B: 'Komis (xx/yyy)', C: 'Nazwa elementu', D: 'nr rysunku', E: 'nr poz.', F: 'kpl/partia', G: 'szt x kpl', O: 'Uwagi', P: 'szt zrobione' },
+    calc: { H: ['qr-code', 'Kod QR detalu (gdy wszystkie pola B–G są wypełnione)'],
+      L: ['postęp', 'szt zrobione / szt x kpl'] } },
 ];
 export const sheetByKey = (k) => SHEETS.find((s) => s.key === k);
 
@@ -63,7 +60,8 @@ export const groupOfTab = (tab) => (MENU.find((g) => g.tabs && g.tabs.some(([k])
 
 /** Kolumny zakładki w kolejności liter (wpisywane i liczone) – jak w pliku. */
 export function sheetColumns(sh) {
-  const letters = [...new Set([...sh.input, ...Object.keys(sh.calc)])].sort((a, b) => colNum(a) - colNum(b));
+  const all = [...new Set([...sh.input, ...Object.keys(sh.calc)])];
+  const letters = sh.order ? [...sh.order].filter((L) => all.includes(L)) : all.sort((a, b) => colNum(a) - colNum(b));   // order – własna kolejność kolumn
   return letters.map((L) => (sh.calc[L] ? { key: L, title: sh.calc[L][0], full: `${L}: ${sh.calc[L][1]} (liczy program)`, calc: true } : { key: L, title: sh.head[L] || L, full: `${L}: ${sh.head[L] || ''} (wpisywane)` }));
 }
 export const colNum = (L) => { let n = 0; for (const ch of L) n = n * 26 + ch.charCodeAt(0) - 64; return n; };
@@ -168,30 +166,26 @@ export function computeDocs(rows, ops, opsArch) {
   });
 }
 
-/** Rejestr detali: J – do zrobienia (Lista detali: suma G wg D, E, F), K – zrobione (suma G wg C, D, E, F), I – K / J. */
-export function computeDetailReg(rows, list) {
-  const todo = new Map(), done = new Map();
-  for (const { v } of list || []) { const k = dkey(v.D, v.E, v.F), g = num(v.G); if (Number.isFinite(g)) todo.set(k, (todo.get(k) || 0) + g); }
-  for (const { v } of rows) { const k = dkey(v.C, v.D, v.E, v.F), g = num(v.G); if (Number.isFinite(g)) done.set(k, (done.get(k) || 0) + g); }
-  return rows.map(({ v }) => {
-    const J = empty(v.D) ? '' : todo.get(dkey(v.D, v.E, v.F)) || 0;
-    const K = empty(v.C) ? '' : done.get(dkey(v.C, v.D, v.E, v.F)) || 0;
-    const I = typeof J === 'number' && typeof K === 'number' && J ? K / J : '';
-    return { ...v, I, J, K };
-  });
+/** Rejestr detali: bez kolumn liczonych (sztuki zlicza program i zapisuje w Liście detali w kolumnie P „szt zrobione”). */
+export function computeDetailReg(rows) {
+  return rows.map(({ v }) => ({ ...v }));
 }
 
 /** Tekst kodu QR detalu (jak w formule kolumny H Listy detali): *komis*$rys$⍵poz⍵^kpl^@szt@. */
 export const detailQr = (v) => ('BCDEFG'.split('').every((c) => !empty(v[c])) ? `*${s(v.B)}*$${s(v.D)}$⍵${s(v.E)}⍵^${s(v.F)}^@${s(v.G)}@` : '');
 
-/** Lista detali (i archiwum): H – kod QR, J – klucz, K = G, L – zrobione z Rejestru detali / G. */
+/**
+ * Lista detali (i archiwum): H – kod QR, P – szt zrobione (zapisane w bazie przez program przy rejestracji detalu skanerem; gdy komórka jest pusta
+ * – suma „szt” z Rejestru detali dla tego detalu), L – postęp = P / szt x kpl (G).
+ */
 export function computeDetailList(rows, reg) {
   const done = new Map();
   for (const { v } of reg || []) { const k = dkey(v.C, v.D, v.E, v.F), g = num(v.G); if (Number.isFinite(g)) done.set(k, (done.get(k) || 0) + g); }
   return rows.map(({ v }) => {
-    const g = num(v.G), sum = done.get(dkey(v.B, v.D, v.E, v.F)) || 0;
+    const g = num(v.G), stored = num(v.P);
+    const sum = Number.isFinite(stored) && !empty(v.P) ? stored : done.get(dkey(v.B, v.D, v.E, v.F)) || 0;
     const L = !empty(v.C) && Number.isFinite(g) && g ? sum / g : 0;
-    return { ...v, H: detailQr(v), J: s(v.D) + s(v.E), K: v.G ?? '', L };
+    return { ...v, H: detailQr(v), P: sum, L };
   });
 }
 
@@ -212,7 +206,7 @@ export function computeAll(data) {
 }
 
 /** Kolumny w procentach / jako data-godzina (do wyświetlenia). */
-export const PCT_COLS = { ops: ['M'], docs: ['M'], docsArch: ['M'], dreg: ['I'], dlist: ['L'], dlistArch: ['L'] };
+export const PCT_COLS = { ops: ['M'], docs: ['M'], docsArch: ['M'], dlist: ['L'], dlistArch: ['L'] };
 export const STAMP_COLS = { docs: ['N', 'P'], docsArch: ['N', 'P'] };
 
 /** Tekst komórki do pokazania (procenty, data-godzina, godziny). */

@@ -2,7 +2,7 @@
 // a kolumny liczone (formuły arkusza) liczy program (logic/mistrz.js). W bazie są tylko dane wpisywane.
 // Okres przejściowy: wpisy dalej trafiają do arkusza (Skaner, ręcznie); „Import z arkusza” albo „Import z pliku” aktualizuje bazę.
 // Dostęp: przeglądanie od CLERIK, import od MASTER (kolumna „Grafik dostęp”).
-import { h, clear, toast, modal, columnFilterDialog, confirmBox } from '../ui.js';
+import { h, clear, toast, modal, columnFilterDialog, confirmBox, api } from '../ui.js';
 import * as M from '../logic/mistrz.js';
 import { drawMistrzNav } from './mistrzNav.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
@@ -96,7 +96,16 @@ export function mountMistrz(el, ctx) {
     catch (e) { wait.close(); toast('Eksport nieudany: ' + (e.message || e), 'error'); }
   }
 
+  /** Przeliczenie „szt zrobione” w Liście detali z Rejestru detali (sztuki zlicza i zapisuje w bazie program; MASTER, GOD). */
+  async function recount() {
+    const wait = modal('Przeliczanie sztuk', h('p', {}, 'Liczenie sztuk zrobionych z Rejestru detali…'), { sticky: true });
+    try { const r = await api('mp_recountDetails', [], { timeoutMs: 240000 }); wait.close(); toast((r && r.message) || 'Przeliczono.'); await load(); }
+    catch (e) { wait.close(); toast('Przeliczanie nieudane: ' + (e.message || e), 'error'); }
+  }
+  const recountBtn = h('button', { class: 'btn small', style: { display: 'none' }, title: 'Przelicza „szt zrobione” w Liście detali z Rejestru detali i zapisuje w bazie (sztuki zapisują się też same przy każdej rejestracji detalu skanerem)', onclick: recount }, 'Przelicz sztuki');
+
   function draw() {
+    recountBtn.style.display = acc.manage && st.tab === 'dlist' ? '' : 'none';
     drawTabs();
     clear(body); clear(printSlot);
     const m = st.meta;
@@ -215,6 +224,7 @@ export function mountMistrz(el, ctx) {
     h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search, tabs,
       h('button', { class: 'btn small', title: 'Wczytaj ponownie dane z bazy', onclick: load }, 'Odśwież'),
       acc.importG ? h('button', { class: 'btn small', title: 'Import tej zakładki z arkusza Google Mistrz_po do bazy (tylko GOD; zastępuje dane zakładki w bazie; trzy pytania o zgodę)', onclick: importTab }, 'Import z arkusza') : null,
+      recountBtn,
       acc.manage ? h('button', { class: 'btn small', title: 'Eksport tej zakładki z bazy do arkusza Google Mistrz_po (MASTER, GOD; zastępuje dane wpisywane w zakładce arkusza)', onclick: exportTab }, 'Eksport do arkusza') : null,
       printSlot, h('span', { class: 'grow' }), info),
     h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kolumny ƒ liczy program z danych w bazie (jak formuły arkusza). Skaner i program zapisują tylko w bazie; arkusz Google aktualizuje się wyłącznie przyciskiem „Eksport do arkusza”.')),

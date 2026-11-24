@@ -22,6 +22,7 @@ function makeSheet(rows = [], maxCols = 14) {
       };
     },
     copied: [],
+    getMaxColumns: () => 20, insertColumnsAfter() {},
   };
   void maxCols;
   return sheet;
@@ -109,12 +110,24 @@ test('detale: zapis w bazie, limit ilości zleconej i wymagane pola', () => {
   assert.throws(() => call(env, 'mp_saveDetail_', { productCode: '*K1*', extraNotes: '1' }, user('op@x.pl')), /kluczowych polach/);
   assert.throws(() => call(env, 'mp_saveDetail_', { productCode: '*K9*$R1$⍵P1⍵^KOM^', extraNotes: '1' }, user('op@x.pl')), /nie zarejestrowany/);
   assert.equal(env.sheets.Setup.copied.length, 0);   // arkusz nie jest zmieniany
+  // sztuki zlicza i zapisuje program: Lista detali dostaje „szt zrobione” (kolumna P) = suma zarejestrowanych sztuk
+  assert.equal(env.rows('dlist')[0].v.P, 5);                                  // 3 + 2
 });
 
 test('detale: numer pozycji z arkusza jako data lub liczba nadal pasuje do kodu ze skanera (luźny klucz)', () => {
   const env = makeEnv({ db: { dlist: [R(3, { B: 'K1', D: 'R1', E: '2002-01-04', F: 'KOM', G: 5 })] } });
   call(env, 'mp_saveDetail_', { productCode: '*K1*$R1$⍵2.1.4⍵^KOM^', extraNotes: '1' }, user('op@x.pl'));
   assert.equal(env.rows('dreg').length, 1);
+});
+
+test('przeliczenie sztuk: Lista detali dostaje „szt zrobione” z Rejestru detali (tylko zmienione wiersze, pierwsza pozycja przy duplikacie)', () => {
+  const env = makeEnv({ db: {
+    dlist: [R(3, { B: 'K1', D: 'R1', E: 'P1', F: 'KOM', G: 5 }), R(4, { B: 'K1', D: 'R2', E: 'P1', F: 'KOM', G: 2, P: 0 }), R(5, { B: 'K1', D: 'R1', E: 'P1', F: 'KOM', G: 5 })],
+    dreg: [R(3, { C: 'K1', D: 'R1', E: 'P1', F: 'KOM', G: '3' }), R(4, { C: 'K1', D: 'R1', E: 'P1', F: 'KOM', G: '2' })] } });
+  const r = call(env, 'mp_recountDetails_');
+  assert.equal(r.checked, 3); assert.equal(r.changed, 2);                    // R1: 5 (pierwsza), duplikat 0; R2 już ma 0
+  assert.deepEqual(env.rows('dlist').map((x) => x.v.P), [5, 0, 0]);
+  assert.equal(call(env, 'mp_recountDetails_').changed, 0);                  // drugi raz nic do zmiany
 });
 
 test('operacje: kolejność statusów Start, W toku, Koniec – zapis w bazie', () => {

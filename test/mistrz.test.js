@@ -29,15 +29,20 @@ test('Rejestr dokumentacji: status z archiwum, start, koniec i czas', () => {
   assert.equal(cellText('docs', 'N', a.N), '02.01.2026 07:00'); assert.equal(cellText('docs', 'M', a.M), '100%'); assert.equal(cellText('docs', 'O', a.O), '26,5');
 });
 
-test('Detale: do zrobienia, zrobione, postęp i kod QR; numery zamienione przez arkusz na daty i liczby', () => {
-  const list = [row(3, { A: 1, B: '26/1', C: 'Kołnierz', D: 'R-1', E: '2.1.4', F: 1, G: 4 }), row(4, { A: 2, B: '26/1', C: 'Tuleja', D: '0000123', E: '2,3', F: 1, G: 2 })];
+test('Lista detali: szt zrobione (zapisane w bazie albo z Rejestru detali), postęp i kod QR; numery zamienione przez arkusz na daty i liczby', () => {
+  const list = [row(3, { A: 1, B: '26/1', C: 'Kołnierz', D: 'R-1', E: '2.1.4', F: 1, G: 4 }), row(4, { A: 2, B: '26/1', C: 'Tuleja', D: '0000123', E: '2,3', F: 1, G: 2 }),
+    row(5, { A: 3, B: '26/1', C: 'Wałek', D: 'R-9', E: '1', F: 1, G: 5, P: 5 })];
   const reg = [row(3, { C: '26/1', D: 'R-1', E: '2002-01-04', F: 1, G: 1 }), row(4, { C: '26/1', D: 'R-1', E: '2.1.4', F: '1', G: 2 }), row(5, { C: '26/1', D: 123, E: 2.3, F: 1, G: 2 })];
-  const r = computeDetailReg(reg, list);
-  assert.deepEqual(r.map((x) => [x.J, x.K, x.I]), [[4, 3, 0.75], [4, 3, 0.75], [2, 2, 1]]);
+  assert.deepEqual(computeDetailReg(reg, list), reg.map((x) => x.v));          // Rejestr detali bez kolumn liczonych
   const l = computeDetailList(list, reg);
-  assert.deepEqual(l.map((x) => x.L), [0.75, 1]); assert.equal(l[0].J, 'R-12.1.4'); assert.equal(l[0].K, 4);
+  assert.deepEqual(l.map((x) => x.P), [3, 2, 5]);                                // 3 i 2 z rejestru (pusta kolumna P), 5 zapisane w bazie
+  assert.deepEqual(l.map((x) => x.L), [0.75, 1, 1]);
+  assert.equal(computeDetailList([row(6, { B: 'x', C: 'n', G: 4, P: 1 })], reg)[0].P, 1);   // zapisana wartość ma pierwszeństwo
   assert.equal(detailQr(list[0].v), '*26/1*$R-1$⍵2.1.4⍵^1^@4@'); assert.equal(detailQr({ B: 'x' }), '');
   assert.equal(looseKey('06-01'), looseKey('2026-06-01')); assert.notEqual(looseKey('06-02'), looseKey('2026-06-01'));
+  // kolumny Listy detali: bez klucza, szt, daty druku i potwierdzenia; sztuki zrobione i postęp przed uwagami
+  assert.deepEqual(sheetColumns(sheetByKey('dlist')).map((c) => c.key), ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'P', 'L', 'O']);
+  assert.deepEqual(sheetColumns(sheetByKey('dlistArch')).map((c) => c.title).slice(-3), ['szt zrobione', 'postęp', 'Uwagi']);
 });
 
 test('Z.kom: wpisany status albo „wstrzymany” z kolumny I; import pomija wynik formuły', () => {
@@ -52,7 +57,7 @@ test('Import: tylko kolumny wpisywane, daty i godziny z Excela, kolumny jak w pl
   assert.deepEqual(rowsFromGrid(sh, g), [{ row: 3, v: { A: '2026-01-02', B: '07:00', C: 'K', D: '1', E: 10, F: 'Kl', G: 'R', H: 'op@x', I: 'Start' } }]);
   assert.equal(xlsxValue({ v: 46024, date: true }), '2026-01-02'); assert.equal(xlsxValue({ v: 0.5, date: true }), '12:00');
   assert.equal(xlsxValue({ v: 46024.25, date: true }), '2026-01-02 06:00'); assert.equal(xlsxValue({ v: 'abc' }), 'abc');
-  assert.deepEqual(sheetColumns(sheetByKey('dreg')).map((c) => c.key), ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']);
+  assert.deepEqual(sheetColumns(sheetByKey('dreg')).map((c) => c.key), ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);   // bez Progres, Do zrobienia, zrobione
   assert.equal(Object.keys(computeAll({})).length, 8);
 });
 
