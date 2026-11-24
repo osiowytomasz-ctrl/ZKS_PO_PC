@@ -1,9 +1,11 @@
 /**
  * Code_MistrzPO.js – rejestry detali, operacji i dokumentacji z arkusza Mistrz_po (używane przez Skaner w aplikacji).
  *
- * Logika przeniesiona ze skryptu Mistrz_po (osobny arkusz, katalog mistrz-po/): ten sam arkusz,
- * te same zakładki, te same reguły zapisu. Różnice względem oryginału:
- *  - arkusz jest otwierany przez openById (skrypt działa jako właściciel, nie jako użytkownik),
+ * ZAPIS TYLKO W BAZIE: rejestry (detali, operacji, dokumentacji), Lista detali i archiwa są w bazie Firebase (Firestore, mp_rows),
+ * a nie w arkuszu Google. Skaner (PC i Android) zapisuje wyłącznie do bazy. Arkusz Mistrz_po jest używany tylko na wyraźne polecenie:
+ *  - mp_export (import arkusz → baza, tylko GOD) oraz mp_exportToSheet (eksport baza → arkusz, MASTER i GOD).
+ * Logika rejestrów (reguły zapisu) jest ta sama co w skrypcie Mistrz_po. Różnice względem oryginału:
+ *  - dostęp do bazy przez konto usługi (Firestore REST), arkusz (import/eksport) przez openById,
  *  - operator to e-mail z klucza API (ctx.email), a nie Session.getActiveUser(),
  *  - wszystkie nazwy mają prefiks mp_, żeby nie kolidować z resztą projektu,
  *  - zapisy idą pod blokadą (api_withLock_ przez flagę `write` w API_FUNCS).
@@ -67,24 +69,8 @@ function mp_str_(v) {
   return v === undefined || v === null ? '' : String(v);
 }
 
-function mp_now_() {
-  var now = new Date();
-  return {
-    date: Utilities.formatDate(now, MP_TZ, 'dd.MM.yyyy'),
-    time: Utilities.formatDate(now, MP_TZ, 'HH:mm')
-  };
-}
 
-function mp_shortName_(email) {
-  return mp_str_(email).split('@')[0];
-}
 
-/** Wartości A..lastCol od firstRow; pusta tablica, gdy w arkuszu nie ma jeszcze takich wierszy. */
-function mp_rows_(sheet, firstRow, lastCol) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < firstRow) return [];
-  return sheet.getRange(firstRow, 1, lastRow - firstRow + 1, lastCol).getValues();
-}
 
 // ---------------------------------------------------------------------------
 // Uprawnienia
@@ -157,14 +143,222 @@ function mp_setupLevelColumn() {
 }
 
 // ---------------------------------------------------------------------------
+// Baza Firebase (Firestore REST, konto usługi): mp_meta/main i mp_rows/{klucz}_{nnn} = { k, r: { "<wiersz>": "<JSON {A:…, B:…}>" } }
+// Wiersz = numer wiersza arkusza Mistrz_po; w bazie tylko kolumny wpisywane (kolumny liczone liczy program). Daty: rrrr-mm-dd, godziny: gg:mm.
+// ---------------------------------------------------------------------------
+
+var MP_CHUNK = 300;
+
+/** Zakładki modułu: klucz → nazwa zakładki arkusza, pierwszy wiersz danych, ostatnia kolumna, kolumny wpisywane (jak SHEETS w logic/mistrz.js). */
+var MP_DEF = {
+  ops:       { name: 'Rejestr operacji',       first: 3, cols: 10, input: 'ABCDEFGHIJ' },
+  docs:      { name: 'Rejestr dokumentacji',   first: 3, cols: 10, input: 'ABCDEFGHIJ' },
+  dreg:      { name: 'Rejestr detali',         first: 3, cols: 8,  input: 'ABCDEFGH' },
+  dlist:     { name: 'Lista detali',           first: 3, cols: 15, input: 'ABCDEFGMNO' },
+  zkom:      { name: 'Z.kom',                  first: 2, cols: 9,  input: 'ABCDEFGHI' },
+  opsArch:   { name: 'Archiwum operacji',      first: 3, cols: 10, input: 'ABCDEFGHIJ' },
+  docsArch:  { name: 'Ar. dok',                first: 3, cols: 10, input: 'ABCDEFGHIJ' },
+  dlistArch: { name: 'Archiwum Lista detali',  first: 3, cols: 15, input: 'ABCDEFGMNO' }
+};
+
+function mp_keyOfSheet_(name) {
+  var found = null;
+  Object.keys(MP_DEF).forEach(function (k) { if (MP_DEF[k].name === name || k === name) found = k; });
+  return found;
+}
+
+function mp_colIndex_(letter) { return letter.charCodeAt(0) - 65; }   // A → 0 (kolumny do Z wystarczą)
+
+function mp_fsBase_() {
+  var projectId = PropertiesService.getScriptProperties().getProperty('FIREBASE_PROJECT_ID') || 'harmonohram-zks';
+  return 'projects/' + projectId + '/databases/(default)/documents';
+}
+
+/** Token konta usługi (zakres datastore), pamiętany w CacheService. */
+function mp_fsToken_() {
+  var cache = CacheService.getScriptCache();
+  var t = cache.get('mp_fs_token');
+  if (t) return t;
+  var props = PropertiesService.getScriptProperties();
+  var email = props.getProperty('FIREBASE_CLIENT_EMAIL');
+  var key = (props.getProperty('FIREBASE_PRIVATE_KEY') || '').replace(/\\n/g, '\n');
+  if (!email || !key) throw new Error('Brak FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY w Script Properties.');
+  var now = Math.floor(Date.now() / 1000);
+  var unsigned = api_b64url_(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + api_b64url_(JSON.stringify({
+    iss: email, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600
+  }));
+  var jwt = unsigned + '.' + api_b64url_(Utilities.computeRsaSha256Signature(unsigned, key));
+  var r = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post', payload: { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }, muteHttpExceptions: true
+  });
+  var j = JSON.parse(r.getContentText() || '{}');
+  if (!j.access_token) throw new Error('Brak dostępu do bazy (token konta usługi): ' + r.getContentText().slice(0, 200));
+  cache.put('mp_fs_token', j.access_token, 3000);
+  return j.access_token;
+}
+
+function mp_fsFetch_(method, url, body) {
+  var opts = { method: method, headers: { Authorization: 'Bearer ' + mp_fsToken_() }, muteHttpExceptions: true };
+  if (body !== undefined) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
+  var r = UrlFetchApp.fetch('https://firestore.googleapis.com/v1/' + url, opts);
+  var code = r.getResponseCode();
+  if (code === 404) return null;
+  if (code !== 200) throw new Error('Błąd bazy (' + code + '): ' + r.getContentText().slice(0, 200));
+  return JSON.parse(r.getContentText() || '{}');
+}
+
+function mp_fsStr_(f) { return f && typeof f.stringValue === 'string' ? f.stringValue : ''; }
+
+/** mp_meta/main → { sheets: { klucz: { rows, n, name } } } (puste, gdy brak). */
+function mp_meta_() {
+  var d = mp_fsFetch_('GET', mp_fsBase_() + '/mp_meta/main');
+  var out = { sheets: {} };
+  var sh = d && d.fields && d.fields.sheets && d.fields.sheets.mapValue && d.fields.sheets.mapValue.fields;
+  Object.keys(sh || {}).forEach(function (k) {
+    var f = (sh[k].mapValue && sh[k].mapValue.fields) || {};
+    out.sheets[k] = { rows: Number(f.rows && (f.rows.integerValue || f.rows.doubleValue)) || 0, n: Number(f.n && (f.n.integerValue || f.n.doubleValue)) || 0 };
+  });
+  return out;
+}
+
+function mp_pad3_(n) { return ('00' + n).slice(-3); }
+
+/**
+ * Wszystkie wiersze zakładki [key] z bazy: { rows: [{ row, v, chunk }] posortowane po numerze wiersza, chunks: [{ id, idx, count }] }.
+ * Paczki mają kolejne numery od 000; czytamy je jednym batchGet (o jedną więcej niż wynika z meta – na wypadek dopisanej).
+ */
+function mp_loadKey_(key, meta) {
+  meta = meta || mp_meta_();
+  var m = meta.sheets[key] || { rows: 0, n: 0 };
+  var n = Math.max(Math.ceil(m.rows / MP_CHUNK), m.n, 1) + 1;
+  var names = [];
+  for (var i = 0; i < n; i++) names.push(mp_fsBase_() + '/mp_rows/' + key + '_' + mp_pad3_(i));
+  var res = mp_fsFetch_('POST', mp_fsBase_() + ':batchGet', { documents: names }) || [];
+  var rows = [], chunks = [];
+  res.forEach(function (x) {
+    if (!x.found) return;
+    var id = x.found.name.split('/').pop(), idx = Number(id.split('_').pop());
+    var r = (x.found.fields && x.found.fields.r && x.found.fields.r.mapValue && x.found.fields.r.mapValue.fields) || {};
+    var count = 0;
+    Object.keys(r).forEach(function (row) {
+      var v = {};
+      try { v = JSON.parse(mp_fsStr_(r[row])) || {}; } catch (e) { v = {}; }
+      rows.push({ row: Number(row), v: v, chunk: id });
+      count++;
+    });
+    chunks.push({ id: id, idx: idx, count: count });
+  });
+  rows.sort(function (a, b) { return a.row - b.row; });
+  chunks.sort(function (a, b) { return a.idx - b.idx; });
+  return { rows: rows, chunks: chunks };
+}
+
+/** Zapis zmian wierszy jednej paczki: changes = { "<wiersz>": obiekt v | null (usunięcie) }. */
+function mp_fsPatchChunk_(key, chunkId, changes) {
+  var fields = {}, mask = ['k'];
+  Object.keys(changes).forEach(function (row) {
+    mask.push('r.`' + row + '`');
+    if (changes[row] !== null) fields[row] = { stringValue: JSON.stringify(changes[row]) };
+  });
+  var url = mp_fsBase_() + '/mp_rows/' + chunkId + '?' + mask.map(function (p) { return 'updateMask.fieldPaths=' + encodeURIComponent(p); }).join('&');
+  mp_fsFetch_('PATCH', url, { fields: { k: { stringValue: key }, r: { mapValue: { fields: fields } } } });
+}
+
+/** Zapis liczników zakładki w mp_meta/main (rows, n, at) – dane dopisane z programów (np. skaner), bez zmiany źródła importu. */
+function mp_fsPatchMeta_(key, rows, n) {
+  var f = {};
+  f.rows = { integerValue: String(rows) }; f.n = { integerValue: String(n) }; f.at = { integerValue: String(new Date().getTime()) }; f.name = { stringValue: MP_DEF[key].name };
+  var url = mp_fsBase_() + '/mp_meta/main?' + ['rows', 'n', 'at', 'name'].map(function (p) { return 'updateMask.fieldPaths=' + encodeURIComponent('sheets.`' + key + '`.' + p); }).join('&');
+  mp_fsFetch_('PATCH', url, { fields: { sheets: { mapValue: { fields: (function () { var o = {}; o[key] = { mapValue: { fields: f } }; return o; })() } } } });
+}
+
+/** Dopisuje wiersz na końcu zakładki (numer = największy + 1, nie mniejszy niż pierwszy wiersz danych). Zwraca numer wiersza. */
+function mp_append_(key, v, loaded) {
+  var d = loaded || mp_loadKey_(key);
+  var row = MP_DEF[key].first;
+  d.rows.forEach(function (r) { if (r.row >= row) row = r.row + 1; });
+  var last = d.chunks.length ? d.chunks[d.chunks.length - 1] : null;
+  var chunkId, idx;
+  if (last && last.count < MP_CHUNK) { chunkId = last.id; idx = last.idx; }
+  else { idx = last ? last.idx + 1 : 0; chunkId = key + '_' + mp_pad3_(idx); }
+  var ch = {}; ch[row] = v;
+  mp_fsPatchChunk_(key, chunkId, ch);
+  mp_fsPatchMeta_(key, d.rows.length + 1, Math.max(idx + 1, d.chunks.length));
+  d.rows.push({ row: row, v: v, chunk: chunkId });
+  if (last && last.id === chunkId) last.count++; else d.chunks.push({ id: chunkId, idx: idx, count: 1 });
+  return row;
+}
+
+/** Zmienia wartości kolumn istniejącego wiersza (rowObj z mp_loadKey_) – scala [patch] z dotychczasowymi. */
+function mp_update_(key, rowObj, patch) {
+  var v = {};
+  Object.keys(rowObj.v).forEach(function (c) { v[c] = rowObj.v[c]; });
+  Object.keys(patch).forEach(function (c) { v[c] = patch[c]; });
+  var ch = {}; ch[rowObj.row] = v;
+  mp_fsPatchChunk_(key, rowObj.chunk, ch);
+  rowObj.v = v;
+}
+
+/** Usuwa wiersz z bazy (dane wiersza znikają; numer może zostać użyty ponownie po imporcie). */
+function mp_remove_(key, rowObj) {
+  var ch = {}; ch[rowObj.row] = null;
+  mp_fsPatchChunk_(key, rowObj.chunk, ch);
+}
+
+// ---------------------------------------------------------------------------
+// Wartości i porównania
+// ---------------------------------------------------------------------------
+
+function mp_cell_(rowObj, col) { return mp_str_(rowObj.v[col]); }
+function mp_eqv_(a, b) { return mp_str_(a).trim().toLowerCase() === mp_str_(b).trim().toLowerCase(); }
+
+/**
+ * Luźny klucz numeru detalu (jak looseKey w logic/mistrz.js): arkusz zamienia niektóre wpisy na daty / liczby, a formuły i tak je łączą –
+ * data r-m-d, „m-d” i liczba zapisana tekstem dają ten sam klucz.
+ */
+function mp_loose_(x) {
+  var t = mp_str_(x).trim().toLowerCase();
+  var p2 = function (v) { return ('0' + Number(v)).slice(-2); };
+  var md = function (m, d) { return (Number(m) >= 1 && Number(m) <= 12 && Number(d) >= 1 && Number(d) <= 31) ? 'md:' + p2(m) + '-' + p2(d) : null; };
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) return md(m[2], m[3]) || t;
+  m = /^(\d{1,4})[./-](\d{1,2})[./-](\d{1,2})$/.exec(t);
+  if (m) return md(m[2], m[3]) || t;
+  m = /^(\d{1,2})[-/](\d{1,2})$/.exec(t);
+  if (m) return md(m[1], m[2]) || t;
+  var n = t.replace(',', '.');
+  return /^-?\d+(\.\d+)?$/.test(n) && n.length < 16 ? String(Number(n)) : t;
+}
+function mp_dkey_(parts) { return parts.map(mp_loose_).join('\u0001'); }
+function mp_num_(x) { var t = mp_str_(x).trim().replace(',', '.'); if (t === '') return NaN; return Number(t); }
+
+/** Data (rrrr-mm-dd) → dd.mm.rrrr; godzina z sekundami → gg:mm; inne wartości bez zmian. */
+function mp_display_(v) {
+  var t = mp_str_(v);
+  var m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2})(?::\d{2})?)?$/.exec(t);
+  if (m) return m[3] + '.' + m[2] + '.' + m[1] + (m[4] ? ' ' + m[4] : '');
+  var h = /^(\d{2}:\d{2}):\d{2}$/.exec(t);
+  return h ? h[1] : t;
+}
+
+function mp_now_() {
+  var now = new Date();
+  return {
+    date: Utilities.formatDate(now, MP_TZ, 'yyyy-MM-dd'),
+    time: Utilities.formatDate(now, MP_TZ, 'HH:mm')
+  };
+}
+
+function mp_shortName_(email) {
+  return mp_str_(email).split('@')[0];
+}
+
+// ---------------------------------------------------------------------------
 // Rejestr detali
 // ---------------------------------------------------------------------------
 
 function mp_saveDetail_(form, ctx) {
   form = form || {};
-  var dataSheet = mp_sheet_(MP_DETAIL_SHEET);
-  var listSheet = mp_sheet_(MP_LIST_SHEET);
-
   var code = mp_str_(form.productCode);
   if (!code) throw new Error('Błąd: Brak kodu produktu!');
 
@@ -182,57 +376,33 @@ function mp_saveDetail_(form, ctx) {
     throw new Error("Błąd: Pole 'Ilość sztuk' musi być większe lub równe 1!");
   }
 
-  var listRows = mp_rows_(listSheet, MP_LIST_FIRST_ROW, 7); // A..G
-  if (!listRows.length) throw new Error('Błąd: Lista detali jest pusta!');
-  var detailMap = {};
-  listRows.forEach(function (row) {
-    // B komis, D nr rysunku, E nr pozycji, F atrybut, G ilość zlecona
-    var key = [mp_str_(row[1]), mp_str_(row[3]), mp_str_(row[4]), mp_str_(row[5])].join('|');
-    detailMap[key] = Number(row[6] || 0);
+  var meta = mp_meta_();
+  var list = mp_loadKey_('dlist', meta).rows;
+  if (!list.length) throw new Error('Błąd: Lista detali jest pusta!');
+  var detailKey = mp_dkey_([colC, colG, colH, colF]);
+  var ordered = null;
+  list.forEach(function (r) {   // B komis, D nr rysunku, E nr pozycji, F atrybut, G ilość zlecona
+    if (mp_dkey_([r.v.B, r.v.D, r.v.E, r.v.F]) === detailKey) ordered = (ordered || 0) + (Number(mp_str_(r.v.G).replace(',', '.')) || 0);
   });
-  var detailKey = [colC, colG, colH, colF].join('|');
-  if (!(detailKey in detailMap)) throw new Error('Detal nie zarejestrowany na liście detali!');
-  var orderedQuantity = detailMap[detailKey];
+  if (ordered === null) throw new Error('Detal nie zarejestrowany na liście detali!');
 
-  var rows = mp_rows_(dataSheet, MP_DETAIL_FIRST_ROW, 10); // A..J
-  var newRow = MP_DETAIL_FIRST_ROW + rows.length;
+  var reg = mp_loadKey_('dreg', meta);
   var registered = 0;
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i];
-    if (!(row[2] || row[3] || row[4])) { // C, D, E puste = pierwszy wolny wiersz
-      newRow = MP_DETAIL_FIRST_ROW + i;
-      break;
-    }
-    if (mp_str_(row[2]) === colC && mp_str_(row[3]) === colG && mp_str_(row[4]) === colH && mp_str_(row[5]) === colF) {
-      registered += Number(row[6] || 0);
-    }
-  }
-
-  if (registered + extraNum > orderedQuantity) {
-    var allowed = orderedQuantity - registered;
-    throw new Error('Zarejestrowano ' + registered + ' detali, dozwolona ilość: ' + allowed + '. Skontaktuj się z Mistrzem PO.');
+  reg.rows.forEach(function (r) {
+    if (mp_dkey_([r.v.C, r.v.D, r.v.E, r.v.F]) === detailKey) registered += Number(mp_str_(r.v.G).replace(',', '.')) || 0;
+  });
+  if (registered + extraNum > ordered) {
+    throw new Error('Zarejestrowano ' + registered + ' detali, dozwolona ilość: ' + (ordered - registered) + '. Skontaktuj się z Mistrzem PO.');
   }
 
   var t = mp_now_();
-  dataSheet.getRange(newRow, 1, 1, 8).setValues([[t.date, t.time, colC, colG, colH, colF, extra, ctx.email]]);
-  return { status: 'success', message: 'Dane zapisane w wierszu ' + newRow + ' przez ' + mp_shortName_(ctx.email) };
+  var newRow = mp_append_('dreg', { A: t.date, B: t.time, C: colC, D: colG, E: colH, F: colF, G: extra, H: ctx.email }, reg);
+  return { status: 'success', message: 'Dane zapisane w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
 }
 
 // ---------------------------------------------------------------------------
 // Rejestr operacji
 // ---------------------------------------------------------------------------
-
-function mp_operRows_(sheet) {
-  return mp_rows_(sheet, MP_OPER_FIRST_ROW, 13); // A..M
-}
-
-/** Kopiuje formuły i formatowanie K:M z wiersza źródłowego (jak w oryginale). */
-function mp_copyFormulas_(sheet, targetRow) {
-  var src = sheet.getRange(MP_OPER_FORMULA_SOURCE_ROW, 11, 1, 3);
-  var dst = sheet.getRange(targetRow, 11, 1, 3);
-  src.copyTo(dst, { contentsOnly: false });
-  src.copyTo(dst, { formatOnly: true });
-}
 
 function mp_parseOperCode_(code) {
   code = mp_str_(code);
@@ -245,52 +415,52 @@ function mp_parseOperCode_(code) {
   };
 }
 
-/**
- * Wyszukiwanie operacji. conditions: {indeksKolumny: wartość | funkcja}, columns: indeksy kolumn wyniku
- * [E, C, D, F, H, ostatnia]. Wynik posortowany po pierwszej kolumnie (nr operacji).
- */
-function mp_searchOperations_(conditions, columns) {
-  var rows = mp_operRows_(mp_sheet_(MP_OPER_SHEET));
-  var keys = Object.keys(conditions);
-  var found = rows.filter(function (row) {
-    return keys.every(function (colIndex) {
-      var cond = conditions[colIndex];
-      var value = mp_str_(row[parseInt(colIndex, 10)]);
-      return typeof cond === 'function' ? cond(value) : value === String(cond);
-    });
-  }).map(function (row) {
-    var out = {};
-    ['nr', 'komis', 'przewodnik', 'klient', 'operator', 'status'].forEach(function (name, i) {
-      out[name] = mp_str_(row[columns[i]]);
-    });
-    return out;
+/** Stan operacji (komis, przewodnik, nr): Koniec > W toku > Start (jak kolumna K Rejestru operacji); wpis „Usunięta” ma pusty stan. */
+function mp_opStates_(rows) {
+  var rank = {};
+  rows.forEach(function (r) {
+    var st = mp_str_(r.v.I).trim().toLowerCase();
+    var k = mp_dkey_([r.v.C, r.v.D, r.v.E]);
+    var x = st === 'koniec' ? 3 : st === 'w toku' ? 2 : st === 'start' ? 1 : 0;
+    if (x > (rank[k] || 0)) rank[k] = x;
   });
-  found.sort(function (a, b) { return a.nr.toLowerCase().localeCompare(b.nr.toLowerCase()); });
-  return found;
+  return function (r) {
+    if (mp_str_(r.v.I).trim().toLowerCase() === 'usunięta') return '';
+    return ['', 'Start', 'W toku', 'Koniec'][rank[mp_dkey_([r.v.C, r.v.D, r.v.E])] || 0];
+  };
 }
 
-/** Zaległe operacje komisu: status Start i kolumna K różna od „Koniec”. */
+function mp_opsOut_(rows, statusFn) {
+  var out = rows.map(function (r) {
+    return { nr: mp_cell_(r, 'E'), komis: mp_cell_(r, 'C'), przewodnik: mp_cell_(r, 'D'), klient: mp_cell_(r, 'F'), operator: mp_cell_(r, 'H'), status: statusFn(r) };
+  });
+  out.sort(function (a, b) { return a.nr.toLowerCase().localeCompare(b.nr.toLowerCase()); });
+  return out;
+}
+
+/** Zaległe operacje komisu: status Start i stan operacji (kolumna K) różny od „Koniec”. */
 function mp_pendingOperations_(komis) {
-  return mp_searchOperations_({ 2: mp_str_(komis), 8: 'Start', 10: function (v) { return v !== 'Koniec'; } },
-    [4, 2, 3, 5, 7, 10]);
+  var rows = mp_loadKey_('ops').rows, stateOf = mp_opStates_(rows);
+  var k = mp_str_(komis);
+  return mp_opsOut_(rows.filter(function (r) { return mp_cell_(r, 'C') === k && mp_cell_(r, 'I') === 'Start' && stateOf(r) !== 'Koniec'; }), stateOf);
 }
 
 /** Wszystkie operacje komisu i przewodnika (podgląd); status z kolumny I. */
 function mp_displayOperations_(komis, przewodnik) {
-  return mp_searchOperations_({ 2: mp_str_(komis), 3: mp_str_(przewodnik) }, [4, 2, 3, 5, 7, 8]);
+  var rows = mp_loadKey_('ops').rows;
+  return mp_opsOut_(rows.filter(function (r) { return mp_cell_(r, 'C') === mp_str_(komis) && mp_cell_(r, 'D') === mp_str_(przewodnik); }), function (r) { return mp_cell_(r, 'I'); });
 }
 
 /** Aktywne (nieusunięte) operacje o danym komisie, przewodniku i numerze. */
 function mp_findOperations_(komis, przewodnik, nr) {
-  return mp_searchOperations_({
-    2: mp_str_(komis), 3: mp_str_(przewodnik), 4: mp_str_(nr),
-    8: function (v) { return v !== 'Usunięta'; }
-  }, [4, 2, 3, 5, 7, 8]);
+  var rows = mp_loadKey_('ops').rows;
+  return mp_opsOut_(rows.filter(function (r) {
+    return mp_cell_(r, 'C') === mp_str_(komis) && mp_cell_(r, 'D') === mp_str_(przewodnik) && mp_cell_(r, 'E') === mp_str_(nr) && mp_cell_(r, 'I') !== 'Usunięta';
+  }), function (r) { return mp_cell_(r, 'I'); });
 }
 
 function mp_saveOperation_(form, ctx) {
   form = form || {};
-  var sheet = mp_sheet_(MP_OPER_SHEET);
   if (!mp_str_(form.productCode)) throw new Error('Brak operacji!');
 
   var p = mp_parseOperCode_(form.productCode);
@@ -299,16 +469,11 @@ function mp_saveOperation_(form, ctx) {
   var status = mp_str_(form.status) || 'Start';
   if (MP_OPER_STATUSES.indexOf(status) === -1) throw new Error('Nieprawidłowy status operacji: ' + status);
 
-  var rows = mp_operRows_(sheet);
-  var newRow = MP_OPER_FIRST_ROW + rows.length;
-  for (var i = 0; i < rows.length; i++) {
-    if (!rows[i].some(function (cell) { return cell; })) { newRow = MP_OPER_FIRST_ROW + i; break; }
-  }
-
+  var d = mp_loadKey_('ops');
   var hasStart = false, hasEnd = false;
-  rows.forEach(function (row) {
-    if (mp_str_(row[2]) === p.komis && mp_str_(row[3]) === p.przewodnik && mp_str_(row[4]) === p.nr) {
-      var s = mp_str_(row[8]);
+  d.rows.forEach(function (r) {
+    if (mp_cell_(r, 'C') === p.komis && mp_cell_(r, 'D') === p.przewodnik && mp_cell_(r, 'E') === p.nr) {
+      var s = mp_cell_(r, 'I');
       if (s === 'Start') hasStart = true;
       if (s === 'Koniec') hasEnd = true;
     }
@@ -322,75 +487,51 @@ function mp_saveOperation_(form, ctx) {
   }
 
   var t = mp_now_();
-  sheet.getRange(newRow, 1, 1, 10).setValues([[
-    t.date, t.time, p.komis, p.przewodnik, p.nr, p.klient, p.rysunek, ctx.email, status, mp_str_(form.notes)
-  ]]);
-  SpreadsheetApp.flush();
-  mp_copyFormulas_(sheet, newRow);
-  SpreadsheetApp.flush();
-
-  return { status: 'success', message: 'Dane zapisane w wierszu ' + newRow + ' przez ' + mp_shortName_(ctx.email) };
+  var newRow = mp_append_('ops', { A: t.date, B: t.time, C: p.komis, D: p.przewodnik, E: p.nr, F: p.klient, G: p.rysunek, H: ctx.email, I: status, J: mp_str_(form.notes) }, d);
+  return { status: 'success', message: 'Dane zapisane w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
 }
 
 /** Zmiana statusu zakończonej operacji z powrotem na „W toku” (uprawnienie manage). */
 function mp_changeOperationStatus_(form, ctx) {
   mp_require_(ctx, 'manage');
   form = form || {};
-  var sheet = mp_sheet_(MP_OPER_SHEET);
   var p = mp_parseOperCode_(form.productCode);
   if (!p.komis || !p.przewodnik || !p.nr) throw new Error('Brak danych w kluczowych polach!');
 
-  var rows = mp_operRows_(sheet);
-  var targetRow = -1;
+  var rows = mp_loadKey_('ops').rows, stateOf = mp_opStates_(rows), target = null;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    if (mp_str_(r[2]) === p.komis && mp_str_(r[3]) === p.przewodnik && mp_str_(r[4]) === p.nr && mp_str_(r[8]) === 'Koniec') {
-      targetRow = MP_OPER_FIRST_ROW + i;
-      if (mp_str_(r[10]) !== 'Koniec') throw new Error('Operacja nie jest zakończona (status K: ' + mp_str_(r[10]) + ')!');
+    if (mp_cell_(r, 'C') === p.komis && mp_cell_(r, 'D') === p.przewodnik && mp_cell_(r, 'E') === p.nr && mp_cell_(r, 'I') === 'Koniec') {
+      if (stateOf(r) !== 'Koniec') throw new Error('Operacja nie jest zakończona (status K: ' + stateOf(r) + ')!');
+      target = r;
       break;
     }
   }
-  if (targetRow === -1) throw new Error("Nie znaleziono operacji ze statusem 'Koniec'!");
+  if (!target) throw new Error("Nie znaleziono operacji ze statusem 'Koniec'!");
 
-  var t = mp_now_();
-  var who = mp_shortName_(ctx.email);
-  var note = 'Zmiana statusu na W toku: ' + t.date + ' ' + t.time + ' przez ' + who;
-  var current = mp_str_(sheet.getRange(targetRow, 10).getValue());
-  sheet.getRange(targetRow, 9, 1, 2).setValues([['W toku', current ? current + '; ' + note : note]]);
-  SpreadsheetApp.flush();
-  mp_copyFormulas_(sheet, targetRow);
-  SpreadsheetApp.flush();
-
-  return { status: 'success', message: "Status zmieniony na 'W toku' w wierszu " + targetRow + ' przez ' + who };
+  var t = mp_now_(), who = mp_shortName_(ctx.email);
+  var note = 'Zmiana statusu na W toku: ' + mp_display_(t.date) + ' ' + t.time + ' przez ' + who;
+  var current = mp_cell_(target, 'J');
+  mp_update_('ops', target, { I: 'W toku', J: current ? current + '; ' + note : note });
+  return { status: 'success', message: "Status zmieniony na 'W toku' w wierszu " + target.row + ' przez ' + who };
 }
 
-/** Oznacza wszystkie aktywne wiersze operacji jako „Usunięta” (uprawnienie manage); dane zostają w arkuszu. */
+/** Oznacza wszystkie aktywne wiersze operacji jako „Usunięta” (uprawnienie manage); dane zostają w bazie. */
 function mp_deleteOperation_(form, ctx) {
   mp_require_(ctx, 'manage');
   form = form || {};
-  var sheet = mp_sheet_(MP_OPER_SHEET);
   var p = mp_parseOperCode_(form.productCode);
   if (!p.komis || !p.przewodnik || !p.nr) throw new Error('Brak danych w kluczowych polach!');
 
-  var rows = mp_operRows_(sheet);
-  var t = mp_now_();
-  var who = mp_shortName_(ctx.email);
-  var note = 'Usunięto: ' + t.date + ' ' + t.time + ' przez ' + who;
-  var updated = [];
-  rows.forEach(function (row, i) {
-    if (mp_str_(row[2]) === p.komis && mp_str_(row[3]) === p.przewodnik && mp_str_(row[4]) === p.nr && mp_str_(row[8]) !== 'Usunięta') {
-      var current = mp_str_(row[9]);
-      updated.push({ row: MP_OPER_FIRST_ROW + i, values: ['Usunięta', current ? current + '; ' + note : note] });
-    }
+  var rows = mp_loadKey_('ops').rows;
+  var t = mp_now_(), who = mp_shortName_(ctx.email);
+  var note = 'Usunięto: ' + mp_display_(t.date) + ' ' + t.time + ' przez ' + who;
+  var hits = rows.filter(function (r) {
+    return mp_cell_(r, 'C') === p.komis && mp_cell_(r, 'D') === p.przewodnik && mp_cell_(r, 'E') === p.nr && mp_cell_(r, 'I') !== 'Usunięta';
   });
-  if (!updated.length) throw new Error('Nie znaleziono aktywnych operacji!');
-
-  updated.forEach(function (u) { sheet.getRange(u.row, 9, 1, 2).setValues([u.values]); });
-  SpreadsheetApp.flush();
-  updated.forEach(function (u) { mp_copyFormulas_(sheet, u.row); });
-  SpreadsheetApp.flush();
-
-  return { status: 'success', message: "Status " + updated.length + " operacji zmieniony na 'Usunięta' przez " + who };
+  if (!hits.length) throw new Error('Nie znaleziono aktywnych operacji!');
+  hits.forEach(function (r) { var cur = mp_cell_(r, 'J'); mp_update_('ops', r, { I: 'Usunięta', J: cur ? cur + '; ' + note : note }); });
+  return { status: 'success', message: 'Status ' + hits.length + " operacji zmieniony na 'Usunięta' przez " + who };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +540,6 @@ function mp_deleteOperation_(form, ctx) {
 
 function mp_saveDocument_(form, ctx) {
   form = form || {};
-  var sheet = mp_sheet_(MP_DOC_SHEET);
   var code = mp_str_(form.productCode);
   if (!code) throw new Error('Błąd: Brak danych!');
 
@@ -414,20 +554,15 @@ function mp_saveDocument_(form, ctx) {
     throw new Error('Błąd: Nieprawidłowy format kodu. Brak danych w kluczowych polach (Komis, Nr przewodnika, Typ dokumentu, Nazwa, Nr rysunku, Nr id, Ilość operacji). Skanowanie zablokowane!');
   }
 
-  var values = mp_rows_(sheet, MP_DOC_FIRST_ROW, 10).map(function (r) { return r.slice(2, 9); }); // C..I
-  var duplicate = values.some(function (row) { return mp_str_(row[0]) === colC && mp_str_(row[1]) === colD; });
+  var d = mp_loadKey_('docs');
+  var duplicate = d.rows.some(function (r) { return mp_cell_(r, 'C') === colC && mp_cell_(r, 'D') === colD; });
   if (duplicate) {
     throw new Error("Błąd: Dokument o numerze przewodnika '" + colD + "' i numerze komis '" + colC + "' już istnieje w rejestrze!");
   }
 
-  var newRow = MP_DOC_FIRST_ROW + values.length;
-  for (var i = 0; i < values.length; i++) {
-    if (values[i].every(function (cell) { return !cell; })) { newRow = MP_DOC_FIRST_ROW + i; break; }
-  }
-
   var t = mp_now_();
-  sheet.getRange(newRow, 1, 1, 10).setValues([[t.date, t.time, colC, colD, colE, colF, colG, colH, colI, ctx.email]]);
-  return { status: 'success', message: 'Dokument został pomyślnie zapisany w wierszu: ' + newRow + ' przez: ' + mp_shortName_(ctx.email) };
+  var newRow = mp_append_('docs', { A: t.date, B: t.time, C: colC, D: colD, E: colE, F: colF, G: colG, H: colH, I: colI, J: ctx.email }, d);
+  return { status: 'success', message: 'Dokument został pomyślnie zapisany w bazie (wiersz: ' + newRow + ') przez: ' + mp_shortName_(ctx.email) };
 }
 
 /** Wpisy rejestru dokumentacji, najnowsze na górze (uprawnienie docs). filter: {komis, przewodnik} opcjonalnie. */
@@ -436,49 +571,39 @@ function mp_listDocuments_(filter, ctx) {
   filter = filter || {};
   var komis = mp_str_(filter.komis).trim();
   var przewodnik = mp_str_(filter.przewodnik).trim();
-  var rows = mp_rows_(mp_sheet_(MP_DOC_SHEET), MP_DOC_FIRST_ROW, 10);
+  var rows = mp_loadKey_('docs').rows;
   var out = [];
   for (var i = rows.length - 1; i >= 0 && out.length < MP_DOC_LIST_LIMIT; i--) {
     var r = rows[i];
-    if (r.every(function (cell) { return !cell; })) continue;
-    if (komis && mp_str_(r[2]) !== komis) continue;
-    if (przewodnik && mp_str_(r[3]) !== przewodnik) continue;
+    if (komis && mp_cell_(r, 'C') !== komis) continue;
+    if (przewodnik && mp_cell_(r, 'D') !== przewodnik) continue;
     out.push({
-      row: MP_DOC_FIRST_ROW + i,
-      date: mp_displayCell_(r[0]), time: mp_displayCell_(r[1]),
-      komis: mp_str_(r[2]), przewodnik: mp_str_(r[3]), typ: mp_str_(r[4]), nazwa: mp_str_(r[5]),
-      rysunek: mp_str_(r[6]), id: mp_str_(r[7]), ilosc: mp_str_(r[8]), operator: mp_str_(r[9])
+      row: r.row,
+      date: mp_display_(r.v.A), time: mp_display_(r.v.B),
+      komis: mp_cell_(r, 'C'), przewodnik: mp_cell_(r, 'D'), typ: mp_cell_(r, 'E'), nazwa: mp_cell_(r, 'F'),
+      rysunek: mp_cell_(r, 'G'), id: mp_cell_(r, 'H'), ilosc: mp_cell_(r, 'I'), operator: mp_cell_(r, 'J')
     });
   }
   return out;
 }
 
-/** Data i godzina z arkusza mogą być obiektami Date; zwracamy czytelny tekst. */
-function mp_displayCell_(v) {
-  if (Object.prototype.toString.call(v) === '[object Date]') {
-    return Utilities.formatDate(v, MP_TZ, v.getFullYear() < 1950 ? 'HH:mm' : 'dd.MM.yyyy');
-  }
-  return mp_str_(v);
-}
-
 /**
- * Usuwa wpis rejestru dokumentacji (czyści wiersz A:J, formatowanie zostaje) – uprawnienie docs.
- * form: {row, komis, przewodnik}. Numer wiersza jest sprawdzany z komisem i przewodnikiem, więc
- * wiersz przesunięty w arkuszu od ostatniego odczytu nie zostanie usunięty przez pomyłkę.
+ * Usuwa wpis rejestru dokumentacji z bazy – uprawnienie docs. form: {row, komis, przewodnik}.
+ * Numer wiersza jest sprawdzany z komisem i przewodnikiem, więc wiersz zmieniony od ostatniego odczytu nie zostanie usunięty przez pomyłkę.
  */
 function mp_deleteDocument_(form, ctx) {
   mp_require_(ctx, 'docs');
   form = form || {};
   var row = Number(form.row);
   if (!isFinite(row) || row < MP_DOC_FIRST_ROW || Math.floor(row) !== row) throw new Error('Nieprawidłowy numer wiersza.');
-  var sheet = mp_sheet_(MP_DOC_SHEET);
-  if (row > sheet.getLastRow()) throw new Error('Wpis nie istnieje. Odśwież listę.');
-  var cur = sheet.getRange(row, 1, 1, 10).getValues()[0];
-  if (mp_str_(cur[2]) !== mp_str_(form.komis) || mp_str_(cur[3]) !== mp_str_(form.przewodnik)) {
-    throw new Error('Wiersz w arkuszu zmienił się od ostatniego odczytu. Odśwież listę.');
+  var target = null;
+  mp_loadKey_('docs').rows.forEach(function (r) { if (r.row === row) target = r; });
+  if (!target) throw new Error('Wpis nie istnieje. Odśwież listę.');
+  if (mp_cell_(target, 'C') !== mp_str_(form.komis) || mp_cell_(target, 'D') !== mp_str_(form.przewodnik)) {
+    throw new Error('Wiersz w bazie zmienił się od ostatniego odczytu. Odśwież listę.');
   }
-  console.log('[Mistrz PO] Usunięto dokument, wiersz ' + row + ' (' + JSON.stringify(cur) + ') przez ' + ctx.email);
-  sheet.getRange(row, 1, 1, 10).clearContent();
+  console.log('[Mistrz PO] Usunięto dokument, wiersz ' + row + ' (' + JSON.stringify(target.v) + ') przez ' + ctx.email);
+  mp_remove_('docs', target);
   return { status: 'success', message: 'Usunięto wpis z wiersza ' + row + ' przez ' + mp_shortName_(ctx.email) };
 }
 
@@ -488,22 +613,19 @@ function mp_deleteDocument_(form, ctx) {
 
 function mp_listDetails_(ctx) {
   mp_require_(ctx, 'details');
-  var rows = mp_rows_(mp_sheet_(MP_LIST_SHEET), MP_LIST_FIRST_ROW, 7); // A..G
+  var rows = mp_loadKey_('dlist').rows;
   var out = [];
   for (var i = rows.length - 1; i >= 0 && out.length < MP_DETAIL_LIST_LIMIT; i--) {
     var r = rows[i];
-    if (!(r[1] || r[3] || r[4])) continue;
-    out.push({
-      row: MP_LIST_FIRST_ROW + i,
-      komis: mp_str_(r[1]), rysunek: mp_str_(r[3]), pozycja: mp_str_(r[4]), komplet: mp_str_(r[5]), ilosc: mp_str_(r[6])
-    });
+    if (!(mp_cell_(r, 'B') || mp_cell_(r, 'D') || mp_cell_(r, 'E'))) continue;
+    out.push({ row: r.row, komis: mp_cell_(r, 'B'), rysunek: mp_cell_(r, 'D'), pozycja: mp_cell_(r, 'E'), komplet: mp_cell_(r, 'F'), ilosc: mp_cell_(r, 'G') });
   }
   return out;
 }
 
 /**
- * Dodaje pozycję do listy detali. form: {komis, rysunek, pozycja, komplet, ilosc}.
- * Zapisywane są tylko kolumny B (komis) i D:G (rysunek, pozycja, komplet, ilość zlecona); A i C zostają nietknięte.
+ * Dodaje pozycję do listy detali (baza). form: {komis, rysunek, pozycja, komplet, ilosc}.
+ * Zapisywane są kolumny B (komis) i D:G (rysunek, pozycja, komplet, ilość zlecona).
  */
 function mp_addDetail_(form, ctx) {
   mp_require_(ctx, 'details');
@@ -519,37 +641,21 @@ function mp_addDetail_(form, ctx) {
     throw new Error('Ilość zlecona musi być liczbą całkowitą większą lub równą 1.');
   }
 
-  var sheet = mp_sheet_(MP_LIST_SHEET);
-  var rows = mp_rows_(sheet, MP_LIST_FIRST_ROW, 7);
+  var d = mp_loadKey_('dlist');
   var key = [komis, rysunek, pozycja, komplet].join('|');
-  var newRow = -1;
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (!(r[1] || r[3] || r[4])) { if (newRow === -1) newRow = MP_LIST_FIRST_ROW + i; continue; }
-    if ([mp_str_(r[1]), mp_str_(r[3]), mp_str_(r[4]), mp_str_(r[5])].join('|') === key) {
-      throw new Error('Taki detal jest już na liście (wiersz ' + (MP_LIST_FIRST_ROW + i) + ', ilość zlecona ' + mp_str_(r[6]) + ').');
-    }
-  }
-  if (newRow === -1) newRow = MP_LIST_FIRST_ROW + rows.length;
+  var dup = null;
+  d.rows.forEach(function (r) {
+    if (!dup && [mp_cell_(r, 'B'), mp_cell_(r, 'D'), mp_cell_(r, 'E'), mp_cell_(r, 'F')].join('|') === key) dup = r;
+  });
+  if (dup) throw new Error('Taki detal jest już na liście (wiersz ' + dup.row + ', ilość zlecona ' + mp_cell_(dup, 'G') + ').');
 
-  sheet.getRange(newRow, 2).setValue(komis);
-  sheet.getRange(newRow, 4, 1, 4).setValues([[rysunek, pozycja, komplet, ilosc]]);
-  return { status: 'success', message: 'Dodano detal do listy w wierszu ' + newRow + ' przez ' + mp_shortName_(ctx.email) };
+  var newRow = mp_append_('dlist', { B: komis, D: rysunek, E: pozycja, F: komplet, G: ilosc }, d);
+  return { status: 'success', message: 'Dodano detal do listy w bazie (wiersz ' + newRow + ') przez ' + mp_shortName_(ctx.email) };
 }
 
 // ---------------------------------------------------------------------------
-// Test w edytorze (bez zapisu): sprawdza dostęp do arkusza i zakładek
+// Import arkusz → baza (tylko GOD) i eksport baza → arkusz (MASTER, GOD)
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Eksport do bazy Firebase (moduł Mistrz PO w programie)
-// ---------------------------------------------------------------------------
-
-/** Zakładki i ostatnia kolumna z danymi wpisywanymi (jak SHEETS w logic/mistrz.js programu). */
-var MP_EXPORT_SHEETS = [
-  ['Rejestr operacji', 10], ['Rejestr dokumentacji', 10], ['Rejestr detali', 8], ['Lista detali', 15], ['Z.kom', 9],
-  ['Archiwum operacji', 10], ['Ar. dok', 10], ['Archiwum Lista detali', 15]
-];
 
 /** Wartość komórki do bazy: data → rrrr-mm-dd, sama godzina → gg:mm(:ss), data z godziną → „rrrr-mm-dd gg:mm”. */
 function mp_exportValue_(v, tz) {
@@ -560,17 +666,78 @@ function mp_exportValue_(v, tz) {
   return hms === '00:00' ? d : d + ' ' + hms;
 }
 
-/** { sheets: { nazwa zakładki: [[wartości wiersza od kolumny A], …] od wiersza 1 } } – formuły i tak pomija program. */
-function mp_export_() {
+/**
+ * Import: { sheets: { nazwa zakładki: [[wartości wiersza od kolumny A], …] od wiersza 1 } } – formuły i tak pomija program.
+ * [only] – klucz albo nazwa jednej zakładki (import jednego rejestru / listy); bez parametru – wszystkie zakładki modułu.
+ */
+function mp_export_(only) {
   var ss = mp_ss_(), tz = ss.getSpreadsheetTimeZone(), out = {};
-  MP_EXPORT_SHEETS.forEach(function (x) {
-    var sh = ss.getSheetByName(x[0]);
+  var want = only ? mp_keyOfSheet_(only) : null;
+  if (only && !want) throw new Error('Nieznana zakładka: ' + only);
+  Object.keys(MP_DEF).forEach(function (k) {
+    if (want && k !== want) return;
+    var x = MP_DEF[k], sh = ss.getSheetByName(x.name);
     if (!sh || sh.getLastRow() < 1) return;
-    out[x[0]] = sh.getRange(1, 1, sh.getLastRow(), x[1]).getValues().map(function (row) {
+    out[x.name] = sh.getRange(1, 1, sh.getLastRow(), x.cols).getValues().map(function (row) {
       return row.map(function (v) { return mp_exportValue_(v, tz); });
     });
   });
   return { sheets: out, exportedAt: new Date().getTime() };
+}
+
+/** Komórka z bazy → wartość do arkusza: daty ISO jako Date (format komórki zostaje), reszta bez zmian. */
+function mp_sheetValue_(v) {
+  if (v === undefined || v === null) return '';
+  var t = String(v);
+  var m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(t);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0));
+  return typeof v === 'number' ? v : t;
+}
+
+/**
+ * Eksport baza → arkusz dla jednej zakładki ([only] – klucz albo nazwa): czyści kolumny wpisywane (od pierwszego wiersza danych)
+ * i wpisuje wiersze z bazy pod tymi samymi numerami wierszy; kolumny liczone (formuły) zostają. Dla Rejestru operacji kopiuje formuły K:M
+ * z wiersza 1 na wszystkie wiersze danych (jak robił skaner). Poziom MASTER lub GOD (sprawdza Api.gs).
+ */
+function mp_exportToSheet_(only) {
+  var key = mp_keyOfSheet_(only);
+  if (!key) throw new Error('Nieznana zakładka: ' + only);
+  var def = MP_DEF[key];
+  var sheet = mp_sheet_(def.name);
+  var rows = mp_loadKey_(key).rows;
+  var maxRow = def.first - 1;
+  rows.forEach(function (r) { if (r.row > maxRow) maxRow = r.row; });
+  var lastRow = Math.max(sheet.getLastRow(), maxRow);
+  var n = lastRow - def.first + 1;
+  if (n < 1) return { sheet: def.name, rows: 0, message: 'Brak danych do eksportu.' };
+
+  // grupy kolumn wpisywanych (ciągłe zakresy): ABCDEFGMNO → A–G i M–O
+  var groups = [], cur = null;
+  def.input.split('').forEach(function (L) {
+    var c = L.charCodeAt(0) - 64;
+    if (cur && c === cur.to + 1) cur.to = c; else { cur = { from: c, to: c }; groups.push(cur); }
+  });
+  var byRow = {};
+  rows.forEach(function (r) { byRow[r.row] = r.v; });
+  groups.forEach(function (g) {
+    var width = g.to - g.from + 1;
+    var grid = [];
+    for (var i = 0; i < n; i++) {
+      var v = byRow[def.first + i] || {}, line = [];
+      for (var c = 0; c < width; c++) line.push(mp_sheetValue_(v[String.fromCharCode(64 + g.from + c)]));
+      grid.push(line);
+    }
+    var rg = sheet.getRange(def.first, g.from, n, width);
+    rg.clearContent();
+    rg.setValues(grid);
+  });
+  SpreadsheetApp.flush();
+  if (key === 'ops') {   // formuły K:M z wiersza 1 na wszystkie wiersze danych (jak przy dopisywaniu przez skaner)
+    var src = sheet.getRange(MP_OPER_FORMULA_SOURCE_ROW, 11, 1, 3);
+    src.copyTo(sheet.getRange(def.first, 11, n, 3), { contentsOnly: false });
+    SpreadsheetApp.flush();
+  }
+  return { sheet: def.name, rows: rows.length, message: 'Wyeksportowano ' + rows.length + ' wierszy do zakładki „' + def.name + '”.' };
 }
 
 function mp_selfTest() {
@@ -590,58 +757,111 @@ function mp_selfTest() {
   } catch (e) {
     problems.push('Setup: ' + e.message);
   }
-  var result = problems.length ? 'PROBLEMY:\n- ' + problems.join('\n- ') : 'OK: Mistrz PO gotowy';
+  try {
+    var d = mp_loadKey_('ops');
+    Logger.log('Baza: Rejestr operacji – wierszy: ' + d.rows.length + ', paczek: ' + d.chunks.length);
+  } catch (e) {
+    problems.push('Baza Firebase (mp_rows): ' + e.message);
+  }
+  var result = problems.length ? 'PROBLEMY:\n- ' + problems.join('\n- ') : 'OK: Mistrz PO gotowy (zapis w bazie)';
   Logger.log(result);
   return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Skaner: podgląd rejestrów prosto z arkusza (wartości formuł – status, postęp, start i koniec obróbki)
+// Skaner: podgląd rejestrów z bazy (wartości liczone jak formuły arkusza – status, postęp, start i koniec obróbki)
 // ---------------------------------------------------------------------------
 
 function mp_eq_(a, b) { return mp_str_(a).toLowerCase() === mp_str_(b).toLowerCase(); }
 
-/** Wiersze zakładki od wiersza 3: [wartości, wartości wyświetlane] dla kolumn 1..[cols] (puste zakładki – []). */
-function mp_sheetRows_(name, cols) {
-  var sh = mp_ss_().getSheetByName(name);
-  if (!sh || sh.getLastRow() < 3) return [];
-  var rg = sh.getRange(3, 1, sh.getLastRow() - 2, cols);
-  var v = rg.getValues(), d = rg.getDisplayValues();
-  return v.map(function (row, i) { return { row: i + 3, v: row, d: d[i] }; });
+/** Czas z kolumn A (rrrr-mm-dd) i B (gg:mm) → ms UTC albo null (jak stamp w logic/mistrz.js). */
+function mp_stamp_(a, b) {
+  var d = /^(\d{4})-(\d{2})-(\d{2})/.exec(mp_str_(a)); if (!d) return null;
+  var t = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(mp_str_(b)) || /\s(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(mp_str_(a));
+  return Date.UTC(+d[1], +d[2] - 1, +d[3], t ? +t[1] : 0, t ? +t[2] : 0, t && t[3] ? +t[3] : 0);
+}
+function mp_fmtStamp_(ms) {
+  if (ms === null || ms === undefined || ms === '') return '';
+  var d = new Date(ms), p = function (n) { return ('0' + n).slice(-2); };
+  return p(d.getUTCDate()) + '.' + p(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
+}
+
+/** Indeks operacji dla dokumentów: zakończone (oper. 10), start oper. 10, koniec każdej oper. – na (komis, przewodnik). */
+function mp_docIndex_(list) {
+  var done = {}, start = {}, end = {}, cnt = {};
+  list.forEach(function (r) { if (mp_eq_(r.v.I, 'koniec')) { var k = mp_dkey_([r.v.C, r.v.D]); cnt[k] = (cnt[k] || 0) + 1; } });
+  list.forEach(function (r) {
+    var k = mp_dkey_([r.v.C, r.v.D]), e = mp_num_(r.v.E), st = mp_str_(r.v.I).trim().toLowerCase();
+    if (e === 10 && st === 'koniec') (done[k] = done[k] || []).push(cnt[k] || 0);
+    if (e === 10 && st === 'start' && !(k in start)) start[k] = mp_stamp_(r.v.A, r.v.B);
+    if (st === 'koniec') { var ek = k + '\u0001' + e; if (!(ek in end)) end[ek] = mp_stamp_(r.v.A, r.v.B); }
+  });
+  return { done: done, start: start, end: end };
+}
+
+/** Wartości liczone dokumentu (jak computeDocs): status „x / ilość”, postęp, start, godziny, koniec. */
+function mp_docCalc_(r, a, b) {
+  var k = mp_dkey_([r.v.C, r.v.D]), ok = mp_str_(r.v.C).trim() && mp_str_(r.v.D).trim() && mp_str_(r.v.I).trim(), n = mp_num_(r.v.I);
+  var K = '', M = null;
+  if (ok) {
+    if (a.done[k]) { K = a.done[k].join('') + ' / ' + mp_str_(r.v.I); M = isFinite(n) && n ? a.done[k][0] / n : 0; }
+    else if (b.done[k]) { K = 'Ar :' + b.done[k].join('') + ' / ' + mp_str_(r.v.I); M = isFinite(n) && n ? b.done[k][0] / n : 0; }
+    else { K = '0 / ' + mp_str_(r.v.I); M = 0; }
+  }
+  var N = (k in a.start) ? a.start[k] : (k in b.start) ? b.start[k] : null;
+  var ek = k + '\u0001' + (isFinite(n) ? n * 10 : NaN);
+  var P = (ek in a.end) ? a.end[ek] : (ek in b.end) ? b.end[ek] : null;
+  var O = (P === null || N === null) ? '' : (P - N) / 3600000;
+  return { K: K, M: M, N: N, O: O, P: P };
 }
 
 /**
- * q = { komis, przewodnik, detailKomis }. Wynik:
- *  docs  – dokumenty komisu z Rejestru dokumentacji i Ar. dok (data, godz, nr, rodzaj, nazwa, ilość oper, kto, status K, postęp M, start N, koniec P, godziny O),
- *  ops   – wpisy operacji przewodnika z Rejestru operacji i Archiwum operacji (data, godz, nr, operator, status I, status g K),
- *  dreg  – wpisy Rejestru detali komisu detalu (data, godz, rysunek, poz., kpl, szt, operator, postęp I, do zrobienia J, zrobione K).
+ * q = { komis, przewodnik, detailKomis }. Wynik (jak dawniej z arkusza, teraz z bazy):
+ *  docs  – dokumenty komisu z Rejestru dokumentacji i Ar. dok (data, godz, nr, rodzaj, nazwa, ilość oper, kto, status, postęp, start, koniec, godziny),
+ *  ops   – wpisy operacji przewodnika z Rejestru operacji i Archiwum operacji (data, godz, nr, operator, status I, stan operacji),
+ *  dreg  – wpisy Rejestru detali komisu detalu (data, godz, rysunek, poz., kpl, szt, operator, postęp, do zrobienia, zrobione).
  */
 function mp_scanInfo_(q) {
   var komis = mp_str_(q.komis), prz = mp_str_(q.przewodnik), dk = mp_str_(q.detailKomis);
   var out = { docs: [], ops: [], dreg: [] };
+  var meta = mp_meta_();
+  var need = {};
+  if (komis) { need.docs = 1; need.docsArch = 1; need.ops = 1; need.opsArch = 1; }
+  if (komis && prz) { need.ops = 1; need.opsArch = 1; }
+  if (dk) { need.dreg = 1; need.dlist = 1; }
+  var data = {};
+  Object.keys(need).forEach(function (k) { data[k] = mp_loadKey_(k, meta).rows; });
   if (komis) {
-    [['Rejestr dokumentacji', false], ['Ar. dok', true]].forEach(function (x) {
-      mp_sheetRows_(x[0], 16).forEach(function (r) {
-        if (!mp_eq_(r.v[2], komis)) return;
-        out.docs.push({ archive: x[1], row: r.row, date: r.d[0], time: r.d[1], komis: r.d[2], nr: r.d[3], typ: r.d[4], nazwa: r.d[5], ilosc: r.d[8], kto: r.d[9],
-          status: r.d[10], progress: typeof r.v[12] === 'number' ? r.v[12] : null, start: r.d[13], hours: r.d[14], end: r.d[15] });
+    var a = mp_docIndex_(data.ops), b = mp_docIndex_(data.opsArch);
+    [['docs', false], ['docsArch', true]].forEach(function (x) {
+      data[x[0]].forEach(function (r) {
+        if (!mp_eq_(r.v.C, komis)) return;
+        var c = mp_docCalc_(r, a, b);
+        out.docs.push({ archive: x[1], row: r.row, date: mp_display_(r.v.A), time: mp_display_(r.v.B), komis: mp_str_(r.v.C), nr: mp_str_(r.v.D), typ: mp_str_(r.v.E), nazwa: mp_str_(r.v.F),
+          ilosc: mp_str_(r.v.I), kto: mp_str_(r.v.J), status: c.K, progress: typeof c.M === 'number' ? c.M : null, start: mp_fmtStamp_(c.N),
+          hours: c.O === '' ? '' : String(Math.round(c.O * 100) / 100).replace('.', ','), end: mp_fmtStamp_(c.P) });
       });
     });
   }
   if (komis && prz) {
-    [['Rejestr operacji', false], ['Archiwum operacji', true]].forEach(function (x) {
-      mp_sheetRows_(x[0], 11).forEach(function (r) {
-        if (!mp_eq_(r.v[2], komis) || !mp_eq_(r.v[3], prz)) return;
-        out.ops.push({ archive: x[1], row: r.row, date: r.d[0], time: r.d[1], nr: r.d[4], operator: r.d[7], status: r.d[8], statusG: x[1] ? '' : r.d[10] });
+    var stateOf = mp_opStates_(data.ops);
+    [['ops', false], ['opsArch', true]].forEach(function (x) {
+      data[x[0]].forEach(function (r) {
+        if (!mp_eq_(r.v.C, komis) || !mp_eq_(r.v.D, prz)) return;
+        out.ops.push({ archive: x[1], row: r.row, date: mp_display_(r.v.A), time: mp_display_(r.v.B), nr: mp_str_(r.v.E), operator: mp_str_(r.v.H), status: mp_str_(r.v.I), statusG: x[1] ? '' : stateOf(r) });
       });
     });
   }
   if (dk) {
-    mp_sheetRows_(MP_DETAIL_SHEET, 11).forEach(function (r) {
-      if (!mp_eq_(r.v[2], dk)) return;
-      out.dreg.push({ row: r.row, date: r.d[0], time: r.d[1], rysunek: r.d[3], poz: r.d[4], kpl: r.d[5], szt: r.d[6], operator: r.d[7],
-        progress: typeof r.v[8] === 'number' ? r.v[8] : null, todo: r.d[9], done: r.d[10] });
+    var todo = {}, done = {};
+    data.dlist.forEach(function (r) { var g = mp_num_(r.v.G); if (isFinite(g)) { var k = mp_dkey_([r.v.D, r.v.E, r.v.F]); todo[k] = (todo[k] || 0) + g; } });
+    data.dreg.forEach(function (r) { var g = mp_num_(r.v.G); if (isFinite(g)) { var k = mp_dkey_([r.v.C, r.v.D, r.v.E, r.v.F]); done[k] = (done[k] || 0) + g; } });
+    data.dreg.forEach(function (r) {
+      if (!mp_eq_(r.v.C, dk)) return;
+      var J = mp_str_(r.v.D).trim() === '' ? '' : (todo[mp_dkey_([r.v.D, r.v.E, r.v.F])] || 0);
+      var K = mp_str_(r.v.C).trim() === '' ? '' : (done[mp_dkey_([r.v.C, r.v.D, r.v.E, r.v.F])] || 0);
+      out.dreg.push({ row: r.row, date: mp_display_(r.v.A), time: mp_display_(r.v.B), rysunek: mp_str_(r.v.D), poz: mp_str_(r.v.E), kpl: mp_str_(r.v.F), szt: mp_str_(r.v.G), operator: mp_str_(r.v.H),
+        progress: typeof J === 'number' && typeof K === 'number' && J ? K / J : null, todo: String(J), done: String(K) });
     });
   }
   return out;

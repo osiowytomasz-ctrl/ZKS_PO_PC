@@ -43,7 +43,7 @@ export function mountScanner(el, ctx) {
     else body.append(docsPanel());
   }
 
-  const failText = (e) => 'Błąd: ' + e.message + (e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Sprawdź arkusz, zanim spróbujesz ponownie.' : '');
+  const failText = (e) => 'Błąd: ' + e.message + (e.code === 'NETWORK' ? ' Nie wiadomo, czy zapis się udał. Odśwież podgląd i sprawdź, zanim spróbujesz ponownie.' : '');
 
   /**
    * Blokada przycisków zapisu po udanym zapisie (ochrona przed podwójnym skanem), wspólna dla wszystkich opcji,
@@ -76,7 +76,7 @@ export function mountScanner(el, ctx) {
   const PREFS_KEY = 'scanner.prefs';
   const loadPrefs = () => { try { return { height: 300, zoom: 1, reticle: true, size: 70, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')) }; } catch { return { height: 300, zoom: 1, reticle: true, size: 70 }; } };
   const savePrefs = (p) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* bez pamięci */ } };
-  // podgląd prosto z arkusza (świeże dane): klucz → odpowiedź API
+  // podgląd z bazy (świeże dane): klucz → odpowiedź API
   const liveCache = new Map();
   async function live(fn, args, key, force = false) {
     if (!force && liveCache.has(key)) return liveCache.get(key);
@@ -110,7 +110,7 @@ export function mountScanner(el, ctx) {
 
     const say = (text, ok) => { msg.className = ok ? '' : 'err'; msg.style.color = ok ? '#1b5e20' : ''; msg.textContent = text; };
     const parsedNow = () => ({ detail: parseDetailCode, operation: parseOperCode, document: parseDocCode })[kind]?.(code.value.trim());
-    /** Po udanym zapisie: czyści kod i pola, komunikat, blokada przycisku zapisu; podgląd zostaje dla zapisanego kodu (odświeżony z arkusza). */
+    /** Po udanym zapisie: czyści kod i pola, komunikat, blokada przycisku zapisu; podgląd zostaje dla zapisanego kodu (odświeżony z bazy). */
     const finished = (r, lock, saved = code.value.trim(), refresh = null) => {
       say((r && r.message && String(r.message).trim()) || 'Zapisano.', true);
       lastSaved = saved; code.value = ''; update(); code.focus();
@@ -156,7 +156,7 @@ export function mountScanner(el, ctx) {
       current.focus?.();
     });
 
-    // ---------- podgląd pod spodem (prosto z arkusza): część, detale, operacje, dokumenty ----------
+    // ---------- podgląd pod spodem (z bazy): część, detale, operacje, dokumenty ----------
     let infoToken = 0, infoFor = '';
     async function showInfo(raw, force = false, opNr = null) {
       if (!force && raw === infoFor) return;
@@ -207,7 +207,7 @@ export function mountScanner(el, ctx) {
       clear(infoArea);
       const doc = r.docs.find((d) => eqv(d.nr, cur.przewodnik) && !d.archive) || r.docs.find((d) => eqv(d.nr, cur.przewodnik)) || null;
       const t = SI.operTable(SI.opers(r.ops, cur.nr), doc, cur.nr);
-      if (!t.rows.length) { infoArea.append(h('p', { class: 'muted', style: { fontSize: '12px' } }, 'Brak operacji tego przewodnika w arkuszu.')); return; }
+      if (!t.rows.length) { infoArea.append(h('p', { class: 'muted', style: { fontSize: '12px' } }, 'Brak operacji tego przewodnika w bazie.')); return; }
       infoArea.append(smallTable(['Oper.', 'Start', 'Koniec', 'Kto'], t.rows.map((x) => ({ cells: [String(x.nr), x.skipped ? 'pominięto' : x.start, x.skipped ? 'pominięto' : x.end, x.operator],
         color: x.skipped ? SI.SKIPPED_COLOR : SI.statusColor(x.status), current: x.current }))));
       const hist = SI.history(r.ops);
@@ -229,7 +229,7 @@ export function mountScanner(el, ctx) {
 
     // --- Produkt: po lewej „Produkt – pobranie części” i lokalizacja, po prawej ilość i Zapisz (kod z listy, zapis do ZP) ---
     function productSection() {
-      const qty = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'ilość', value: '1', style: { width: '70px', height: '30px' } });
+      const qty = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'ilość', value: '1', style: { color: '#000', background: '#fff', fontWeight: 600, fontSize: '14px', width: '70px', height: '30px' } });
       const sugg = h('div', { class: 'opts', style: { maxHeight: '180px', background: '#fff' } });
       const save = h('button', { class: 'btn primary', style: { height: '30px' }, onclick: submit }, 'Zapisz');
       const redraw = () => {
@@ -264,7 +264,7 @@ export function mountScanner(el, ctx) {
     // --- Detal: odkodowany kod (komis, kpl / rysunek, pozycja), obok ilość sztuk i zapis ---
     function detailSection() {
       const decoded = h('div', { style: { flex: 1, border: '1px solid #999', padding: '2px 6px', lineHeight: 1.25, minHeight: '30px' } });
-      const pieces = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'szt', style: { width: '64px', height: '30px' } });
+      const pieces = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'szt', style: { color: '#000', background: '#fff', fontWeight: 600, fontSize: '14px', width: '64px', height: '30px' } });
       const save = h('button', { class: 'btn primary', style: { height: '30px' }, disabled: true, onclick: submit }, 'Zapisz detal');
       pieces.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
       async function submit() {
@@ -336,7 +336,7 @@ export function mountScanner(el, ctx) {
         try {
           const list = await api('mp_findOperations', [p.fields.komis, p.fields.przewodnik, p.fields.nr]);
           if (!list.length) { await alertBox('Usuwanie operacji', 'Nie znaleziono aktywnych operacji o podanych parametrach.'); return; }
-          if (!(await confirmBox(`Usunąć operację (wierszy: ${list.length})?`, `${operationsText(list)}\n\nWiersze dostaną status „Usunięta” (dane zostają w arkuszu).`, 'Usuń'))) return;
+          if (!(await confirmBox(`Usunąć operację (wierszy: ${list.length})?`, `${operationsText(list)}\n\nWiersze dostaną status „Usunięta” (dane zostają w bazie).`, 'Usuń'))) return;
           finished(await api('mp_deleteOperation', [{ productCode: raw() }]));
         } catch (e) { fail(e); }
       }
@@ -526,7 +526,7 @@ export function mountScanner(el, ctx) {
       try { rows = await api('mp_listDocuments', [{}]); drawRegistry(); } catch (e) { clear(registry); registry.append(h('p', { class: 'err' }, failText(e))); }
     }
     async function removeDoc(d) {
-      if (!(await confirmBox('Usunąć wpis z rejestru?', `Komis: ${d.komis}\nPrzewodnik: ${d.przewodnik}\nTyp: ${d.typ}\nNazwa: ${d.nazwa}\nWiersz w arkuszu: ${d.row}\n\nWpis zostanie wyczyszczony w arkuszu (nie można tego cofnąć w aplikacji).`, 'Usuń'))) return;
+      if (!(await confirmBox('Usunąć wpis z rejestru?', `Komis: ${d.komis}\nPrzewodnik: ${d.przewodnik}\nTyp: ${d.typ}\nNazwa: ${d.nazwa}\nWiersz w bazie: ${d.row}\n\nWpis zostanie usunięty z bazy (nie można tego cofnąć w aplikacji).`, 'Usuń'))) return;
       try { const r = await api('mp_deleteDocument', [{ row: d.row, komis: d.komis, przewodnik: d.przewodnik }]); toast((r && r.message) || 'Usunięto.'); loadRegistry(); }
       catch (e) { toast(failText(e), true); }
     }

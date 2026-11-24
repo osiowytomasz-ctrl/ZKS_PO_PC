@@ -164,7 +164,7 @@ var API_FUNCS = {
     run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'god'); return api_kartaExport_(); }
   },
   mp_scanInfo: {
-    // Skaner: podgląd rejestrów prosto z arkusza Mistrz_po (wartości formuł z arkusza) – dokumenty komisu, operacje przewodnika, detale komisu.
+    // Skaner: podgląd rejestrów z bazy (wartości liczone jak formuły arkusza) – dokumenty komisu, operacje przewodnika, detale komisu.
     run: function (a) { return mp_scanInfo_(a[0] || {}); }
   },
   scanPartInfo: {
@@ -172,9 +172,14 @@ var API_FUNCS = {
     run: function (a) { return api_scanPartInfo_(a[0]); }
   },
   mp_export: {
-    // Moduł Mistrz PO: dane WPISYWANE zakładek arkusza Mistrz_po do importu do bazy Firebase (kolumny liczone liczy program).
-    // poziom MASTER lub GOD (kolumna „Grafik dostęp”)
-    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'master'); return mp_export_(); }
+    // Moduł Mistrz PO – IMPORT arkusz → baza: dane WPISYWANE jednej zakładki (a[0] – klucz albo nazwa; bez parametru wszystkie) arkusza Mistrz_po.
+    // Tylko GOD (kolumna „Grafik dostęp”); zapis w bazie robi program, który zastępuje dane importowanej zakładki.
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'god'); return mp_export_(a[0]); }
+  },
+  mp_exportToSheet: {
+    // Moduł Mistrz PO – EKSPORT baza → arkusz dla jednej zakładki (a[0] – klucz albo nazwa). MASTER lub GOD. Zapis w arkuszu tylko na to polecenie.
+    write: true,
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'master'); return mp_exportToSheet_(a[0]); }
   },
 
   // --- Skaner ---
@@ -1496,7 +1501,7 @@ function api_selfTest() {
    'saveToolDataToBN', 'getBNbaseData', 'getBnPartsForTeamV2', 'getBn2dDataForTeamV2',
    'getStToolOptions', 'getStBasicToolMap', 'saveStSelectedToolsToN', 'saveScannedToolToN',
    'getHarmData', 'getZakupyData', 'getZakupyArchiveData', 'getZakupyProductCodes',
-   'addZakupyItem', 'updateZakupyItem'].forEach(function (name) {
+   'addZakupyItem', 'updateZakupyItem', 'mp_saveDetail', 'mp_exportToSheet'].forEach(function (name) {
     if (typeof globalThis[name] !== 'function') missing.push(name);
   });
   if (missing.length) problems.push('Brak funkcji: ' + missing.join(', '));

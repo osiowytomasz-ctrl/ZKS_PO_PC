@@ -1,7 +1,8 @@
 // Mistrz PO w Firestore – tylko dane WPISYWANE zakładek arkusza Mistrz_po (kolumny liczone liczy program: logic/mistrz.js).
 //  - mp_meta/main: { sheets: { key: { rows, name } }, chunk, importedAt, importedBy, source: 'arkusz' | 'plik' }
 //  - mp_rows/{key}_{nnn}: { k: key, r: { "<wiersz arkusza>": "<JSON {A: …, B: …}>" } } – po [MP_CHUNK] wierszy w dokumencie.
-// Okres przejściowy: dane wpisuje się w arkuszu (Skaner, ręcznie), a baza jest aktualizowana importem z arkusza albo z pliku .xlsx.
+// Zapis tylko w bazie: Skaner (Apps Script, konto usługi) dopisuje wiersze do mp_rows; arkusz Google jest używany wyłącznie na polecenie –
+// import arkusz → baza (GOD, jedna zakładka) i eksport baza → arkusz (MASTER, GOD).
 import { firebase } from './fb.js';
 import { api } from './ui.js';
 import * as M from './logic/mistrz.js';
@@ -67,13 +68,24 @@ export async function saveMistrz(data, { user = '', source = '' } = {}) {
   return Object.fromEntries(keys.map((k) => [k, (data[k] || []).length]));
 }
 
-/** Import z arkusza Google Mistrz_po (API mp_export, poziom MASTER lub GOD). */
-export async function importFromSheet(user = '') {
-  const x = await api('mp_export', [], { timeoutMs: 240000 });
+/**
+ * Import z arkusza Google Mistrz_po (API mp_export, tylko GOD): [key] – klucz jednej zakładki (rejestru albo listy), której dane w bazie
+ * zostają zastąpione danymi z arkusza; bez klucza – wszystkie zakładki modułu.
+ */
+export async function importFromSheet(user = '', key = null) {
+  const sheet = key ? M.sheetByKey(key) : null;
+  const x = await api('mp_export', sheet ? [sheet.name] : [], { timeoutMs: 240000 });
   const data = {};
-  for (const sh of M.SHEETS) if (x && x.sheets && x.sheets[sh.name]) data[sh.key] = M.rowsFromGrid(sh, x.sheets[sh.name]);
+  for (const sh of M.SHEETS) if ((!sheet || sh.key === sheet.key) && x && x.sheets && x.sheets[sh.name]) data[sh.key] = M.rowsFromGrid(sh, x.sheets[sh.name]);
   if (!Object.keys(data).length) throw new Error('Arkusz nie zwrócił żadnej zakładki modułu (sprawdź wdrożenie Apps Script: mp_export).');
   return { counts: await saveMistrz(data, { user, source: 'arkusz' }), data };
+}
+
+/** Eksport baza → arkusz Google dla jednej zakładki [key] (API mp_exportToSheet, MASTER lub GOD): zapis w arkuszu tylko na to polecenie. */
+export async function exportToSheet(key) {
+  const sheet = M.sheetByKey(key);
+  if (!sheet) throw new Error('Nieznana zakładka.');
+  return api('mp_exportToSheet', [sheet.name], { timeoutMs: 240000 });
 }
 
 /** Import z pliku .xlsx (pobrany arkusz Mistrz_PO): te same zakładki i kolumny. */

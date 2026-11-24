@@ -2,11 +2,11 @@
 // a kolumny liczone (formuły arkusza) liczy program (logic/mistrz.js). W bazie są tylko dane wpisywane.
 // Okres przejściowy: wpisy dalej trafiają do arkusza (Skaner, ręcznie); „Import z arkusza” albo „Import z pliku” aktualizuje bazę.
 // Dostęp: przeglądanie od CLERIK, import od MASTER (kolumna „Grafik dostęp”).
-import { h, clear, toast, modal, columnFilterDialog } from '../ui.js';
+import { h, clear, toast, modal, columnFilterDialog, confirmBox } from '../ui.js';
 import * as M from '../logic/mistrz.js';
 import { drawMistrzNav } from './mistrzNav.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
-import { loadMistrz, importFromSheet, importFromXlsx, loadMarks, setMark, detailKey } from '../mistrzStore.js';
+import { loadMistrz, importFromSheet, importFromXlsx, exportToSheet, loadMarks, setMark, detailKey } from '../mistrzStore.js';
 import { qrSvg } from '../logic/qr.js';
 import { detailsPrintHtml } from '../logic/mistrzPrint.js';
 
@@ -54,7 +54,7 @@ export function mountMistrz(el, ctx) {
         await load();
       } catch (e) { wait.close(); toast('Import nieudany: ' + (e.message || e), 'error'); }
     };
-    if (kind === 'sheet') return go(() => importFromSheet(user));
+    if (kind === 'sheet') return go(() => importFromSheet(user, st.tab));
     const input = h('input', { type: 'file', accept: '.xlsx', style: { display: 'none' } });
     input.addEventListener('change', () => { const f = input.files && input.files[0]; input.remove(); if (f) go(async () => importFromXlsx(await f.arrayBuffer(), user)); });
     document.body.append(input); input.click();
@@ -73,6 +73,29 @@ export function mountMistrz(el, ctx) {
     }
   }
 
+  /**
+   * Import jednej zakładki z arkusza Google (tylko GOD): zastępuje dane tej zakładki w bazie danymi z arkusza – trzy pytania o zgodę.
+   * Nowszych wpisów skanera, które nie zostały wyeksportowane do arkusza, nie da się potem odzyskać z bazy.
+   */
+  async function importTab() {
+    const name = (M.sheetByKey(st.tab) || {}).name || st.tab;
+    const ask = [
+      ['Import z arkusza (1/3)', `Zastąpić dane zakładki „${name}” w bazie danymi z arkusza Google?\nWszystko, co w bazie jest w tej zakładce, zostanie usunięte.`],
+      ['Import z arkusza (2/3)', `Czy na pewno? Wpisy dodane w bazie (np. skanerem) po ostatnim eksporcie do arkusza przepadną.\nZakładka: „${name}”.`],
+      ['Import z arkusza (3/3)', `OSTATNIE POTWIERDZENIE: zastępuję zakładkę „${name}” w bazie danymi z arkusza.`],
+    ];
+    for (const [t, msg] of ask) if (!(await confirmBox(t, msg, 'Tak, dalej'))) return;
+    await runImport('sheet');
+  }
+  /** Eksport jednej zakładki do arkusza Google (MASTER i GOD): wpisuje dane z bazy w kolumny wpisywane arkusza (formuły zostają). */
+  async function exportTab() {
+    const name = (M.sheetByKey(st.tab) || {}).name || st.tab;
+    if (!(await confirmBox('Eksport do arkusza', `Wpisać dane zakładki „${name}” z bazy do arkusza Google?\nDotychczasowe dane wpisywane w tej zakładce arkusza zostaną zastąpione (formuły zostają).`, 'Eksportuj'))) return;
+    const wait = modal('Eksport do arkusza', h('p', {}, 'Zapis w arkuszu Google… (to może potrwać kilkadziesiąt sekund)'), { sticky: true });
+    try { const r = await exportToSheet(st.tab); wait.close(); toast((r && r.message) || 'Wyeksportowano do arkusza.'); }
+    catch (e) { wait.close(); toast('Eksport nieudany: ' + (e.message || e), 'error'); }
+  }
+
   function draw() {
     drawTabs();
     clear(body); clear(printSlot);
@@ -82,8 +105,8 @@ export function mountMistrz(el, ctx) {
     if (!st.loaded) { body.append(h('p', { class: 'muted', style: { padding: '12px' } }, 'Wczytywanie…')); return; }
     if (!m) {
       body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Danych Mistrz PO nie ma jeszcze w bazie.'),
-        acc.manage ? h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => runImport('sheet') }, 'Import z arkusza'), h('button', { class: 'btn', onclick: () => runImport('file') }, 'Import z pliku .xlsx…'))
-          : h('p', { class: 'muted' }, 'Import robi osoba z poziomem MASTER lub GOD.')));
+        acc.importG ? h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: importTab }, 'Import z arkusza'))
+          : h('p', { class: 'muted' }, 'Import z arkusza robi administrator (GOD).')));
       return;
     }
     const sh = M.sheetByKey(st.tab) || M.SHEETS[0];
@@ -191,9 +214,10 @@ export function mountMistrz(el, ctx) {
   el.append(h('div', { class: 'panel', style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
     h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, h('b', {}, 'Mistrz'), search, tabs,
       h('button', { class: 'btn small', title: 'Wczytaj ponownie dane z bazy', onclick: load }, 'Odśwież'),
-      acc.manage ? h('button', { class: 'btn small', title: 'Dane wpisywane z arkusza Google Mistrz_po do bazy (zastępuje dane w bazie)', onclick: () => runImport('sheet') }, 'Import z arkusza') : null,
+      acc.importG ? h('button', { class: 'btn small', title: 'Import tej zakładki z arkusza Google Mistrz_po do bazy (tylko GOD; zastępuje dane zakładki w bazie; trzy pytania o zgodę)', onclick: importTab }, 'Import z arkusza') : null,
+      acc.manage ? h('button', { class: 'btn small', title: 'Eksport tej zakładki z bazy do arkusza Google Mistrz_po (MASTER, GOD; zastępuje dane wpisywane w zakładce arkusza)', onclick: exportTab }, 'Eksport do arkusza') : null,
       printSlot, h('span', { class: 'grow' }), info),
-    h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kolumny ƒ liczy program z danych w bazie (jak formuły arkusza). Wpisy na razie robi się w arkuszu – potem import aktualizuje bazę.')),
+    h('div', { class: 'muted', style: { fontSize: '11px' } }, 'Kolumny ƒ liczy program z danych w bazie (jak formuły arkusza). Skaner i program zapisują tylko w bazie; arkusz Google aktualizuje się wyłącznie przyciskiem „Eksport do arkusza”.')),
     body);
   draw();
   load();
