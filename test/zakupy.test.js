@@ -38,3 +38,21 @@ test('po zmianie PZ pozycja przechodzi między widokami', () => {
   Z.setValue(r, 'pz', '0001/11/M0/02');
   assert.ok(!Z.isNoPz(r) && !Z.lacksPz(r));
 });
+
+test('sortowanie PZ: najpierw rok (DD), potem miesiąc (BB), na końcu numer (AAAA); ZMW: CC, BB, AAAA', () => {
+  const pz = ['0012/11/M0/26', '0003/01/M0/27', '0100/02/M0/26', '0001/11/M0/26', 'x', ''];
+  const sortedPz = Z.shown(pz.map((v, i) => row(i + 10, { columnE: v || 'zz', columnC: 'K' })).map((r, i) => ({ ...r, columnE: pz[i] })), [], 'bought', {}, [{ key: 'pz', ascending: true }]);
+  // PZ puste nie trafia do Zakupione; „x” – do innego widoku; sprawdzamy kolejność samych numerów
+  assert.deepEqual(sortedPz.map((r) => r.columnE), ['0100/02/M0/26', '0001/11/M0/26', '0012/11/M0/26', '0003/01/M0/27']);
+  assert.ok(Z.compareSegmented('0100/02/M0/26', '0001/11/M0/26') < 0);       // luty 26 przed listopadem 26
+  assert.ok(Z.compareSegmented('0001/11/M0/26', '0012/11/M0/26') < 0);       // ten sam miesiąc i rok – po numerze
+  assert.ok(Z.compareSegmented('0012/11/M0/26', '0003/01/M0/27') < 0);       // rok ważniejszy niż numer
+  const zmw = ['0005/11/26', '0100/03/26', '0002/01/27', '0001/11/26'];
+  const sortedZmw = Z.shown(zmw.map((v, i) => row(i + 20, { columnG: v, columnI: '1' })), [], 'ordered', {}, [{ key: 'zmw', ascending: true }]);
+  assert.deepEqual(sortedZmw.map((r) => r.columnG), ['0100/03/26', '0001/11/26', '0005/11/26', '0002/01/27']);
+  const desc = Z.shown(zmw.map((v, i) => row(i + 20, { columnG: v, columnI: '1' })), [], 'ordered', {}, [{ key: 'zmw', ascending: false }]);
+  assert.deepEqual(desc.map((r) => r.columnG), ['0002/01/27', '0005/11/26', '0001/11/26', '0100/03/26']);
+  // lista wartości w oknie filtra ma tę samą kolejność
+  const opts = Z.options(zmw.map((v, i) => row(i + 20, { columnG: v, columnI: '1' })), 'ordered', {}, Z.columns('ordered').find((c) => c.key === 'zmw'));
+  assert.deepEqual(opts.map((o) => o.value), ['0100/03/26', '0001/11/26', '0005/11/26', '0002/01/27']);
+});

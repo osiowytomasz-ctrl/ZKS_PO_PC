@@ -1,5 +1,5 @@
 // Filtrowanie i sortowanie tabel jak autofiltr w arkuszu (wspólne dla Grafiku i Zakupów).
-// columns: [{key, isDate?, isNumberAware?}], getValue(row, column) -> tekst do filtrowania.
+// columns: [{key, isDate?, cmp?}], getValue(row, column) -> tekst do filtrowania; cmp(a, b) – własna kolejność wartości kolumny.
 import { naturalCompare, parseDate } from './common.js';
 
 const dateKey = (text) => {
@@ -39,6 +39,7 @@ export function filterOptions(rows, columns, filters, getValue, column) {
   list.sort((a, b) => {
     if ((a.value === '') !== (b.value === '')) return a.value === '' ? 1 : -1;
     if (column.isDate) return dateKey(a.value) - dateKey(b.value);
+    if (column.cmp) return column.cmp(a.value, b.value);   // własna kolejność kolumny (np. PZ, ZMW)
     return naturalCompare(a.value, b.value);
   });
   return list;
@@ -49,7 +50,9 @@ function compareCells(a, b, column, ascending) {
   if (a === '') return 1; // puste zawsze na końcu
   if (b === '') return -1;
   let c;
-  if (column.isDate) {
+  if (column.cmp) {
+    c = Math.sign(column.cmp(a, b));
+  } else if (column.isDate) {
     c = dateKey(a) - dateKey(b);
     c = c < 0 ? -1 : c > 0 ? 1 : 0;
   } else {

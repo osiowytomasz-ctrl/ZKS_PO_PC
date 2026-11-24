@@ -1,5 +1,5 @@
 // Logika Zakupów (odpowiednik ZakupyLogic.kt).
-import { formatDate, parseDate } from './common.js';
+import { formatDate, parseDate, naturalCompare } from './common.js';
 import { parseQuantity } from './scanner.js';
 import { visibleRows, filterOptions, sortRows, sortSummary as genericSummary } from './tableFilter.js';
 
@@ -36,7 +36,7 @@ export function columns(view) {
     : view === 'nopz'
       ? [['zakup', 'Data'], ['kod', 'Kod'], ['ilosc', 'Ilość'], ['pz', 'PZ'], ['zmw', 'ZMW'], ['opis', 'Opis']]
       : [['zakup', 'Data'], ['kod', 'Kod'], ['ilosc', 'Ilość'], ['pz', 'PZ'], ['opis', 'Opis']];
-  return defs.map(([key, title]) => ({ key, title, isDate: !!FIELDS[key].isDate }));
+  return defs.map(([key, title]) => ({ key, title, isDate: !!FIELDS[key].isDate, ...(CMP[key] ? { cmp: CMP[key] } : {}) }));
 }
 
 // ---- edycja komórek w widokach Zakupione i Odebrane bez PZ (jak w arkuszu Google) ----
@@ -58,6 +58,26 @@ export function normalizeEdit(field, text) {
 }
 /** Ustawia surową wartość pola w wierszu (po zapisie w arkuszu). */
 export const setValue = (row, field, v) => { row[FIELDS[field].col] = v; };
+
+// ---- nietypowa kolejność sortowania numerów PZ i ZMW ----
+/**
+ * Numery dokumentów z segmentami rozdzielonymi „/” sortujemy od najmniej znaczącego miejsca w numerze:
+ * PZ (AAAA/BB/MC/DD): najpierw DD (ostatni segment), potem BB (drugi), na końcu AAAA (pierwszy);
+ * ZMW (AAAA/BB/CC): najpierw CC (ostatni), potem BB, na końcu AAAA. Segmenty liczbowe porównujemy jako liczby.
+ * Wartości bez takiej budowy (np. „x”) idą po poprawnych numerach, między sobą naturalnie.
+ */
+export function compareSegmented(a, b) {
+  const keys = (t) => { const p = String(t ?? '').split('/').map((x) => x.trim()); return p.length >= 3 ? [p[p.length - 1], p[1], p[0]] : null; };
+  const ka = keys(a), kb = keys(b);
+  if (!ka || !kb) return ka ? -1 : kb ? 1 : naturalCompare(String(a ?? ''), String(b ?? ''));
+  for (let i = 0; i < 3; i++) {
+    const x = ka[i], y = kb[i];
+    const c = /^\d+$/.test(x) && /^\d+$/.test(y) ? Number(x) - Number(y) : naturalCompare(x, y);
+    if (c !== 0) return Math.sign(c);
+  }
+  return 0;
+}
+const CMP = { pz: compareSegmented, zmw: compareSegmented };
 
 export const value = (row, field) => String(row[FIELDS[field].col] ?? '');
 export const display = (field, raw) => (FIELDS[field].isDate ? formatDate(raw) : raw);
