@@ -931,7 +931,7 @@ function api_updateZakup_(data) {
 
 /**
  * Zapis pojedynczych komórek karty Zakupy (edycja jak w arkuszu Google): changes = [{ rowNumber, col, value, expect }].
- * Dozwolone kolumny: B (data zakupu), C (kod), D (ilość), E (PZ; „x” = odebrane bez PZ), K (opis). Zapis tylko, gdy komórka nadal ma
+ * Dozwolone kolumny: B (data zakupu), C (kod), D (ilość), E (PZ; „x” = odebrane bez PZ), G (ZMW), K (opis). Zapis tylko, gdy komórka nadal ma
  * wartość `expect` (to, co aplikacja pokazywała) – inaczej wynik „conflict” i nic się nie zmienia (ktoś zmienił arkusz).
  * Wynik: { v: 1, results: [{ s: 'ok'|'conflict'|'badrow'|'badcol', now: tekst komórki po zapisie }] } w kolejności wejścia.
  */
@@ -939,7 +939,7 @@ function api_updateZakupCells_(changes) {
   if (!Array.isArray(changes) || !changes.length) return { v: 1, results: [] };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Zakupy');
   if (!sheet) throw new Error('Nie znaleziono karty: Zakupy');
-  var COLS = { B: 2, C: 3, D: 4, E: 5, K: 11 };
+  var COLS = { B: 2, C: 3, D: 4, E: 5, G: 7, K: 11 };
   var lastRow = sheet.getLastRow();
   var norm = function (col, x) {
     var t = String(x == null ? '' : x).trim();
