@@ -3,6 +3,7 @@ import { h, clear, api, apiCached, toast } from './ui.js';
 import { preload } from './catalog.js';
 import { permissionsSummary } from './logic/common.js';
 import { grafikAccess, grafikLevelOf } from './logic/grafikAccess.js';
+import { toolroomAccess } from './logic/toolroomAccess.js';
 import { mountWeb } from './views/web.js';
 import { mountPlaceholder } from './views/placeholder.js';
 import { mountToolRoom } from './views/toolroom.js';
@@ -48,15 +49,18 @@ const mountMeasuring = lazy(() => import('./views/measuring.js'), 'mountMeasurin
  * Moduły w kolejności przycisków górnego paska: Skaner, Grafik, Plan, Harmonogram, Mistrz, Narzędziownia, Help (potem zakładki Braki i Tablica).
  * [color] – pastelowe tło przycisku w pasku. Kompetencje są w module Mistrz (inMistrz), Zakupy w Narzędziowni (inToolRoom).
  */
+/** Dostęp do Narzędziowni, Harmonogramu, Zakupów i Ustawień wg poziomu użytkownika (logic/toolroomAccess.js). */
+export const tra = () => toolroomAccess(grafikLevelOf(ctx.user));
+
 export const MODULES = [
   { id: 'skaner', title: 'Skaner', color: '#ffd1dc', mount: mountScanner },
   { id: 'grafik', title: 'Grafik', color: '#ffe0b2', perm: 'grafik', mount: mountGrafik },
   { id: 'plan', title: 'Plan', color: '#fff4b0', perm: 'plan', mount: mountPlan },
   // Harmonogram z bazy Firebase (Grafik też z bazy – gr_meta, gr_days); dawny widok z arkusza Google usunięty.
-  { id: 'harmonogram-fb', title: 'Harmonogram', color: '#d4efb9', mount: mountHarmLive },
+  { id: 'harmonogram-fb', title: 'Harmonogram', color: '#d4efb9', mount: mountHarmLive, lock: () => !tra().harmonogram },   // TOURIST – przycisk niedostępny
   // Mistrz: zakładki arkusza Mistrz_po z bazy Firebase (kolumny liczone liczy program); od CLERIK, import od MASTER; w środku przycisk Kompetencje
   { id: 'mistrz', title: 'Mistrz', color: '#b9ecd9', perm: 'grafik', mount: mountMistrz, visible: () => grafikAccess(grafikLevelOf(ctx.user)).cells },
-  { id: 'narzedziownia', title: 'Narzędziownia', color: '#bfe3f7', mount: mountToolRoom },
+  { id: 'narzedziownia', title: 'Narzędziownia', color: '#bfe3f7', mount: mountToolRoom, visible: () => tra().enter },   // TOURIST – bez przycisku i bez wejścia
   { id: 'help', title: 'Help', color: '#d6d2f8', mount: mountHelp },
   // Kompetencje: otwierane przyciskiem w module Mistrz (nie ma ich w górnym pasku)
   { id: 'kompetencje', title: 'Kompetencje', perm: 'grafik', inMistrz: true, mount: mountCompetence, visible: () => grafikAccess(grafikLevelOf(ctx.user)).competence },
@@ -73,7 +77,7 @@ export const MODULES = [
   { id: 'toolbuilder', title: 'ToolBuilder', style: 'green', inToolRoom: true, mount: mountBuilder },
   { id: 'assemtool', title: 'Assem.Tool', style: 'green', inToolRoom: true, mount: mountBn },
   { id: 'tooltrack', title: 'ToolTrack', style: 'green', inToolRoom: true, mount: mountToolTrack },
-  { id: 'kontury', title: 'Kontury', style: 'green', inToolRoom: true, mount: mountContours },
+  { id: 'kontury', title: 'Kontury', style: 'green', inToolRoom: true, viaBuilder: true, mount: mountContours },   // bez przycisku: dostępne tylko po kliknięciu obrazu narzędzia w ToolBuilderze
   { id: 'czesci', title: 'Części', style: 'green', inToolRoom: true, mount: mountParts },
   { id: 'produkty', title: 'Produkty', style: 'green', inToolRoom: true, mount: mountProducts },
   { id: 'pomiarowe', title: 'Pomiarowe', style: 'green', inToolRoom: true, mount: mountMeasuring },
@@ -84,6 +88,9 @@ export const MODULES = [
 
 /** Kolory pastelowe zakładek Braki i Tablica (ekran główny). */
 const TAB_COLORS = { braki: '#f8c8e8', workflow: '#e8d5b5' };
+
+// widoczność modułów Narzędziowni wg poziomu (ToolBuilder, Assem.Tool, ToolTrack, Części – CLERIK; wszystko – MASTER, GOD)
+for (const m of MODULES) if (m.inToolRoom) m.visible = () => tra().moduleVisible(m.id);
 
 export const ctx = {
   version: '',         // numer wersji programu PC (np. 1.1.0)
@@ -104,6 +111,7 @@ export const ctx = {
         if (meta && !meta.cached && current && before !== 'null' && before !== JSON.stringify(u || null)) go(current);
       }, { force: fresh });
       ctx.userError = null;
+      try { localStorage.setItem('zks.level', grafikLevelOf(ctx.user)); } catch { /* bez pamięci */ }   // zapamiętany poziom (Ustawienia, gdy serwer nie odpowiada)
     } catch (e) {
       ctx.user = null;
       ctx.userError = e.message;
@@ -111,7 +119,11 @@ export const ctx = {
     return ctx.user;
   },
   canWrite(perm) { return !!ctx.user && (!perm || (ctx.user.permissions || {})[perm] === 'write' || (!(perm in (ctx.user.permissions || {})) && false)); },
-  level(perm) { return ctx.user ? (ctx.user.permissions || {})[perm] || 'none' : 'none'; },
+  level(perm) {
+    if (!ctx.user) return 'none';
+    if (perm === 'zakupy') return tra().zakupy ? 'write' : 'none';   // Zakupy: MASTER i GOD – zamówienia i zatwierdzanie zakupów, niżej – bez Zakupów
+    return (ctx.user.permissions || {})[perm] || 'none';
+  },
   /** Uprawnienia w Grafiku i Kompetencjach (GOD / MASTER / CLERIK / TOURIST). */
   grafikAcc() { return grafikAccess(grafikLevelOf(ctx.user)); },
 };
@@ -142,7 +154,7 @@ function topbar(title, showBack) {
     h('button', { class: 'nav ' + style + (active ? ' on' : ''), style: color ? { background: color } : {}, disabled, title: tip || label, onclick }, label);
   const nav = h('div', { class: 'nav-bar' });
   for (const m of MODULES.filter((x) => !x.inToolRoom && !x.inHelp && !x.inMistrz && (!x.visible || x.visible()))) {
-    const denied = m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
+    const denied = (m.lock && m.lock()) || (m.perm === 'grafik' ? !!ctx.user && !grafikAccess(grafikLevelOf(ctx.user)).view : m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none');
     nav.append(navBtn(m.title, () => go(m.id), { active: activeMain === m.id, style: 'pastel', color: m.color, disabled: !!denied, title: denied ? `${m.title}: brak uprawnień` : m.title }));
   }
   for (const [tab, label, color] of [['braki', 'Braki', TAB_COLORS.braki], ['workflow', 'Tablica', TAB_COLORS.workflow]]) {
@@ -152,8 +164,8 @@ function topbar(title, showBack) {
   ctx.nav2 = h('div', { class: 'nav-bar nav-bar2' });
   // Narzędziownia: przyciski podmodułów w drugim rzędzie (jak w Mistrzu), w kolorze przycisku modułu; wybrany – zielona poświata
   if (activeMain === 'narzedziownia') {
-    for (const m of MODULES.filter((x) => x.inToolRoom)) {
-      const denied = m.perm && ctx.user && (ctx.user.permissions || {})[m.perm] === 'none';
+    for (const m of MODULES.filter((x) => x.inToolRoom && !x.viaBuilder && (!x.visible || x.visible()))) {
+      const denied = m.perm && ctx.user && ctx.level(m.perm) === 'none';
       ctx.nav2.append(h('button', { class: 'btn small' + (m.id === current ? ' glow' : ''), disabled: !!m.disabled || !!denied, title: m.disabled ? 'Moduł w budowie' : denied ? `${m.title}: brak uprawnień` : m.title, onclick: () => go(m.id) }, m.title));
     }
   }
@@ -175,8 +187,8 @@ export function go(id) {
   // Narzędziownia otwiera ostatnio używany podmoduł (przyciski podmodułów są w nagłówku)
   if (id === 'narzedziownia') {
     let last = null; try { last = localStorage.getItem('zks.toolroom.last'); } catch { /* bez pamięci */ }
-    const ok = (x) => MODULES.some((m) => m.id === x && m.inToolRoom && !m.disabled);
-    id = ok(last) ? last : 'toolbuilder';
+    const ok = (x) => MODULES.some((m) => m.id === x && m.inToolRoom && !m.disabled && !m.viaBuilder && (!m.visible || m.visible()));
+    id = ok(last) ? last : (MODULES.find((m) => ok(m.id)) || { id: 'toolbuilder' }).id;
   }
   { const m = MODULES.find((x) => x.id === id); if (m && m.inToolRoom) { try { localStorage.setItem('zks.toolroom.last', id); } catch { /* bez pamięci */ } } }
   try { sessionStorage.setItem('zks.current', id); } catch { /* bez pamięci sesji */ }

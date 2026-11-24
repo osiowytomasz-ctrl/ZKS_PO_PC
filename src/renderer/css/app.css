@@ -81,6 +81,9 @@ table.t tr.click:hover td { filter: brightness(.93); }
 .gr table.t td.sticky2 { position: sticky; z-index: 1; }
 .gr table.t td.edited { outline: 2px solid #e65100; outline-offset: -2px; }
 .gr table.t td.editable { cursor: cell; }
+/* Grafik: siatka czarna, linie 2 px (prawa i dolna krawędź komórek ustawia grafik.js, lewa i górna tylko tabela) */
+.gr table.t th, .gr table.t td { border-left: 0; border-top: 0; }
+.gr table.t thead tr:first-child th { border-top: 2px solid #000; }
 .gr table.t th.vert { height: calc(70px * var(--z)); vertical-align: bottom; }
 .gr table.t th.vert > span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; }
 /* Dialogi */

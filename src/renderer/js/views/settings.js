@@ -12,6 +12,7 @@ import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
 import { openGrafikCodes } from './grafikCodes.js';
 import { openUsersAdmin } from './usersAdmin.js';
 import { publishLink, readLinkHistory } from '../linkStore.js';
+import { toolroomAccess } from '../logic/toolroomAccess.js';
 
 export async function mountSettings(el, ctx) {
   const cfg = await window.zks.getSettings();
@@ -20,7 +21,15 @@ export async function mountSettings(el, ctx) {
   const show = h('input', { type: 'checkbox', onchange: () => { key.type = show.checked ? 'text' : 'password'; } });
   const status = h('div', { class: 'muted', style: { marginTop: '8px', whiteSpace: 'pre-wrap' } });
 
-  const isAdmin = () => grafikLevelOf(ctx.user) === 'god';
+  // poziom: z zalogowanego użytkownika, a gdy serwer nie odpowiada – ostatnio zapamiętany (żeby administrator z nieaktualnym adresem mógł go poprawić)
+  let remembered = 'none'; try { remembered = localStorage.getItem('zks.level') || 'none'; } catch { /* bez pamięci */ }
+  const levelNow = ctx.user ? grafikLevelOf(ctx.user) : remembered;
+  const acc = toolroomAccess(levelNow);
+  const isAdmin = () => acc.apiLink;
+  // adres API widzi i zmienia tylko GOD; reszta go nie widzi (program pobiera go z bazy). Wyjątek: gdy w ogóle nie ma adresu, pole jest potrzebne do pierwszego uruchomienia
+  const showUrl = acc.apiLink || !cfg.url;
+  // TOURIST (i brak dostępu): w Ustawieniach tylko klucz, jego zatwierdzenie i sekcja aktualizacji
+  const limited = !acc.fullSettings;
   // Adres API jest w bazie: zwykły użytkownik go nie wpisuje (program pobiera go sam przy starcie i po błędzie połączenia),
   // zapisuje go administrator (GOD) z programu PC. Pole jest zablokowane tylko, gdy wiemy, że to nie administrator.
   const linkInfo = h('div', { class: 'muted', style: { fontSize: '12px', margin: '2px 0 6px' } });
@@ -28,6 +37,7 @@ export async function mountSettings(el, ctx) {
     let r = null; try { r = await window.zks.remoteLink(); } catch { /* bez połączenia */ }
     const l = r && r.ok ? r.link : null;
     const locked = !!l && !!ctx.user && !isAdmin();
+    if (!showUrl) return;
     url.disabled = locked;
     linkInfo.textContent = !r || !r.ok ? 'Adres z bazy: brak połączenia z bazą – używany jest adres zapamiętany w programie.'
       : !l ? 'Adres z bazy: jeszcze nie zapisany. Administrator (GOD) wpisuje go tu raz i zapisuje – potem wszystkie programy pobierają go z bazy.'
@@ -106,9 +116,9 @@ export async function mountSettings(el, ctx) {
   };
   el.append(h('div', { class: 'panel', style: { maxWidth: '640px', margin: '20px auto' } },
     h('h2', {}, 'Połączenie z serwerem'),
-    h('p', { class: 'muted' }, 'Adres i klucz są te same co w aplikacji na telefonie. Klucz jest przechowywany w pliku szyfrowanym przez system (gdy system to umożliwia) i jest wysyłany wyłącznie w treści żądania do podanego adresu.'),
-    field('Adres API (…/exec)', url),
-    linkInfo,
+    h('p', { class: 'muted' }, !showUrl ? 'Wpisz swój klucz użytkownika i zatwierdź go. Klucz jest przechowywany w pliku szyfrowanym przez system (gdy system to umożliwia) i jest wysyłany wyłącznie w treści żądania do serwera.' : 'Adres i klucz są te same co w aplikacji na telefonie. Klucz jest przechowywany w pliku szyfrowanym przez system (gdy system to umożliwia) i jest wysyłany wyłącznie w treści żądania do podanego adresu.'),
+    showUrl ? field('Adres API (…/exec)', url) : null,
+    showUrl ? linkInfo : null,
     isAdmin() ? h('button', { class: 'btn small', style: { marginBottom: '6px' }, title: 'Ostatnie zapisane adresy API (kto i kiedy)', onclick: async () => {
       try { const hist = await readLinkHistory(10); const m = modal('Historia adresów API', h('div', {}, ...(hist.length ? hist.map((x) => h('div', { style: { fontFamily: 'monospace', fontSize: '12px', margin: '4px 0', wordBreak: 'break-all' } }, `v${x.ver} · ${new Date(x.ts).toLocaleString('pl-PL')} · ${x.by || '—'}\n${x.url}`)) : [h('p', {}, 'Brak wpisów.')]), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true }); }
       catch (e) { toast('Nie wczytano historii: ' + (e.message || e), true); } } }, 'Historia adresów') : null,
@@ -116,19 +126,19 @@ export async function mountSettings(el, ctx) {
     h('label', { class: 'row muted' }, show, 'Pokaż klucz'),
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn primary', onclick: check }, 'Zapisz i sprawdź połączenie'),
-      h('button', { class: 'btn', title: 'Mierzy czas odpowiedzi serwera dla pustego wywołania, Grafiku i Harmonogramu', onclick: speedTest }, 'Test szybkości'),
-      h('button', { class: 'btn', title: 'Sprawdza logowanie i zapis/odczyt w bazie Firebase', onclick: fbTest }, 'Test Firebase'),
+      limited ? null : h('button', { class: 'btn', title: 'Mierzy czas odpowiedzi serwera dla pustego wywołania, Grafiku i Harmonogramu', onclick: speedTest }, 'Test szybkości'),
+      limited ? null : h('button', { class: 'btn', title: 'Sprawdza logowanie i zapis/odczyt w bazie Firebase', onclick: fbTest }, 'Test Firebase'),
       h('button', { class: 'btn', onclick: async () => { await save(); await ctx.loadUser(); ctx.go('home'); } }, 'Zapisz i wróć'),
       h('button', { class: 'btn', title: 'Otwiera stronę z najnowszą wersją aplikacji (plik .exe)', onclick: () => window.zks.openExternal('https://github.com/osiowytomasz-ctrl/ZKS_PO_PC/releases/tag/latest') }, 'Aktualizuj'),
-      h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną'),
-      h('button', { class: 'btn', title: 'Usuwa lokalną kopię bazy Firebase (Grafik, Harmonogram, Kompetencje, Workflow) i przeładowuje program – dane pobiorą się od nowa z serwera. Gdy na tym komputerze brakuje danych, które inni widzą.', onclick: async () => {
+      limited ? null : h('button', { class: 'btn', title: 'Usuwa zapamiętane dane z arkusza (listy, grafik, katalog narzędzi)', onclick: async () => { await window.zks.cacheClear(); toast('Wyczyszczono pamięć podręczną'); } }, 'Wyczyść pamięć podręczną'),
+      limited ? null : h('button', { class: 'btn', title: 'Usuwa lokalną kopię bazy Firebase (Grafik, Harmonogram, Kompetencje, Workflow) i przeładowuje program – dane pobiorą się od nowa z serwera. Gdy na tym komputerze brakuje danych, które inni widzą.', onclick: async () => {
         if (!(await confirmBox('Pamięć bazy', 'Usunąć lokalną kopię bazy Firebase na tym komputerze i przeładować program? Dane w bazie zostają; pobiorą się od nowa.', 'Wyczyść i przeładuj'))) return;
         await resetFirestoreCache('ręcznie z Ustawień', true);
       } }, 'Wyczyść pamięć bazy')),
     status, speed, fbOut,
     (paintLink(), null),
     // Dostęp: klucze do programu (administrator) i kody do Grafiku na telefonie (MASTER, GOD)
-    cfg.url && cfg.key && (grafikAccess(grafikLevelOf(ctx.user)).manage) ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Dostęp'),
+    !limited && cfg.url && cfg.key && (grafikAccess(grafikLevelOf(ctx.user)).manage) ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Dostęp'),
       h('p', { class: 'muted' }, 'Klucze dostępu do programu (PC i Android) nadaje administrator. Kody iPhone – osobiste kody pracowników do Grafiku i Planu do wglądu w przeglądarce telefonu (strona …/exec?p=grafik).'),
       h('div', { class: 'row' },
         grafikLevelOf(ctx.user) === 'god' ? h('button', { class: 'btn', title: 'Konta z zakładki Uzytkownicy: klucze, nowi użytkownicy (tylko administrator)', onclick: () => openUsersAdmin() }, 'Użytkownicy i klucze') : null,
@@ -140,12 +150,12 @@ export async function mountSettings(el, ctx) {
             await openGrafikCodes({ people: () => people, user: ctx.user });
           } catch (e) { toast('Kody iPhone: ' + (e.message || e), true); }
         } }, 'Kody iPhone'))) : null,
-    cfg.url && cfg.key ? holidaysPanel() : null,
-    cfg.url && cfg.key ? stationsPanel() : null,
-    toolLookPanel(),
-    cfg.url && cfg.key && grafikAccess(grafikLevelOf(ctx.user)).manage ? ndPanel(ctx) : null,
+    !limited && cfg.url && cfg.key ? holidaysPanel() : null,
+    !limited && cfg.url && cfg.key ? stationsPanel() : null,
+    limited ? null : toolLookPanel(),
+    !limited && cfg.url && cfg.key && grafikAccess(grafikLevelOf(ctx.user)).manage ? ndPanel(ctx) : null,
     // Pomiary: karty są w bazie Firebase; jednorazowe przeniesienie dawnych kart z arkusza „Karty pomiarowe” (GOD)
-    cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
+    !limited && cfg.url && cfg.key && grafikLevelOf(ctx.user) === 'god' ? h('div', { style: { marginTop: '14px' } }, h('h3', {}, 'Pomiary'),
       h('p', { class: 'muted' }, 'Karty pomiaru zapisują się w bazie Firebase (bez arkusza). Dawne karty z arkusza „Karty pomiarowe” można raz przenieść do bazy.'),
       h('button', { class: 'btn', onclick: async () => {
         if (!(await confirmBox('Pomiary', 'Przenieść wszystkie karty z arkusza „Karty pomiarowe” do bazy? Karty już przeniesione zostaną nadpisane danymi z arkusza; karty zapisane w programie zostają.', 'Przenieś'))) return;

@@ -415,6 +415,7 @@ function doPost(e) {
     var req = api_parseRequest_(e);
 
     user = api_authenticate_(req.key);
+    user.perms = api_zakupyFromLevel_(user);   // Zakupy: MASTER i GOD – zapis (zamówienia, zatwierdzanie zakupów), niżej – brak
     API_USER_EMAIL = user.email;
     API_USER_NAME = user.name;
     API_PERMS = user.perms;
@@ -588,6 +589,18 @@ function api_permsFromRow_(row, permCols, email) {
       perms[module] = api_parsePermission_(text, API_PERM_DEFAULTS[module]);
     }
   });
+  return perms;
+}
+
+/**
+ * Uprawnienie do Zakupów wynika z poziomu w kolumnie „Grafik dostęp” (nie z osobnej kolumny Zakupy): MASTER i GOD – 'write' (wprowadzanie zamówień i
+ * zatwierdzanie zakupów), CLERIK, TOURIST i brak – 'none' (moduł Zakupy jest wtedy niewidoczny w programie). Zwraca kopię uprawnień.
+ */
+function api_zakupyFromLevel_(user) {
+  var perms = {};
+  Object.keys(user.perms || {}).forEach(function (k) { perms[k] = user.perms[k]; });
+  var level = typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none';
+  perms.zakupy = (level === 'master' || level === 'god') ? 'write' : 'none';
   return perms;
 }
 

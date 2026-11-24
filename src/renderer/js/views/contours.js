@@ -9,6 +9,7 @@ import { learnFre } from '../logic/contourGen.js';
 import * as E from '../logic/contourEditor.js';
 import { normCode, description } from '../logic/tooltrack.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { toolroomAccess } from '../logic/toolroomAccess.js';
 import { openPlateEditor } from './plateEditor.js';
 import { mountPlateLayout } from './plateLayout.js';
 import { patchPlate, specsFromPlates, normPlates } from '../logic/plateLayout.js';
@@ -43,7 +44,7 @@ function triad2d(x, y) {
 }
 
 export function mountContours(el, ctx) {
-  const canSave = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  const canSave = toolroomAccess(grafikLevelOf(ctx.user)).editContours;   // edycja konturów – tylko GOD
   const st = { filters: B.emptyFilters(), stopFill: null, tools: [], details: new Map(), v: {}, mounts: {}, params: {}, q: '', only: '', tool: null, rows: [], dirty: false, full: null, fullLabel: '' };
   const emb = !!ctx.embedded;   // okno Kontur otwarte z ToolBuildera: narzędzie już wybrane – bez filtrów, listy i komunikatu o wczytaniu
   const status = statusLine();

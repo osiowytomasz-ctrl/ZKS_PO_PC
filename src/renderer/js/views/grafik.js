@@ -169,7 +169,7 @@ export function mountGrafik(el, ctx) {
     const sy = body.scrollTop, sx = body.scrollLeft;
     clear(body);
     const z = st.zoom / 100;
-    const table = h('table', { class: 't', style: { fontSize: 13 * z + 'px', borderCollapse: 'separate', borderSpacing: 0 } });
+    const table = h('table', { class: 't', style: { fontSize: 13 * z + 'px', borderCollapse: 'separate', borderSpacing: 0, borderLeft: '2px solid #000', borderTop: '2px solid #000' } });   // linie siatki Grafiku: czarne, 2 px
     const fixed = FIXED;
     // szerokości: własne (przeciągnięcie prawej krawędzi nagłówka, zapisywane na tym komputerze) albo domyślne; wszystkie dni – jedna szerokość
     const wKey = (c) => (c.iso ? 'date' : c.key);
@@ -182,7 +182,7 @@ export function mountGrafik(el, ctx) {
     const weekH = Math.round(17 * z);
     // nagłówek: wiersz tygodni (ISO) nad datami, pod nim daty w pionie „dd-mm-rrrr” jak w karcie G
     const headM = h('tr', {}), head1 = h('tr', {}), head2 = h('tr', {});
-    const thBase = { position: 'sticky', cursor: 'pointer', padding: '2px 3px', fontWeight: 700, borderRight: '1px solid #999', borderBottom: '1px solid #999' };
+    const thBase = { position: 'sticky', cursor: 'pointer', padding: '2px 3px', fontWeight: 700, borderRight: '2px solid #000', borderBottom: '2px solid #000' };
     cols.forEach((c, i) => {
       if (c.iso) return;
       const filt = !!st.filters[c.key];
@@ -227,7 +227,7 @@ export function mountGrafik(el, ctx) {
       grid.push(p);
       cols.forEach((c, ci) => {
         const fixedCell = ci < fixed;
-        let txt = value(p, c), style = { borderRight: '1px solid #c8c8c8', borderBottom: '1px solid #c8c8c8', padding: '1px 4px', whiteSpace: 'nowrap', textAlign: c.key === 'name' ? 'left' : 'center' };
+        let txt = value(p, c), style = { borderRight: '2px solid #000', borderBottom: '2px solid #000', padding: '1px 4px', whiteSpace: 'nowrap', textAlign: c.key === 'name' ? 'left' : 'center' };
         const stn = F.placeStation(p.place, stList);
         if (c.key === 'name') { txt = acc.summary ? F.displayName(p, s ? s.remaining : 0) : p.name + (p.suffix ? ' ' + p.suffix : ''); style = { ...style, fontWeight: 600, ...(stn ? { background: stn.bg, color: stn.color } : {}) }; }
         if (c.ut !== undefined) style = { ...style, background: utShade(c.ut, c.utN, false) };

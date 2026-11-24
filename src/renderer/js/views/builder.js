@@ -7,6 +7,7 @@ import { ndLoad, ndPatch } from '../ndStore.js';
 import * as E from '../logic/contourEditor.js';
 import { fullContour } from '../logic/contourGen.js';
 import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { toolroomAccess } from '../logic/toolroomAccess.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
 import { multiFilter, toolRow, toolTile, miniSvg, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, lazyFill, setToolStations, locColor, contrast, dimsOn, dimsToggle } from './toolViews.js';
@@ -45,7 +46,7 @@ export function mountBuilder(el, ctx) {
   }
 
   // ---------- akceptacja konturu z kafelka: to samo co „✓ Potwierdź poprawność konturu” w Konturach (PSWT: BH, BC, BE) ----------
-  const canConfirm = grafikAccess(grafikLevelOf(ctx.user)).manage;
+  const canConfirm = toolroomAccess(grafikLevelOf(ctx.user)).editContours;   // zatwierdzanie konturów – tylko GOD (MASTER składa narzędzia, ale nie edytuje konturów)
   async function loadContourData() {
     if (!canConfirm) return;
     try {
