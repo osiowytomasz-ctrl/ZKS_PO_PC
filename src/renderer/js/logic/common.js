@@ -3,8 +3,21 @@
 const collator = new Intl.Collator('pl', { sensitivity: 'base' });
 const CHUNKS = /\d+|\D+/g;
 
-/** Porównanie „naturalne”: liczby w tekście jako liczby (9 przed 10), bez wielkości liter, wg reguł polskich. */
+// Data w formacie DD.MM.RRRR (też z „-” albo „/”), opcjonalnie z godziną: porównywana jak w Excelu – rok, miesiąc, dzień, godzina, minuta.
+const DMY = /^\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$/;   // godzina: GG:MM albo GG:MM:SS
+/** Wartość daty tekstowej DD.MM.RRRR [GG:MM] jako liczba do porównań (null – to nie jest data w tym formacie albo jest nieprawidłowa). */
+export function dmyValue(text) {
+  const m = DMY.exec(String(text ?? ''));
+  if (!m) return null;
+  const d = +m[1], mo = +m[2];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return ((+m[3] * 100 + mo) * 100 + d) * 1e6 + (+m[4] || 0) * 1e4 + (+m[5] || 0) * 100 + (+m[6] || 0);
+}
+
+/** Porównanie „naturalne”: liczby w tekście jako liczby (9 przed 10), bez wielkości liter, wg reguł polskich; daty DD.MM.RRRR – chronologicznie. */
 export function naturalCompare(a, b) {
+  const da = dmyValue(a), db = dmyValue(b);
+  if (da !== null && db !== null) return da < db ? -1 : da > db ? 1 : 0;
   const x = String(a).match(CHUNKS) || [];
   const y = String(b).match(CHUNKS) || [];
   for (let i = 0; i < Math.min(x.length, y.length); i++) {
@@ -27,26 +40,26 @@ export function normalize(value) {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-const ISO = /(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?)?/;
-const PL = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})(?:[ T](\d{1,2})(?::(\d{2}))?)?/;
+const ISO = /(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?/;
+const PL = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})(?:[ T](\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?/;
 
-/** Data z arkusza: `yyyy-MM-dd[ HH[:mm]]` albo `d.M.yyyy[ HH[:mm]]` (też z `-` i `/`). Zwraca Date (UTC) albo null. */
+/** Data z arkusza: `yyyy-MM-dd[ HH[:mm[:ss]]]` albo `d.M.yyyy[ HH[:mm[:ss]]]` (też z `-` i `/`). Zwraca Date (UTC) albo null. */
 export function parseDate(value) {
   const text = String(value ?? '').trim();
   if (!text) return null;
-  let y, mo, d, h = 0, mi = 0;
+  let y, mo, d, h = 0, mi = 0, sec = 0;
   let m = ISO.exec(text);
   if (m) {
     [y, mo, d] = [+m[1], +m[2], +m[3]];
-    h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0;
+    h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; sec = m[6] ? +m[6] : 0;
   } else if ((m = PL.exec(text))) {
     [d, mo, y] = [+m[1], +m[2], +m[3]];
     if (y < 100) y += 2000;
-    h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0;
+    h = m[4] ? +m[4] : 0; mi = m[5] ? +m[5] : 0; sec = m[6] ? +m[6] : 0;
   } else {
     return null;
   }
-  const date = new Date(Date.UTC(y, mo - 1, d, h, mi));
+  const date = new Date(Date.UTC(y, mo - 1, d, h, mi, sec));
   if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
   return date;
 }

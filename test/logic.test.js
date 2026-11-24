@@ -423,3 +423,15 @@ test('ToolBuilder: usunięcie narzędzia z zestawu usuwa je i wszystkie dodane p
   assert.equal(set.length, 10, 'zestaw wejściowy nie jest zmieniany');
   assert.equal(B.isComposite([]), false); assert.equal(B.isComposite(set.slice(0, 1)), false); assert.equal(B.isComposite(set.slice(0, 2)), true);
 });
+
+import { naturalCompare as nat, dmyValue } from '../src/renderer/js/logic/common.js';
+test('sortowanie dat DD.MM.RRRR: rok, miesiąc, dzień (jak w Excelu), z godziną; reszta tekstu naturalnie', () => {
+  const dates = ['15.03.2026', '02.12.2025', '31.01.2026', '01.02.2026', '02.12.2024', '15.03.2026 08:30', '15.03.2026 07:05'];
+  assert.deepEqual([...dates].sort(nat), ['02.12.2024', '02.12.2025', '31.01.2026', '01.02.2026', '15.03.2026', '15.03.2026 07:05', '15.03.2026 08:30']);
+  assert.ok(dmyValue('1.2.2026') < dmyValue('01.03.2026')); assert.equal(dmyValue('32.01.2026'), null); assert.equal(dmyValue('abc'), null);
+  assert.deepEqual(['K10', 'K9', 'K1'].sort(nat), ['K1', 'K9', 'K10']);           // zwykły tekst – bez zmian
+  const dt = ['24.11.2026 09:05:30', '24.11.2026 09:05:07', '24.11.2026, 10:00', '24.11.2026 9:05'];
+  assert.deepEqual([...dt].sort(nat), ['24.11.2026 9:05', '24.11.2026 09:05:07', '24.11.2026 09:05:30', '24.11.2026, 10:00']);   // godzina, minuta, sekunda
+  assert.deepEqual(['10:00', '9:05:30', '09:05'].sort(nat), ['09:05', '9:05:30', '10:00']);                                        // same godziny: GG:MM[:SS]
+  assert.ok(nat('01.01.2026', 'x') !== 0);                                           // mieszane: porównanie tekstowe, bez błędu
+});
