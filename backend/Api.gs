@@ -349,6 +349,12 @@ var API_FUNCS = {
     write: true,
     run: function (a) { return api_updateZakup_(a[0]); }
   },
+  // Edycja komórek w widokach Zakupione i Odebrane bez PZ (jak w arkuszu Google): [{ rowNumber, col, value, expect }]
+  updateZakupyCells: {
+    perm: ['zakupy', 'write'],
+    write: true,
+    run: function (a) { return api_updateZakupCells_(a[0]); }
+  },
 
   // --- Pomiary: karta pomiaru płaszcza (Code_Karta.js) ---
   // Bez osobnego uprawnienia, tak jak w wersji webowej: każdy użytkownik z aktywnym kluczem.
@@ -921,6 +927,38 @@ function api_updateZakup_(data) {
   if (hasPz) throw new Error('Ta pozycja ma już wpisany PZ. Odśwież listę.');
 
   return updateZakupyItem(data);
+}
+
+/**
+ * Zapis pojedynczych komórek karty Zakupy (edycja jak w arkuszu Google): changes = [{ rowNumber, col, value, expect }].
+ * Dozwolone kolumny: B (data zakupu), C (kod), D (ilość), E (PZ; „x” = odebrane bez PZ), K (opis). Zapis tylko, gdy komórka nadal ma
+ * wartość `expect` (to, co aplikacja pokazywała) – inaczej wynik „conflict” i nic się nie zmienia (ktoś zmienił arkusz).
+ * Wynik: { v: 1, results: [{ s: 'ok'|'conflict'|'badrow'|'badcol', now: tekst komórki po zapisie }] } w kolejności wejścia.
+ */
+function api_updateZakupCells_(changes) {
+  if (!Array.isArray(changes) || !changes.length) return { v: 1, results: [] };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Zakupy');
+  if (!sheet) throw new Error('Nie znaleziono karty: Zakupy');
+  var COLS = { B: 2, C: 3, D: 4, E: 5, K: 11 };
+  var lastRow = sheet.getLastRow();
+  var norm = function (col, x) {
+    var t = String(x == null ? '' : x).trim();
+    if (col === 'B') { var m = t.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/) || null; if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+      m = t.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{2,4})/); if (m) return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2); }
+    return t.toLowerCase();
+  };
+  var results = changes.map(function (ch) {
+    var col = String(ch && ch.col || '').toUpperCase(), c = COLS[col], row = Number(ch && ch.rowNumber);
+    if (!c) return { s: 'badcol' };
+    if (!(row >= 2) || row > lastRow) return { s: 'badrow' };
+    var cell = sheet.getRange(row, c);
+    if (norm(col, cell.getDisplayValue()) !== norm(col, ch.expect)) return { s: 'conflict', now: String(cell.getDisplayValue() || '') };
+    cell.setValue(String(ch.value == null ? '' : ch.value));
+    return { s: 'ok', c: c, row: row };
+  });
+  SpreadsheetApp.flush();
+  results.forEach(function (r) { if (r.s === 'ok') { r.now = String(sheet.getRange(r.row, r.c).getDisplayValue() || ''); delete r.c; delete r.row; } });
+  return { v: 1, results: results };
 }
 
 // ---------------------------------------------------------------------------

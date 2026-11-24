@@ -1,12 +1,16 @@
 // Logika Zakupów (odpowiednik ZakupyLogic.kt).
-import { formatDate } from './common.js';
+import { formatDate, parseDate } from './common.js';
 import { parseQuantity } from './scanner.js';
 import { visibleRows, filterOptions, sortRows, sortSummary as genericSummary } from './tableFilter.js';
 
-export const VIEWS = { ordered: 'Zamówione', bought: 'Zakupione', archive: 'Archiwum' };
+export const VIEWS = { ordered: 'Zamówione', bought: 'Zakupione', nopz: 'Odebrane bez PZ', archive: 'Archiwum' };
 
-/** Zamówione = pozycje bez wpisanego PZ (kolumna E); zakupione = pozycje z PZ. */
+/**
+ * Zamówione = pozycje bez wpisu w kolumnie PZ (E). Zakupione = z numerem PZ. Odebrane bez PZ = w kolumnie PZ wpisano „x” albo „X”
+ * (towar odebrany, a dokumentu PZ jeszcze nie ma – po otrzymaniu PZ wpisuje się jego numer, a pozycja przechodzi do Zakupione).
+ */
 export const lacksPz = (row) => String(row.columnE ?? '').trim() === '';
+export const isNoPz = (row) => String(row.columnE ?? '').trim().toLowerCase() === 'x';
 /** Bez PZ, a z datą zakupu (kolumna B): zakup uzupełniono niekompletnie, pozycja wymaga korekty (czerwony wiersz). */
 export const needsCorrection = (row) => lacksPz(row) && String(row.columnB ?? '').trim() !== '';
 
@@ -25,13 +29,33 @@ const FIELDS = {
 
 export const isBought = (row) => String(row.columnJ ?? '').trim().toLowerCase() === 'x';
 
-/** Kolumny widoku: zamówione (data, kod, ilość zam., ZMW, opis), zakupione/archiwum (data, kod, ilość, PZ, opis). */
+/** Kolumny widoku: zamówione (data, ilość zam., ZMW, opis – bez kodu), zakupione / odebrane bez PZ / archiwum (data, kod, ilość, PZ, opis). */
 export function columns(view) {
   const defs = view === 'ordered'
-    ? [['zamowiono', 'Data'], ['kod', 'Kod'], ['iloscZamowiona', 'Ilość'], ['zmw', 'ZMW'], ['opis', 'Opis']]
+    ? [['zamowiono', 'Data'], ['iloscZamowiona', 'Ilość'], ['zmw', 'ZMW'], ['opis', 'Opis']]
     : [['zakup', 'Data'], ['kod', 'Kod'], ['ilosc', 'Ilość'], ['pz', 'PZ'], ['opis', 'Opis']];
   return defs.map(([key, title]) => ({ key, title, isDate: !!FIELDS[key].isDate }));
 }
+
+// ---- edycja komórek w widokach Zakupione i Odebrane bez PZ (jak w arkuszu Google) ----
+/** Widoki z edycją komórek. */
+export const editableView = (view) => view === 'bought' || view === 'nopz';
+/** Kolumny arkusza dla edytowalnych pól widoku (data zakupu B, kod C, ilość D, PZ E, opis K). */
+export const EDIT_COLS = { zakup: 'B', kod: 'C', ilosc: 'D', pz: 'E', opis: 'K' };
+/** Wartość wpisana w komórce → tekst do arkusza albo błąd. Data: dd.MM.rrrr (puste dozwolone); PZ: „X” zapisujemy jako „x”. */
+export function normalizeEdit(field, text) {
+  const t = String(text ?? '').trim();
+  if (!EDIT_COLS[field]) return { ok: false, error: 'Tej kolumny nie można edytować.' };
+  if (field === 'zakup') {
+    if (!t) return { ok: true, value: '' };
+    const d = parseDate(t);
+    return d ? { ok: true, value: formatDate(t) } : { ok: false, error: `„${t}” nie jest datą (dd.mm.rrrr).` };
+  }
+  if (field === 'pz') return { ok: true, value: t.toLowerCase() === 'x' ? 'x' : t };
+  return { ok: true, value: t };
+}
+/** Ustawia surową wartość pola w wierszu (po zapisie w arkuszu). */
+export const setValue = (row, field, v) => { row[FIELDS[field].col] = v; };
 
 export const value = (row, field) => String(row[FIELDS[field].col] ?? '');
 export const display = (field, raw) => (FIELDS[field].isDate ? formatDate(raw) : raw);
@@ -39,7 +63,8 @@ export const filterValue = (row, column) => display(column.key, value(row, colum
 
 export function source(rows, archive, view) {
   if (view === 'ordered') return rows.filter(lacksPz);
-  if (view === 'bought') return rows.filter((r) => !lacksPz(r));
+  if (view === 'bought') return rows.filter((r) => !lacksPz(r) && !isNoPz(r));
+  if (view === 'nopz') return rows.filter(isNoPz);
   return archive;
 }
 

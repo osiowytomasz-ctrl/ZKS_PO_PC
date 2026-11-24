@@ -99,10 +99,10 @@ test('Zakupy: widoki, sortowanie dat i naturalne', () => {
   assert.equal(Z.source(zrows, [], 'bought').length, 1);    // z PZ
   const ord = Z.shown(zrows, [], 'ordered', {}, [{ key: 'zamowiono', ascending: true }]);
   assert.deepEqual(ord.map((r) => r.columnC), ['K10', 'K1']);
-  const byCode = Z.shown(zrows, [], 'ordered', {}, [{ key: 'kod', ascending: true }]);
-  assert.deepEqual(byCode.map((r) => r.columnC), ['K1', 'K10']);
-  assert.equal(Z.sortSummary('ordered', [{ key: 'kod', ascending: false }]), 'Kod ↓');
-  assert.match(Z.shareText('ordered', ord), /^Zamówione\n\nData \| Kod \| Ilość \| ZMW \| Opis\n01\.09\.2026 \| K10/);
+  const byQty = Z.shown(zrows, [], 'ordered', {}, [{ key: 'iloscZamowiona', ascending: true }]);   // Zamówione nie ma kolumny Kod – sortowanie po ilości
+  assert.deepEqual(byQty.map((r) => r.columnC), ['K10', 'K1']);
+  assert.equal(Z.sortSummary('bought', [{ key: 'kod', ascending: false }]), 'Kod ↓');
+  assert.match(Z.shareText('ordered', ord), /^Zamówione\n\nData \| Ilość \| ZMW \| Opis\n01\.09\.2026 \| 1/);
 });
 
 import * as T from '../src/renderer/js/logic/tooltrack.js';

@@ -2,6 +2,7 @@ import { h, clear, api, apiCached, toast, modal, field, filterHeader, columnFilt
 import * as Z from '../logic/zakupy.js';
 import { updateSorts, sortLabels, formatDate, parseDate } from '../logic/common.js';
 import { filterCodes, parseQuantity } from '../logic/scanner.js';
+import { createCellGrid } from './cellGrid.js';
 
 export function mountZakupy(el, ctx) {
   const level = ctx.level('zakupy');
@@ -11,6 +12,39 @@ export function mountZakupy(el, ctx) {
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0 } });
   const tabs = h('div', { class: 'tabs' });
   const notice = h('div', { class: 'muted' });
+  const canEdit = () => canWrite && st.exactRows && st.fresh;   // edycja komórek: prawo zapisu, serwer z numerami wierszy, dane świeże (nie z pamięci)
+  const codeList = h('datalist', { id: 'zk-codes' });
+  const grid = createCellGrid({
+    body, listId: 'zk-codes',
+    text: (row, col) => Z.display(col.key, Z.value(row, col.key)),
+    editable: (row, col) => canEdit() && Z.editableView(st.view) && !!Z.EDIT_COLS[col.key],
+    onRowHeader: (row) => openRow(row, true),
+    readOnlyNote: canWrite ? (st.exactRows ? 'Dane z pamięci – poczekaj na odświeżenie' : 'Serwer bez dokładnych numerów wierszy – zaktualizuj skrypt') : 'Uprawnienia: tylko odczyt',
+    commit: commitCells,
+  });
+
+  /** Zapis komórek w arkuszu (updateZakupyCells) z kontrolą poprzedniej wartości; wynik na każdą zmianę. */
+  async function commitCells(changes) {
+    const out = changes.map(() => null), items = [];
+    changes.forEach((ch, i) => {
+      const n = Z.normalizeEdit(ch.col.key, ch.text);
+      if (!n.ok) { out[i] = { ok: false, error: n.error }; return; }
+      items.push({ i, body: { rowNumber: ch.row.rowNumber, col: Z.EDIT_COLS[ch.col.key], value: n.value, expect: ch.expect } });
+    });
+    if (items.length) {
+      let r;
+      try { r = await api('updateZakupyCells', [items.map((x) => x.body)]); }
+      catch (e) { const msg = /nieznan|unknown|not found|Brak funkcji/i.test(e.message || '') ? 'serwer (Apps Script) ma starą wersję – wdróż nowy Api.gs' : e.message; items.forEach((x) => { out[x.i] = { ok: false, error: msg }; }); return out; }
+      const res = (r && r.results) || [];
+      items.forEach((x, k) => {
+        const z = res[k] || {}, ch = changes[x.i];
+        if (z.s === 'ok') { Z.setValue(ch.row, ch.col.key, z.now); out[x.i] = { ok: true, text: Z.display(ch.col.key, z.now) }; }
+        else if (z.s === 'conflict') { Z.setValue(ch.row, ch.col.key, z.now || ''); out[x.i] = { ok: false, error: 'komórka zmieniona w arkuszu – pokazuję aktualną wartość' }; }
+        else out[x.i] = { ok: false, error: z.s === 'badrow' ? 'brak takiego wiersza w arkuszu' : z.s === 'badcol' ? 'ta kolumna nie jest edytowalna' : 'serwer nie potwierdził zapisu (stara wersja skryptu?)' };
+      });
+    }
+    return out;
+  }
 
   async function load() {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie zakupów…'));
@@ -34,7 +68,7 @@ export function mountZakupy(el, ctx) {
 
   async function ensureCodes() {
     if (st.codes) return;
-    try { await apiCached('getZakupyProductCodes', [], (l) => { st.codes = (l || []).filter((c) => String(c).trim()); }); } catch (e) { st.codes = []; }
+    try { await apiCached('getZakupyProductCodes', [], (l) => { st.codes = (l || []).filter((c) => String(c).trim()); codeList.replaceChildren(...st.codes.slice(0, 3000).map((c) => h('option', { value: c }))); }); } catch (e) { st.codes = []; }
   }
 
   function drawTabs() {
@@ -43,6 +77,8 @@ export function mountZakupy(el, ctx) {
       tabs.append(h('button', { class: st.view === id ? 'on' : '', onclick: async () => {
         st.view = id; st.filters = {}; st.sorts = [];
         if (id === 'archive') await ensureArchive();
+        if (Z.editableView(id)) ensureCodes();
+        grid.clearHistory();
         draw();
       } }, label));
     }
@@ -67,6 +103,13 @@ export function mountZakupy(el, ctx) {
         });
       },
     })));
+    if (Z.editableView(st.view)) {
+      // edycja komórek jak w arkuszu Google (Zakupione, Odebrane bez PZ)
+      grid.render(cols.map((c) => ({ ...c, left: c.key === 'opis' || c.key === 'kod', list: c.key === 'kod' })), rows, thead);
+      info.textContent = (st.fresh ? '' : 'Dane z pamięci, odświeżanie… (edycja po odświeżeniu)  ·  ') + `Pozycji: ${rows.length}` + (rows.length !== src.length ? ` z ${src.length}` : '')
+        + (canEdit() ? '  ·  edycja jak w arkuszu Google, zmiany zapisują się od razu; pozycja zmieni widok po odświeżeniu' : '');
+      return;
+    }
     const tbody = h('tbody', {});
     for (const r of rows) {
       const flagged = st.view === 'ordered' && Z.needsCorrection(r);
@@ -78,11 +121,11 @@ export function mountZakupy(el, ctx) {
     info.textContent = (st.fresh ? '' : 'Dane z pamięci, odświeżanie… (zapis po odświeżeniu)  ·  ') + `Pozycji: ${rows.length}` + (rows.length !== src.length ? ` z ${src.length}` : '') + (st.sorts.length ? '  ·  Sortowanie: ' + Z.sortSummary(st.view, st.sorts) : '');
   }
 
-  function openRow(row) {
+  function openRow(row, details = false) {
     // Realizacja: pozycje bez PZ (też z x i datą zakupu, jeśli wymagają korekty) w widoku Zamówione.
-    const editable = canWrite && st.exactRows && st.fresh && st.view === 'ordered' && Z.lacksPz(row);
+    const editable = !details && canWrite && st.exactRows && st.fresh && st.view === 'ordered' && Z.lacksPz(row);
     if (editable) { ensureCodes().then(() => realizeDialog(row)); return; }
-    const m = modal(st.view === 'archive' ? 'Archiwum: szczegóły' : !Z.lacksPz(row) ? 'Zakupione: szczegóły' : 'Zamówione: szczegóły', h('div', {},
+    const m = modal(st.view === 'archive' ? 'Archiwum: szczegóły' : Z.isNoPz(row) ? 'Odebrane bez PZ: szczegóły' : !Z.lacksPz(row) ? 'Zakupione: szczegóły' : 'Zamówione: szczegóły', h('div', {},
       orderFrame(row), purchaseFrameReadOnly(row), h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Zamknij'))), { wide: true });
   }
 
@@ -111,6 +154,7 @@ export function mountZakupy(el, ctx) {
     const kod = codeField(row.columnC);
     const mk = (v) => h('input', { type: 'text', value: v });
     const ilosc = mk(row.columnD), zakup = h('input', { type: 'date', value: toIsoDate(row.columnB) }), cena = mk(row.columnF), pz = mk(row.columnE);
+    pz.placeholder = 'numer PZ albo x (odebrane bez PZ)';
     const uwagi = h('textarea', { rows: 2 }, row.columnL);
     const err = h('div', { class: 'err' });
     let m;
@@ -152,7 +196,7 @@ export function mountZakupy(el, ctx) {
     m = modal('Zamówione: realizacja zakupu', h('div', {}, orderFrame(row),
       frame('Zakup', h('div', { class: 'row', style: { alignItems: 'flex-start' } }, col(1, 'Data zakupu', zakup), h('div', { style: { flex: 1.2, minWidth: 0 } }, kod.node), col(0.9, 'Ilość zakupiona', ilosc)),
         h('div', { class: 'row', style: { alignItems: 'flex-start' } }, col(1, 'Cena jednostkowa', cena), col(1.2, 'PZ', pz), h('div', { style: { flex: 0.9 } })), field('Uwagi', uwagi)),
-      h('div', { class: 'muted' }, 'Zapis oznacza pozycję jako zakupioną (znak x w kolumnie J). Puste pola zostaną zapisane jako puste.'),
+      h('div', { class: 'muted' }, 'Zapis oznacza pozycję jako zakupioną (znak x w kolumnie J). W polu PZ wpisz numer PZ albo „x”, jeśli towar odebrano, a PZ jeszcze nie ma (pozycja trafi do Odebrane bez PZ). Puste pola zostaną zapisane jako puste.'),
       err, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'), saveBtn)), { wide: true });
   }
 
@@ -229,6 +273,7 @@ export function mountZakupy(el, ctx) {
     h('button', { class: 'btn', onclick: async () => { st.archiveLoaded = false; st.codes = null; if (st.view === 'archive') await ensureArchive(); load(); } }, 'Odśwież'),
     h('button', { class: 'btn', onclick: () => { st.filters = {}; st.sorts = []; draw(); } }, 'Wyczyść filtry i sortowanie'),
     h('button', { class: 'btn', onclick: share }, 'Kopiuj tabelę'), info),
-    notice, tabs, body);
+    notice, tabs, body, codeList);
   load();
+  return () => grid.destroy();
 }
