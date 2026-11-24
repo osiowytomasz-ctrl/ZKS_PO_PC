@@ -38,5 +38,6 @@ export function appAccess(level) {
     harmonogram: r >= 2,                            // przycisk Harmonogram (TOURIST – niedostępny)
     fullSettings: r >= 2,                           // pełne Ustawienia (TOURIST: tylko klucz i aktualizacja)
     apiLink: r >= 4,                                // adres API widoczny i edytowalny tylko dla GOD
+    editPlan: r >= 3,                               // Plan i Tablica (Workflow): zmiany tylko MASTER i GOD; CLERIK i TOURIST – tylko przeglądanie
   };
 }

@@ -3,6 +3,8 @@ import * as W from '../logic/workflow.js';
 import { parseSheetColor, updateSorts, sortLabels } from '../logic/common.js';
 import { watchWorkflow, saveWorkflow, importFromSheet } from '../wfStore.js';
 import { harmLevel } from '../fb.js';
+import { appAccess } from '../logic/toolroomAccess.js';
+import { grafikLevelOf } from '../logic/grafikAccess.js';
 
 const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
 
@@ -76,7 +78,8 @@ export function createWorkflow(appCtx) {
   const saveBtn = h('button', { class: 'btn primary', disabled: true, onclick: save }, 'Zapisz zmiany');
   const discardBtn = h('button', { class: 'btn', disabled: true, onclick: async () => { if (await confirmBox('Odrzucić zmiany?', `Niezapisane zmiany: ${st.changes.size}.`, 'Odrzuć')) { st.changes = new Map(); draw(); } } }, 'Odrzuć');
   const clearBtn = h('button', { class: 'btn', title: 'Wyczyść wszystkie filtry i sortowanie', onclick: () => { st.filters = {}; st.sorts = []; draw(); } }, 'Wyczyść filtry i sortowanie');
-  const canEdit = () => st.fresh && !st.saving;
+  const mayEdit = () => appAccess(grafikLevelOf(appCtx.user)).editPlan;   // Tablica: zmiany tylko MASTER i GOD (CLERIK, TOURIST – przeglądanie)
+  const canEdit = () => st.fresh && !st.saving && mayEdit();
   const key = (row, col) => `${row}:${col}`;
 
   // ---- pasek właściwości tekstu (widoczny podczas edycji komórki) ----
@@ -196,6 +199,7 @@ export function createWorkflow(appCtx) {
 
   // ---- akcje na komórce ----
   function toggleStatusAt(row, col) {
+    if (!mayEdit()) { toast('Tablica: tylko przeglądanie (zmiany – MASTER i GOD).', true); return; }
     if (!canEdit()) { toast('Edycja po odświeżeniu danych.', true); return; }
     st.changes = W.stageStatus(st.changes, recByRow.get(row), col); draw();
   }
@@ -337,7 +341,7 @@ export function createWorkflow(appCtx) {
 
   const node = h('div', { class: 'panel', style: { maxWidth: '1400px', margin: '0 auto' } },
     h('div', { class: 'row', style: { marginBottom: '4px' } },
-      h('button', { class: 'btn primary', onclick: newTask }, '+ Nowe zadanie'), saveBtn, discardBtn, clearBtn,
+      mayEdit() ? h('button', { class: 'btn primary', onclick: newTask }, '+ Nowe zadanie') : null, saveBtn, discardBtn, clearBtn,
       h('span', { class: 'grow' }), info, importBtn,
       h('button', { class: 'btn', title: 'Połącz ponownie (dane i tak odświeżają się same)', onclick: async () => { if (st.changes.size && !(await confirmBox('Odświeżyć?', 'Niezapisane zmiany zostaną utracone.', 'Odśwież'))) return; st.changes = new Map(); load(); } }, 'Odśwież')), bar, body);
   return { node, refresh: load };

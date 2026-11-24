@@ -83,7 +83,7 @@ var API_FUNCS = {
   },
   api_saveWorkflow: {
     write: true,
-    run: function (a, ctx) { return api_saveWorkflow_(a[0], ctx); }
+    run: function (a, ctx) { api_requireGrafikLevel_(ctx, 'master'); return api_saveWorkflow_(a[0], ctx); }   // Tablica: zmiany tylko MASTER i GOD
   },
 
   // --- Administrator: użytkownicy i klucze (klucze nigdy nie wracają w liście) ---
@@ -606,6 +606,8 @@ function api_zakupyFromLevel_(user) {
   // GOD w „Grafik dostęp” ma dostęp do wszystkiego: Plan i Grafik z zapisem niezależnie od kolumn „Plan” i „Grafik” (np. „Brak” w Plan nie odcina administratora)
   var gl = typeof api_grafikLevel_ === 'function' ? api_grafikLevel_({ email: user.email, permissions: user.perms }) : 'none';
   if (gl === 'god') { perms.plan = 'write'; perms.grafik = 'write'; }
+  // CLERIK i TOURIST: Plan tylko do przeglądania (zapis w Planie – MASTER i GOD)
+  if ((gl === 'clerik' || gl === 'tourist') && perms.plan === 'write') perms.plan = 'read';
   return perms;
 }
 

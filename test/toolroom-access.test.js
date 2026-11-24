@@ -36,4 +36,7 @@ test('dostęp ogólny wg Grafiku: Harmonogram, Ustawienia i adres API', () => {
   assert.ok(appAccess('god').apiLink && appAccess('god').harmonogram && appAccess('god').fullSettings);
   assert.ok(!appAccess('master').apiLink && appAccess('master').harmonogram && appAccess('master').fullSettings);
   for (const lv of ['tourist', 'none']) { const a = appAccess(lv); assert.ok(!a.harmonogram && !a.fullSettings && !a.apiLink); }
+  // Plan i Tablica: zmiany tylko MASTER i GOD; CLERIK i TOURIST – przeglądanie
+  assert.ok(appAccess('god').editPlan && appAccess('master').editPlan);
+  for (const lv of ['clerik', 'tourist', 'none']) assert.ok(!appAccess(lv).editPlan, lv);
 });

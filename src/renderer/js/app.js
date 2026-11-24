@@ -122,7 +122,9 @@ export const ctx = {
   level(perm) {
     if (!ctx.user) return 'none';
     if (perm === 'zakupy') return tra().zakupy ? 'write' : 'none';   // Zakupy: MASTER i GOD – zamówienia i zatwierdzanie zakupów, niżej – bez Zakupów
-    return (ctx.user.permissions || {})[perm] || 'none';
+    const have = (ctx.user.permissions || {})[perm] || 'none';
+    if (perm === 'plan' && have === 'write' && !appAccess(grafikLevelOf(ctx.user)).editPlan) return 'read';   // CLERIK i TOURIST: Plan tylko do przeglądania
+    return have;
   },
   /** Uprawnienia w Grafiku i Kompetencjach (GOD / MASTER / CLERIK / TOURIST). */
   grafikAcc() { return grafikAccess(grafikLevelOf(ctx.user)); },
