@@ -6,6 +6,7 @@ import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as G from '../logic/toolGeometry.js';
 import * as T from '../logic/tooltrack.js';
 import { toolRow, toolTile, miniSvg, lazyFill, filterDropdown, statusLine } from './toolViews.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 let pendingSelection = null;
 /** Zestaw z ToolBuildera: zastępuje listę wybranych przy najbliższym otwarciu ToolTrack. */
@@ -44,7 +45,9 @@ export function mountToolTrack(el, ctx) {
     }
   }
 
-  function draw() { drawLoc(); drawFilters(); drawList(); }
+  const mem = viewMemory('tooltrack', st, ['simpleFilters']);   // filtry zapamiętane na tym komputerze
+  mem.load();
+  function draw() { mem.save(); drawLoc(); drawFilters(); drawList(); }
   function drawLoc() {
     clear(locBox).append(h('b', { style: { fontSize: '13px' } }, 'Zapis do:'),
       filterDropdown('wybierz lokalizację', st.saveLocation, st.locations, (v) => { st.saveLocation = v; drawLoc(); }, { allLabel: null }));
@@ -67,6 +70,7 @@ export function mountToolTrack(el, ctx) {
     return toolTile(t, { warning: st.warnings.has(t.productCode), mini: mini(t), footer: h('div', { class: 'tile-act' }, act) });
   };
   function drawList() {
+    mem.save();
     const items = T.filterTools(st.listed, st.filters);
     if (st.stopFill) st.stopFill();
     clear(list);

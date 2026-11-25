@@ -3,11 +3,18 @@ import * as Z from '../logic/zakupy.js';
 import { updateSorts, sortLabels, formatDate, parseDate } from '../logic/common.js';
 import { filterCodes, parseQuantity } from '../logic/scanner.js';
 import { createCellGrid } from './cellGrid.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 export function mountZakupy(el, ctx) {
   const level = ctx.level('zakupy');
   const canWrite = level === 'write';
   const st = { rows: [], archive: [], exactRows: false, view: 'ordered', filters: {}, sorts: [], codes: null, archiveLoaded: false };
+  // filtry i sortowanie zapamiętane osobno dla każdego widoku (Zamówione, Zakupione, Odebrane bez PZ, Archiwum) – na tym komputerze
+  const memView = viewMemory('zakupy', st, ['view']);
+  if (memView.load() && !Z.VIEWS[st.view]) st.view = 'ordered';
+  const mem = viewMemory('zakupy.' + st.view, st, ['filters', 'sorts']);
+  const memKey = () => 'zakupy.' + st.view;
+  mem.load(memKey());
   const info = h('span', { class: 'muted' });
   const body = h('div', { class: 'table-wrap', style: { flex: 1, minHeight: 0 } });
   const tabs = h('div', { class: 'tabs' });
@@ -75,7 +82,8 @@ export function mountZakupy(el, ctx) {
     clear(tabs);
     for (const [id, label] of Object.entries(Z.VIEWS)) {
       tabs.append(h('button', { class: st.view === id ? 'on' : '', onclick: async () => {
-        st.view = id; st.filters = {}; st.sorts = [];
+        mem.save(memKey());
+        st.view = id; st.filters = {}; st.sorts = []; mem.load(memKey());
         if (id === 'archive') await ensureArchive();
         if (Z.editableView(id)) ensureCodes();
         grid.clearHistory();
@@ -85,6 +93,7 @@ export function mountZakupy(el, ctx) {
   }
 
   function draw() {
+    mem.save(memKey()); memView.save();
     drawTabs();
     const cols = Z.columns(st.view);
     const src = Z.source(st.rows, st.archive, st.view);

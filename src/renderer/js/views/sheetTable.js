@@ -3,6 +3,7 @@
 import { h, clear, filterHeader, columnFilterDialog, modal } from '../ui.js';
 import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { updateSorts, sortLabels } from '../logic/common.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const PAGE = 500;
 
@@ -12,6 +13,8 @@ const PAGE = 500;
  */
 export function sheetTable({ storageKey = '', defaultVisible = 14, rowStyle = null, cellStyle = null, onRow = null } = {}) {
   const st = { cols: [], rows: [], get: (r, c) => String(r[c.key] ?? ''), filters: {}, sorts: [], q: '', vis: null, shown: PAGE };
+  const mem = storageKey ? viewMemory('sheet.' + storageKey, st, ['filters', 'sorts', 'q']) : null;   // filtry, sortowanie i szukanie zapamiętane na tym komputerze
+  let restored = false;
   const info = h('span', { class: 'muted' });
   const body = h('div', { style: { overflow: 'auto', flex: 1, minHeight: 0, border: '1px solid #ccc', background: '#fff' } });
   const search = h('input', { type: 'search', placeholder: 'Szukaj w widocznych kolumnach…', style: { width: '260px', padding: '4px 8px' }, oninput: () => { st.q = search.value.trim().toLowerCase(); st.shown = PAGE; draw(); } });
@@ -39,6 +42,7 @@ export function sheetTable({ storageKey = '', defaultVisible = 14, rowStyle = nu
   }
   function draw() {
     if (!st.vis) return;
+    if (mem) mem.save();
     const vc = visCols(), rows = rowsNow(), labels = sortLabels(st.sorts);
     const thead = h('tr', {}, ...vc.map((c) => filterHeader(c, { filtered: !!st.filters[c.key], label: labels[c.key], onclick: () => {
       const cur = st.sorts.find((s) => s.key === c.key);
@@ -62,7 +66,10 @@ export function sheetTable({ storageKey = '', defaultVisible = 14, rowStyle = nu
   return {
     el, info,
     setData(columns, rows, getValue = null, opts = {}) {
-      st.cols = columns; st.rows = rows; if (getValue) st.get = getValue; st.filters = {}; st.sorts = []; st.shown = PAGE;
+      st.cols = columns; st.rows = rows; if (getValue) st.get = getValue; st.shown = PAGE;
+      if (mem && !restored) { restored = true; mem.load(); search.value = st.q || ''; }   // pierwsze wczytanie: filtry z pamięci; kolejne odświeżenia danych ich nie zerują
+      const known = new Set(columns.map((c) => c.key));
+      st.filters = Object.fromEntries(Object.entries(st.filters).filter(([k]) => known.has(k))); st.sorts = st.sorts.filter((x) => known.has(x.key));
       const keep = loadVis(); st.vis = keep && columns.some((c) => keep.has(c.key)) ? new Set(columns.filter((c) => keep.has(c.key)).map((c) => c.key)) : new Set(columns.slice(0, opts.defaultVisible || defaultVisible).map((c) => c.key));
       draw();
     },

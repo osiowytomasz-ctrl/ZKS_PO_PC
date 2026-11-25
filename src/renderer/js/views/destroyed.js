@@ -10,12 +10,15 @@ import * as G from '../logic/toolGeometry.js';
 import * as D from '../logic/destroyed.js';
 import { stackSvg, fullScreen, lazyFill } from './toolViews.js';
 import { naturalCompare } from '../logic/common.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const when = (m) => new Date(m.updatedAt).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function mountDestroyed(el, ctx) {
   const canStore = true;   // wspólna kopia karty ZN w bazie: zapisuje każdy zalogowany (narzędziowiec dopisujący wpis od razu ją odświeża); reguły Firestore: klucz `zn`
   const st = { values: null, meta: null, groups: [], index: null, params: {}, cat: null, q: '', grp: '', firma: '', year: '', min: 0, sort: 'date', dir: 1, noPct: false, track: true, loading: false, stop: null };
+  const mem = viewMemory('destroyed', st, ['q', 'grp', 'firma', 'year', 'min', 'sort', 'dir', 'noPct', 'track']);   // filtry, sortowanie i szukanie zapamiętane na tym komputerze
+  mem.load();
   const status = h('span', { class: 'muted' }), info = h('span', { class: 'muted' });
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' } });
   const sel = (fn, ...opts) => { const s = h('select', { class: 'filter-dd', onchange: () => { fn(s.value); s.classList.toggle('on', !!s.value && s.value !== '0'); draw(); } }, ...opts); return s; };
@@ -24,6 +27,8 @@ export function mountDestroyed(el, ctx) {
   const sortSel = h('select', { title: 'Sortowanie', onchange: () => { st.sort = sortSel.value; draw(); } }, ...D.SORTS.map(([v, l]) => h('option', { value: v }, 'Sortuj: ' + l)));
   const dirBtn = h('button', { class: 'btn', title: 'Kierunek sortowania', onclick: () => { st.dir = -st.dir; dirBtn.textContent = st.dir > 0 ? '↑' : '↓'; draw(); } }, '↑');
   const search = h('input', { type: 'search', placeholder: 'Szukaj: numer, opis, firma, kto, przyczyna…', style: { width: '260px', padding: '4px 8px' }, oninput: () => { st.q = search.value.trim().toLowerCase(); draw(); } });
+  search.value = st.q || ''; sortSel.value = st.sort; dirBtn.textContent = st.dir > 0 ? '↑' : '↓'; minSel.value = String(st.min);
+  grpSel.classList.toggle('on', !!st.grp); firmaSel.classList.toggle('on', !!st.firma); yearSel.classList.toggle('on', !!st.year); minSel.classList.toggle('on', st.min > 0);
   const mkChk = (label, key, tip) => { const i = h('input', { type: 'checkbox', checked: st[key], onchange: () => { st[key] = i.checked; draw(); } }); return h('label', { class: 'row', style: { gap: '4px' }, title: tip }, i, label); };
   const refreshBtn = h('button', { class: 'btn', title: 'Połącz z kartą ZN w arkuszu i zapisz aktualne dane w bazie Firebase', onclick: () => refresh() }, 'Odśwież z karty ZN');
   const addBtn = h('button', { class: 'btn primary', title: 'Dopisz zniszczone narzędzie po oględzinach (wpis do karty ZN)', onclick: () => addDialog('') }, '+ Dodaj zniszczone narzędzie');
@@ -118,6 +123,7 @@ export function mountDestroyed(el, ctx) {
   }
 
   function draw() {
+    mem.save();
     if (!st.values) return;
     const all = allGroups().filter((g) => st.track || !g.tracked);
     fillFilters(all);

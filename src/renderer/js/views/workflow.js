@@ -5,6 +5,7 @@ import { watchWorkflow, saveWorkflow, importFromSheet } from '../wfStore.js';
 import { harmLevel } from '../fb.js';
 import { appAccess } from '../logic/toolroomAccess.js';
 import { grafikLevelOf } from '../logic/grafikAccess.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const HEADERS = { A: 'Koniec', B: 'Start', C: 'Start', D: 'Data', E: 'Komis', F: 'Zadanie, informacja', G: 'Zlecający', H: 'Kategoria' };
 
@@ -71,6 +72,8 @@ const PALETTE = ['#cc0000', '#e69138', '#38761d', '#1155cc', '#674ea7', '#666666
 /** Zakładka Workflow na ekranie głównym: zadania w Firebase (na żywo; dawniej karta Z), kolorowanie liczone lokalnie, edycja w tabeli (jak w arkuszu). */
 export function createWorkflow(appCtx) {
   const st = { headers: [], records: [], changes: new Map(), fresh: false, filters: {}, sorts: [], saving: false, sel: null, editing: null, order: [] };
+  const memWf = viewMemory('workflow', st, ['filters', 'sorts']);   // filtry i sortowanie zapamiętane na tym komputerze
+  memWf.load();
   const cells = new Map();      // `${wiersz}:${kolumna}` → <td>
   const recByRow = new Map();
   const info = h('span', { class: 'muted' });
@@ -111,6 +114,7 @@ export function createWorkflow(appCtx) {
   }
 
   function draw() {
+    memWf.save();
     const sy = body.scrollTop, sx = body.scrollLeft;
     const eff = st.records.map((rec) => ({ rec, eff: W.effective(rec, st.changes.get(rec.row)) }));
     let recs = W.visible(eff, st.filters);

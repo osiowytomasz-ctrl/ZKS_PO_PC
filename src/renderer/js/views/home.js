@@ -2,15 +2,19 @@ import { h, clear, api, apiCached, toast } from '../ui.js';
 import { createWorkflow } from './workflow.js';
 import { filterParts, levelsPresent, LEVELS, levelOf } from '../logic/home.js';
 import { parseSheetColor, contrastColor } from '../logic/common.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 export function mountHome(el, ctx) {
   const state = { parts: null, loading: false, error: null, code: '', level: '', tab: 'braki' };
+  const mem = viewMemory('home.braki', state, ['code', 'level']);   // szukanie kodu i poziom braków zapamiętane na tym komputerze
+  mem.load();
 
   // Przyciski modułów oraz Braki / Workflow są w górnym pasku (app.js); ekran główny pokazuje wybraną zakładkę na całą szerokość.
   const draw = () => {};
 
   const listBox = h('div', {});
   const renderList = () => {
+    mem.save();
     clear(listBox);
     if (state.loading) { listBox.append(h('div', { class: 'muted' }, 'Wczytywanie braków części…')); return; }
     if (state.error) { listBox.append(h('div', { class: 'err' }, state.error, ' ', h('button', { class: 'btn small', onclick: refresh }, 'Ponów'))); return; }
@@ -30,7 +34,7 @@ export function mountHome(el, ctx) {
     listBox.append(h('div', { class: 'muted', style: { marginTop: '4px' } }, `Pozycji: ${shown.length}${shown.length !== state.parts.length ? ' z ' + state.parts.length : ''}` + (state.stale ? '  ·  dane z pamięci, odświeżanie…' : '')));
   };
 
-  const codeInput = h('input', { type: 'search', placeholder: 'Szukaj kodu części…', style: { padding: '4px 8px', width: '240px' }, oninput: () => { state.code = codeInput.value; renderList(); } });
+  const codeInput = h('input', { type: 'search', placeholder: 'Szukaj kodu części…', value: state.code || '', style: { padding: '4px 8px', width: '240px' }, oninput: () => { state.code = codeInput.value; renderList(); } });
   const levelSel = h('select', { style: { padding: '4px' }, onchange: () => { state.level = levelSel.value; renderList(); } }, h('option', { value: '' }, 'Wszystkie poziomy'));
   const fillLevels = () => {
     while (levelSel.options.length > 1) levelSel.remove(1);

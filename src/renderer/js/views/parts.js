@@ -13,6 +13,7 @@ import { toolroomAccess, toolroomLevelOf } from '../logic/toolroomAccess.js';
 import { ndLoad } from '../ndStore.js';
 import { normCode } from '../logic/tooltrack.js';
 import * as V from '../logic/partsView.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -33,6 +34,8 @@ export function insertSvg(path, { w = 150, hgt = 120, dims = false } = {}) {
 export function mountParts(el, ctx) {
   const canSave = toolroomAccess(toolroomLevelOf(ctx.user)).editPlates;   // układ płytek i parametry – tylko GOD
   const st = { index: null, parts: [], q: '', onlyContour: true, company: '', u: '', t: '', sort: 'code', dir: 1, params: {}, stopFill: null };
+  const mem = viewMemory('parts', st, ['q', 'onlyContour', 'company', 'u', 't', 'sort', 'dir']);   // filtry, sortowanie i szukanie zapamiętane na tym komputerze
+  mem.load();
   const grid = h('div', { class: 'tool-grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' } });
   const info = h('span', { class: 'muted' });
   const companySel = h('select', { class: 'filter-dd', onchange: () => { st.company = companySel.value; companySel.classList.toggle('on', !!st.company); draw(); } });
@@ -86,7 +89,9 @@ export function mountParts(el, ctx) {
       }).sort((a, b) => naturalCompare(a.code, b.code));
       fillCols(); ensureColumns();
       const firms = [...new Set(st.parts.map((p) => String((p.tool && p.tool.columnP) || '').trim()).filter(Boolean))].sort(naturalCompare);
-      clear(companySel).append(h('option', { value: '' }, 'Firma'), ...firms.map((f) => h('option', { value: f }, f)));
+      clear(companySel).append(h('option', { value: '' }, 'Firma'), ...firms.map((f) => h('option', { value: f, selected: f === st.company }, f)));
+      if (!firms.includes(st.company)) st.company = '';
+      companySel.classList.toggle('on', !!st.company);
       draw();
     } catch (e) { clear(grid).append(h('div', { class: 'err', style: { padding: '12px' } }, 'Nie wczytano części: ' + e.message)); }
   }
@@ -125,6 +130,7 @@ export function mountParts(el, ctx) {
   }
 
   function draw() {
+    mem.save();
     const q = st.q.toLowerCase();
     let items = st.parts.filter((p) => (!st.onlyContour || p.contour) && (!q || p.code.toLowerCase().includes(q) || p.uses.some((u) => String(u.toolCode).toLowerCase().includes(q)))
       && (!st.company || String((p.tool && p.tool.columnP) || '').trim() === st.company) && V.matchesColumns(p.plist, { U: st.u, T: st.t }));
@@ -136,8 +142,9 @@ export function mountParts(el, ctx) {
     st.stopFill = lazyFill(grid, items, tile, 120);
   }
 
-  const search = h('input', { type: 'search', placeholder: 'Kod płytki albo narzędzia', style: { width: '220px', padding: '4px 8px' }, oninput: () => { st.q = search.value; draw(); } });
-  const only = h('input', { type: 'checkbox', checked: true, onchange: () => { st.onlyContour = only.checked; draw(); } });
+  const search = h('input', { type: 'search', placeholder: 'Kod płytki albo narzędzia', value: st.q || '', style: { width: '220px', padding: '4px 8px' }, oninput: () => { st.q = search.value; draw(); } });
+  const only = h('input', { type: 'checkbox', checked: st.onlyContour, onchange: () => { st.onlyContour = only.checked; draw(); } });
+  sortSel.value = st.sort; dirBtn.textContent = st.dir > 0 ? '↑' : '↓';
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Części – kontury płytek'), search, companySel, uSel, tSel, sortSel, dirBtn, legend, h('label', { class: 'row', style: { gap: '4px' } }, only, 'tylko z konturem'),
     h('span', { class: 'grow' }), info, h('button', { class: 'btn', onclick: () => load(true) }, 'Odśwież')), grid);

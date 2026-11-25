@@ -11,6 +11,7 @@ import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
 import { loadMistrz, importFromSheet, importFromXlsx, exportToSheet, loadMarks, setMark, detailKey } from '../mistrzStore.js';
 import { qrSvg } from '../logic/qr.js';
 import { detailsPrintHtml } from '../logic/mistrzPrint.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci przeglądarki */ } };
@@ -35,6 +36,11 @@ export function mountMistrz(el, ctx) {
   const printSlot = h('span');
   const tabs = h('div', { style: { display: 'inline-flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' } });
   const search = h('input', { type: 'search', placeholder: 'Szukaj w zakładce…', style: { width: '220px' }, oninput: () => { st.search = search.value; st.shown = PAGE; draw(); } });
+  // filtry, sortowanie i szukanie zapamiętane osobno dla każdej zakładki – na tym komputerze
+  const mem = viewMemory('mistrz', st, ['filters', 'sorts', 'search']);
+  const memKey = () => 'mistrz.' + st.tab;
+  const switchTab = (tab) => { mem.save(memKey()); st.tab = tab; st.shown = PAGE; st.filters = {}; st.sorts = []; st.search = ''; mem.load(memKey()); search.value = st.search || ''; };
+  mem.load(memKey()); search.value = st.search || '';
 
   async function load() {
     st.error = ''; info.textContent = 'Wczytywanie z bazy…';
@@ -65,13 +71,13 @@ export function mountMistrz(el, ctx) {
   /** Przyciski główne w nagłówku (wspólne z Kompetencjami) i podrzędne w pasku narzędzi, obok pola szukania; wybrane – zielona poświata. */
   function drawTabs() {
     const group = M.groupOfTab(st.tab);
-    drawMistrzNav(ctx, group, (g, tab) => { st.tab = tab; st.shown = PAGE; st.filters = {}; st.sorts = []; search.value = ''; st.search = ''; draw(); });
+    drawMistrzNav(ctx, group, (g, tab) => { switchTab(tab); draw(); });
     clear(tabs);
     const g = M.MENU.find((x) => x.key === group);
     for (const [key, label] of g.tabs) {
       const n = (st.data[key] || []).length;
       tabs.append(h('button', { class: 'btn small' + (st.tab === key ? ' glow' : ''), title: `${label} – ${n} wierszy`,
-        onclick: () => { st.tab = key; lsSet('mp.tab', key); lsSet('mp.tab.' + group, key); st.shown = PAGE; st.filters = {}; st.sorts = []; search.value = ''; st.search = ''; draw(); } }, label));
+        onclick: () => { switchTab(key); lsSet('mp.tab', key); lsSet('mp.tab.' + group, key); draw(); } }, label));
     }
   }
 
@@ -174,6 +180,7 @@ export function mountMistrz(el, ctx) {
   const recountBtn = h('button', { class: 'btn small', style: { display: 'none' }, title: 'Przelicza „szt zrobione” w Liście detali z Rejestru detali i zapisuje w bazie (sztuki zapisują się też same przy każdej rejestracji detalu skanerem)', onclick: recount }, 'Przelicz sztuki');
 
   function draw() {
+    mem.save(memKey());
     recountBtn.style.display = acc.manage && st.tab === 'dlist' ? '' : 'none';
     addBtn.style.display = canList && st.tab === 'dlist' ? '' : 'none';
     drawTabs();

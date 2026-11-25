@@ -24,23 +24,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: Build portable exe and zip
-        run: npx electron-builder --win portable zip --x64 --publish never
+      - name: Build portable exe
+        run: npx electron-builder --win portable --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: ZKS-PO-windows
-          path: |
-            dist/*.exe
-            dist/*.zip
+          path: dist/*.exe
       - name: Publish release "latest"
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # publikujemy tylko plik portable (nazwa bez zmian: ZKS-PO-portable.exe); numer wersji jest w tytule wydania
+          VERSION=$(node -p "require('./package.json').version")
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/*.exe dist/*.zip --title "ZKS PO – najnowsza wersja (Windows)" --notes "Wersja przenośna: pobierz plik .exe i uruchom (bez instalacji, bez Node.js)."
+          gh release create latest dist/*.exe --title "ZKS PO ${VERSION} – najnowsza wersja (Windows)" --notes "Wersja ${VERSION}. Wersja przenośna: pobierz plik .exe i uruchom (bez instalacji, bez Node.js)."
 
       - name: Remove old release "narzedziownia"
         shell: bash

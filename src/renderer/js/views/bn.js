@@ -9,12 +9,15 @@ import { toolCatalog, confirmedContoursQuick } from '../catalog.js';
 import * as B from '../logic/builder.js';
 import * as G from '../logic/toolGeometry.js';
 import { wearCodeCell, toolCard, stackSvg, view3d, toolView3d, partsTable, fullScreen, filterDropdown, statusLine, dimsOn, dimsToggle } from './toolViews.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const FILTERS = [['group', 'Grupa'], ['type', 'Rodzaj'], ['diameter', 'Φ'], ['length', 'L']];
 const empty = () => ({ group: '', type: '', diameter: '', length: '' });
 
 export function mountBn(el, ctx) {
   const st = { rows: [], filters: empty(), fromCache: false, loading: false, index: null, indexError: null };
+  const mem = viewMemory('bn', st, ['simpleFilters']);   // filtry zapamiętane na tym komputerze
+  mem.load();
   const status = statusLine();
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   const list = h('div', { class: 'tool-list' });
@@ -60,6 +63,7 @@ export function mountBn(el, ctx) {
   }
 
   function draw() {
+    mem.save();
     clear(filtersBox);
     if (st.rows.length) {
       filtersBox.append(...FILTERS.map(([f, l]) => filterDropdown(l, st.filters[f], B.bnOptions(st.rows, st.filters, f), (v) => { st.filters[f] = v; draw(); })));

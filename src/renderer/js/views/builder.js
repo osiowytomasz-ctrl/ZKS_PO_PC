@@ -16,11 +16,14 @@ import { stationList } from '../logic/harmModel.js';
 import * as T from '../logic/tooltrack.js';
 import { setToolTrackSelection } from './tooltrack.js';
 import { openContoursFor, mountContours, regionsText } from './contours.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α'], ['mIn', 'Ms (wejście)'], ['mOut', 'Mk (wyjście)']];
 
 export function mountBuilder(el, ctx) {
   const st = { all: [], listed: [], index: null, filters: B.emptyFilters(), selected: [], loading: false, view: 'list', stopFill: null };
+  const mem = viewMemory('builder', st, ['simpleFilters']);   // filtry zapamiętane na tym komputerze
+  mem.load();
   try { st.view = localStorage.getItem('zks.builder.view') === 'tiles' ? 'tiles' : 'list'; } catch { /* domyślnie lista */ }
   const status = statusLine();
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
@@ -189,6 +192,7 @@ export function mountBuilder(el, ctx) {
   }
 
   function draw() {
+    mem.save();
     newBtn.style.display = st.selected.length ? '' : 'none';
     clear(filtersBox);
     if (st.selected.length) filtersBox.append(h('span', { class: 'muted' }, 'Filtry są wyłączone. Kolejne narzędzie musi pasować mocowaniem: Mk = Ms ostatnio wybranego.'));
@@ -203,6 +207,7 @@ export function mountBuilder(el, ctx) {
   }
 
   function drawList() {
+    mem.save();
     const items = okLast(shown());
     if (st.stopFill) st.stopFill();
     clear(list);

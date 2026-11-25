@@ -3,12 +3,15 @@ import * as G from '../logic/grafik.js';
 import { updateSorts, sortLabels, parseSheetColor, filterSummary } from '../logic/common.js';
 import { sortSummary } from '../logic/tableFilter.js';
 import { GR_MAX_AGE } from '../prefetch.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 /** Dawny Grafik czytany wprost z karty G arkusza (okres przejściowy – przycisk „Grafik z arkusza” w nowym Grafiku). */
 export function mountGrafikSheet(el, ctx) {
   const canWrite = ctx.level('grafik') === 'write';
   let [start, end] = G.defaultRange();
   const st = { data: null, loaded: { start: '', end: '' }, changes: new Map(), filters: {}, sorts: [], zoom: 100, saving: false };
+  const mem = viewMemory('grafik.sheet', st, ['filters', 'sorts']);   // filtry i sortowanie zapamiętane na tym komputerze
+  mem.load();
 
   const startIn = h('input', { type: 'date', value: start });
   const endIn = h('input', { type: 'date', value: end });
@@ -29,7 +32,7 @@ export function mountGrafikSheet(el, ctx) {
 
   async function load(s, e, force = false) {
     clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…')); message.textContent = '';
-    st.changes = new Map(); st.filters = {}; st.sorts = []; st.fresh = false;
+    st.changes = new Map(); st.fresh = false;
     const show = (range) => (data, meta) => { st.data = data; st.loaded = range; st.fresh = !meta.cached; if (st.fresh) st.changes = new Map(); draw(); };
     try {
       try {
@@ -50,6 +53,7 @@ export function mountGrafikSheet(el, ctx) {
   };
 
   function draw() {
+    mem.save();
     const data = st.data;
     if (!data) return;
     const header = (data.extraValues && data.extraValues[0]) || [];

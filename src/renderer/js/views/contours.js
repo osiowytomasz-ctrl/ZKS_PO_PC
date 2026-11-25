@@ -22,6 +22,7 @@ let pendingCode = null;
 /** Otwarcie Konturów z wybranym narzędziem (ikonka narzędzia w ToolBuilderze). */
 export function openContoursFor(code) { pendingCode = code; }
 import { bodyContour, mounting } from '../logic/contourGen.js';
+import { viewMemory } from '../logic/viewMemory.js';
 
 /** Rejony ostrze / oprawka jako tekst do arkusza (PSWT, kolumna BE): „ostrze 0–45; oprawka 45–60” (Z w mm). */
 export const regionsText = (list) => (list || []).map((r) => `${r.role} ${String(r.z1).replace('.', ',')}–${String(r.z2).replace('.', ',')}`).join('; ');
@@ -130,10 +131,12 @@ export function mountContours(el, ctx) {
   const FILTERS = [['location', 'Lokal'], ['group', 'Grupa'], ['type', 'Rodzaj'], ['company', 'Firma'], ['diameter', 'Φ'], ['length', 'L'], ['rAlpha', 'r/α'], ['mIn', 'Ms (wejście)'], ['mOut', 'Mk (wyjście)']];
   const filtersBox = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } });
   function drawFilters() {
+    mem.save();
     clear(filtersBox).append(...FILTERS.map((fl) => multiFilter(fl, st.filters, st.tools, () => { drawFilters(); drawList(); })));   // wielokrotny wybór jak w ToolBuilderze
     if (B.hasFilters(st.filters)) filtersBox.append(h('button', { class: 'btn small', onclick: () => { st.filters = B.emptyFilters(); drawFilters(); drawList(); } }, 'Wyczyść'));
   }
   function drawList() {
+    mem.save();
     const q = st.q.toLowerCase();
     const items = B.sorted(B.filterTools(st.tools, st.filters)).filter((t) => (!q || String(t.productCode).toLowerCase().includes(q) || description(t).toLowerCase().includes(q))
       && (!st.only || (st.only === 'T' ? tOf(t) : st.only === 'V' ? vOf(t) : st.only === 'G' ? genOf(t) : !tOf(t) && !vOf(t))));
@@ -931,9 +934,12 @@ export function mountContours(el, ctx) {
     count();
   }
 
-  const search = h('input', { type: 'search', placeholder: 'Szukaj kodu / opisu', style: { width: '100%', padding: '4px 8px' }, oninput: (e) => { st.q = e.target.value; drawList(); } });
+  const mem = viewMemory('contours', st, ['simpleFilters', 'q', 'only']);   // filtry, szukanie i wybór „z konturem…” zapamiętane na tym komputerze
+  mem.load();
+  const search = h('input', { type: 'search', placeholder: 'Szukaj kodu / opisu', style: { width: '100%', padding: '4px 8px' }, value: st.q || '', oninput: (e) => { st.q = e.target.value; drawList(); } });
   const only = h('select', { style: { width: '100%' }, onchange: (e) => { st.only = e.target.value; drawList(); } },
     h('option', { value: '' }, 'Wszystkie narzędzia'), h('option', { value: 'T' }, 'z konturem w kolumnie T'), h('option', { value: 'V' }, 'z konturem w kolumnie V'), h('option', { value: '-' }, 'bez konturu'), h('option', { value: 'G' }, 'z konturem z danych (D:N)'));
+  only.value = st.only || '';
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, h('b', {}, 'Kontury narzędzi'), h('span', { class: 'grow muted' }, 'Wpisz prawą połowę konturu – zapisywana jest tylko połowa (SVG, mm); podgląd 2D – odbicie lustrzane, 3D – obrót. Zatwierdzony kontur → PSWT BC (zastępuje kolumnę T w całym programie).'),
     canSave ? h('button', { class: 'btn', title: 'Kontury z danych (PSWT D:N) dla wielu narzędzi naraz', onclick: () => bulk() }, 'Z danych hurtem…') : null,
