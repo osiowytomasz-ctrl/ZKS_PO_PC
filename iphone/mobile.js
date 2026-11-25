@@ -4,6 +4,8 @@
 import { createZks } from './shim.js';
 import { installBarcodeDetector } from './barcode-shim.js';
 import { VERSION } from './version.js';
+import { grafikAccess, grafikLevelOf } from './js/logic/grafikAccess.js';
+import { appAccess } from './js/logic/toolroomAccess.js';
 
 window.zks = createZks({ storage: window.localStorage, version: VERSION });
 installBarcodeDetector(window);   // Safari nie ma BarcodeDetector – odczyt kodów robi ZXing
@@ -13,7 +15,13 @@ const { h, clear, api, toast, modal } = await import('./js/ui.js');
 const root = document.getElementById('app');
 const ctx = { user: null, version: VERSION, platform: 'ios', go() {}, canWrite: () => true };
 // poziomy jak w programie PC (ctx.level używają m.in. widoki skanera)
-ctx.level = (perm) => (ctx.user ? (ctx.user.permissions || {})[perm] || 'none' : 'none');
+ctx.level = (perm) => {
+  if (!ctx.user) return 'none';
+  const have = (ctx.user.permissions || {})[perm] || 'none';
+  if (perm === 'plan' && have === 'write' && !appAccess(grafikLevelOf(ctx.user)).editPlan) return 'read';   // CLERIK i TOURIST: Plan tylko do przeglądania
+  return have;
+};
+ctx.grafikAcc = () => grafikAccess(grafikLevelOf(ctx.user));   // Grafik: GOD / MASTER / CLERIK / TOURIST jak w programie PC
 
 /** Ekran logowania: klucz użytkownika (adres API zwykle pobiera się z bazy; gdy go nie ma – pole adresu). */
 async function loginView(message = '') {
@@ -42,13 +50,19 @@ async function shell() {
   const badge = h('span', { class: 'm-badge', style: { display: 'none' } });
   const scanBtn = h('button', { class: 'on', onclick: () => select('scan') }, 'Skaner');
   const chatBtn = h('button', { onclick: () => select('chat') }, 'Chat', badge);
-  const wfBtn = h('button', { onclick: () => select('wf') }, 'Tablica');
+  const wfBtn = h('button', { class: 'm-wf', onclick: () => select('wf') }, 'Tablica');
+  // Grafik i Plan – te same widoki co w programie PC (dane na żywo z bazy); przyciski tylko dla tych, którzy mają dostęp
+  const grBtn = h('button', { class: 'm-grafik', onclick: () => select('grafik') }, 'Grafik');
+  const plBtn = h('button', { class: 'm-plan', onclick: () => select('plan') }, 'Plan');
+  const hasGrafik = ctx.grafikAcc().view, hasPlan = ((ctx.user && ctx.user.permissions) || {}).plan && ctx.level('plan') !== 'none';
+  const modEl = h('div', { class: 'm-main m-tab-mod', style: { display: 'none' } });
+  let modCleanup = null;
   const head = h('div', { class: 'm-head' }, h('img', { src: 'img/logo.png', alt: 'ZKS PO' }),
     h('div', { class: 'm-title' }, h('b', {}, (ctx.user && (ctx.user.name || ctx.user.email)) || ''), h('span', {}, `ZKS PO · iPhone · wersja ${VERSION}`)),
     h('span', { id: 'm-bell' }),
     h('button', { onclick: menu, title: 'Ustawienia' }, '⚙'));
   const wfEl = h('div', { class: 'm-main m-tab-wf', style: { display: 'none' } });
-  clear(root).append(head, main, wfEl, h('div', { class: 'm-nav' }, scanBtn, wfBtn, chatBtn));
+  clear(root).append(head, main, wfEl, modEl, h('div', { class: 'm-nav' }, scanBtn, hasGrafik ? grBtn : null, hasPlan ? plBtn : null, wfBtn, chatBtn));
 
   // Tablica (Workflow) i powiadomienia – ten sam kod i te same zasady co w programie PC (zmiany tylko MASTER i GOD, inni przeglądają)
   const { createWorkflow } = await import('./js/views/workflow.js');
@@ -75,12 +89,33 @@ async function shell() {
   if (pill) new MutationObserver(mirror).observe(pill, { childList: true, subtree: true, characterData: true });
   mirror();
 
+  function closeMod() { if (modCleanup) { try { modCleanup(); } catch { /* ignorujemy */ } modCleanup = null; } clear(modEl); }
+  async function openMod(what) {
+    closeMod();
+    const host = h('div', { class: 'm-mod-host' }); modEl.append(host);
+    host.append(h('p', { class: 'muted', style: { padding: '12px' } }, 'Ładowanie…'));
+    try {
+      const mod = what === 'grafik' ? (await import('./js/views/grafik.js')).mountGrafik : (await import('./js/views/plan.js')).mountPlan;
+      if (current !== what) return;                         // w międzyczasie wybrano inną kartę
+      clear(host);
+      const r = await mod(host, ctx);
+      // pasek narzędzi (daty, filtry, przyciski) zwinięty – tabela dostaje cały ekran; przycisk „Narzędzia” rozwija go
+      const tools = h('button', { class: 'btn small m-tools-btn', onclick: () => { const open = host.classList.toggle('m-tools-open'); tools.textContent = open ? 'Narzędzia ▴' : 'Narzędzia ▾'; } }, 'Narzędzia ▾');
+      host.prepend(tools);
+      if (typeof r === 'function') { if (current === what) modCleanup = r; else r(); }
+    } catch (e) { clear(host); host.append(h('p', { class: 'err', style: { padding: '12px' } }, 'Nie można otworzyć: ' + (e.message || e))); }
+  }
+  let current = 'scan';
   function select(what) {
-    const chat = what === 'chat', tab = what === 'wf';
-    scanBtn.className = what === 'scan' ? 'on' : ''; wfBtn.className = tab ? 'on' : ''; chatBtn.className = chat ? 'on' : '';
+    const chat = what === 'chat', tab = what === 'wf', mod = what === 'grafik' || what === 'plan';
+    const prev = current; current = what;
+    scanBtn.className = what === 'scan' ? 'on' : ''; wfBtn.className = (tab ? 'on ' : '') + 'm-wf'; chatBtn.className = chat ? 'on' : '';
+    grBtn.className = (what === 'grafik' ? 'on ' : '') + 'm-grafik'; plBtn.className = (what === 'plan' ? 'on ' : '') + 'm-plan';
     main.style.display = what === 'scan' || chat ? '' : 'none';
     main.style.visibility = chat ? 'hidden' : 'visible';   // przy Chacie układ zostaje (dolny pasek na swoim miejscu), kamera i pola Skanera ukryte
     wfEl.style.display = tab ? '' : 'none';
+    modEl.style.display = mod ? '' : 'none';
+    if (mod) { if (prev !== what) openMod(what); } else if (prev === 'grafik' || prev === 'plan') closeMod();   // widok Grafiku / Planu działa tylko na swojej karcie (bez zbędnego nasłuchu bazy)
     if (tab && !wfLoaded) { wfLoaded = true; wf.refresh(); }
     presence.toggle(chat);
   }

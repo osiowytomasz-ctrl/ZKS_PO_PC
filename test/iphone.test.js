@@ -59,3 +59,11 @@ test('BarcodeDetector na bazie ZXing: instaluje się tylko, gdy przeglądarka go
   assert.equal(installBarcodeDetector({ ZXing: ZX, BarcodeDetector: class {} }), false);   // natywny zostaje
   assert.equal(installBarcodeDetector({}), false);                                          // bez biblioteki – nic
 });
+
+test('powłoka iPhone\'a: karty Grafik i Plan z tych samych widoków co w programie PC, z uprawnieniami (Plan CLERIK/TOURIST tylko do odczytu)', async () => {
+  const fs = await import('node:fs');
+  const js = fs.readFileSync(new URL('../iphone/mobile.js', import.meta.url), 'utf8');
+  assert.match(js, /views\/grafik\.js/); assert.match(js, /views\/plan\.js/); assert.match(js, /ctx\.grafikAcc/);
+  assert.match(js, /editPlan/);
+  for (const f of ['src/renderer/js/views/grafik.js', 'src/renderer/js/views/plan.js']) assert.ok(fs.existsSync(new URL('../' + f, import.meta.url)));
+});

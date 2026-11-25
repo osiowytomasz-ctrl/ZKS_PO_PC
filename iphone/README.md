@@ -1,7 +1,7 @@
-# ZKS PO – wersja na iPhone'a (Skaner i Chat)
+# ZKS PO – wersja na iPhone'a (Skaner, Grafik, Plan, Tablica i Chat)
 
 Aplikacja webowa (PWA) z tego samego kodu co program PC i aplikacja na Androida: **Skaner** (produkt, detal, operacja, dokument, Lista detali, Dokumentacja – te same
-reguły i uprawnienia co na Androidzie) **Tablica** (Workflow: lista zadań na żywo; zmiany tylko MASTER i GOD, pozostali przeglądają – jak w programie PC) i **Chat** (status i dostępność pracowników, rozmowa ogólna i prywatne, historia dla uprawnionych).
+reguły i uprawnienia co na Androidzie) **Grafik** i **Plan** (te same widoki i uprawnienia co w programie PC – GOD / MASTER / CLERIK / TOURIST; pasek narzędzi zwija się pod przyciskiem „Narzędzia”, tabela przewija się palcem; przyciski kart pojawiają się tylko tym, którzy mają dostęp) **Tablica** (Workflow: lista zadań na żywo; zmiany tylko MASTER i GOD, pozostali przeglądają – jak w programie PC) i **Chat** (status i dostępność pracowników, rozmowa ogólna i prywatne, historia dla uprawnionych).
 Powiadomienia Workflow (dzwonek 🔔 w nagłówku): nowe zadania, zmiany statusu (także moich zleceń), codzienne przypomnienie o zaległych; komunikat na ekranie, dźwięk, powiadomienie systemowe i licznik na ikonie aplikacji.
 
 ## Jak to działa

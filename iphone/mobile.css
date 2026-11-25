@@ -33,5 +33,16 @@ body { font-size: 15px; }
 .bell-menu { left: 8px !important; right: 8px !important; width: auto !important; top: calc(52px + env(safe-area-inset-top)) !important; max-height: calc(100dvh - 140px) !important; }
 .bell-list { max-height: none !important; }
 .m-tab-wf .table-wrap { max-height: calc(100dvh - 250px) !important; }
-.m-nav button { font-size: 15px; padding: 10px 0; }
-.m-nav button:nth-child(2) { background: #e8d5b5; }
+.m-nav { gap: 4px; padding-left: 4px; padding-right: 4px; }
+.m-nav button { font-size: 13px; padding: 10px 0; min-width: 0; }
+.m-nav button.m-grafik { background: #ffe0b2; }
+.m-nav button.m-plan { background: #fff4b0; }
+.m-nav button.m-wf { background: #e8d5b5; }
+/* Grafik i Plan: widok PC na pełnym ekranie, tabela przewija się w obie strony */
+.m-tab-mod { display: flex; flex-direction: column; overflow: hidden; }
+.m-tab-mod .m-mod-host { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px; background: #808080; }
+.m-tab-mod .row.panel { flex-wrap: wrap; gap: 4px; }
+
+.m-tab-mod .m-mod-host > .row.panel { display: none; }
+.m-tab-mod .m-mod-host.m-tools-open > .row.panel { display: flex; max-height: 45vh; overflow: auto; }
+.m-tab-mod .m-tools-btn { align-self: flex-start; margin-bottom: 4px; }
