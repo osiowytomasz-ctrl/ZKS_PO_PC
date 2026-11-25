@@ -26,7 +26,7 @@ import { findIssues, issuesByOp, conflictPath } from '../logic/harmIssues.js';
 const BASE = { hour: 0.75, row: 26, font: 12 };
 const DEFAULT_LAYOUT = { rowH: 26, dateW: 104 };   // dateW dopasowana do „dd.mm.rrrr hh”
 const DEFAULT_KEEP = new Set(['lp', 'start', 'koniec', 'station']);   // kolumny, które zostają po „Ukryj dane”
-const LS = { chart: 'zks.harm.chartOpt', confirm: 'zks.harm.confirmChanges', filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval' };
+const LS = { chart: 'zks.harm.chartOpt', confirm: 'zks.harm.confirmChanges', filters: 'zks.harm.filters', komis: 'zks.harm.komisSummary', hide: 'zks.harm.hideSet', mode: 'zks.harm.hideMode', layout: 'zks.harm.layout', interval: 'zks.harm.interval', levels: 'zks.harm.hiddenLevels', shift: 'zks.harm.shift', scale: 'zks.harm.scale' };
 const CELL_W = 18;            // szerokość kolumny osi przy skali 100% (px) dla pełnego interwału
 const HOLIDAY_BG = '#800000';  // święta: bordowe tło, biała pogrubiona czcionka
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -49,7 +49,7 @@ function loadFilters() {
 
 export function mountHarmLive(el, appCtx) {
   const st = {
-    m: null, days: null, data: null, ...loadFilters(), shift: -3, interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: 1, editing: false, pending: false,
+    m: null, days: null, data: null, ...loadFilters(), shift: Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, Math.round(Number(lsGet(LS.shift, -3))) || 0)), interval: intervalOf(lsGet(LS.interval, DEFAULT_INTERVAL)).id, scale: Math.max(0.5, Math.min(2.5, Number(lsGet(LS.scale, 1)) || 1)), editing: false, pending: false,
     hideSet: new Set(lsGet(LS.hide, COLS.filter((c) => !DEFAULT_KEEP.has(c.key)).map((c) => c.key))), compact: !!lsGet(LS.mode, false),
     // podsumowanie komisów: show – paski widoczne, inline – przy pierwszym wystąpieniu komisu (zamiast na górze), filter – filtry i sortowanie także dla pasków
     komisOpt: { show: true, inline: false, filter: false, ...lsGet(LS.komis, {}) },
@@ -58,7 +58,7 @@ export function mountHarmLive(el, appCtx) {
     chartOpt: { fields: ['komis', 'element', 'hours'], font: 0, ...lsGet(LS.chart, {}), komisColor: true },   // kolor komisu na pasku – zawsze   // okno potwierdzenia przed zapisem zmiany komórki
     issues: [], issueMap: new Map(), cursor: null, path: null,   // path – pokazywana ścieżka konfliktu (linie na wykresie)
       // konflikty i błędy (liczone na bieżąco), aktywna komórka (nawigacja jak w Excelu)
-    collapsed: new Set(), hiddenLevels: new Set(), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
+    collapsed: new Set(), hiddenLevels: new Set((lsGet(LS.levels, []) || []).filter((x) => [1, 2, 3].includes(x))), selected: null, rows: [], chart: null, geom: null, layout: { ...DEFAULT_LAYOUT, ...lsGet(LS.layout, {}) },
   };
   const saveFilters = () => lsSet(LS.filters, { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, isRangeFilter(v) ? { range: true, from: v.from, to: v.to } : [...v]])), sorts: st.sorts });
   let syncTools = () => {};
@@ -1221,11 +1221,11 @@ export function mountHarmLive(el, appCtx) {
   }
 
   // ---------- pasek narzędzi ----------
-  const setScale = (v) => { st.scale = Math.max(0.5, Math.min(2.5, Math.round(v * 100) / 100)); if (st.data) draw(); };
+  const setScale = (v) => { st.scale = Math.max(0.5, Math.min(2.5, Math.round(v * 100) / 100)); lsSet(LS.scale, st.scale); if (st.data) draw(); };
   body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setScale(st.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); } }, { passive: false });
   // przesunięcie początku osi względem dziś w dniach (ujemne = przeszłość, dodatnie = przyszłość)
-  const setShift = (v) => { const n = Math.round(Number(v)); if (!Number.isFinite(n)) return; st.shift = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, n)); if (st.data) draw(); };
-  const shiftInput = h('input', { type: 'number', value: '-3', step: '1', title: 'Początek osi względem dziś [dni]: ujemne = cofnięte (przeszłość), dodatnie = przyszłość. Kliknij: suwak, dni albo data',
+  const setShift = (v) => { const n = Math.round(Number(v)); if (!Number.isFinite(n)) return; st.shift = Math.max(-MAX_SHIFT_DAYS, Math.min(MAX_SHIFT_DAYS, n)); lsSet(LS.shift, st.shift); if (st.data) draw(); };
+  const shiftInput = h('input', { type: 'number', value: String(st.shift), step: '1', title: 'Początek osi względem dziś [dni]: ujemne = cofnięte (przeszłość), dodatnie = przyszłość. Kliknij: suwak, dni albo data',
     style: { width: '64px', padding: '3px', textAlign: 'center' },
     onchange: () => setShift(shiftInput.value), onkeydown: (e) => { if (e.key === 'Enter') { setShift(shiftInput.value); shiftInput.blur(); } },
     onclick: () => openShiftPopup() });
@@ -1272,7 +1272,7 @@ export function mountHarmLive(el, appCtx) {
   // poziomy III, II, I: przycisk wciśnięty = poziom widoczny; kliknięcie chowa albo pokazuje wszystkie wiersze tego poziomu
   const LEVEL_TIPS = { 3: 'III – najwyższy poziom: operacje zbierające wszystkie poziomy niższe', 2: 'II – poziom pośredni: zbiera informacje z poziomu I', 1: 'I – najniższy, najważniejszy poziom: operacje wykonywane na stanowiskach' };
   const levelBtns = new Map([3, 2, 1].map((lvl) => [lvl, h('button', { class: 'btn small primary', style: { minWidth: '36px', fontWeight: 700 }, title: LEVEL_TIPS[lvl] + ' (kliknij, aby ukryć albo pokazać)',
-    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
+    onclick: () => { if (st.hiddenLevels.has(lvl)) st.hiddenLevels.delete(lvl); else st.hiddenLevels.add(lvl); lsSet(LS.levels, [...st.hiddenLevels]); if (st.data) draw(); } }, ['', 'I', 'II', 'III'][lvl])]));
   // Przyciski z ikonami (te same co na Androidzie): kwadrat z ramką, wypełniony = włączone
   const ICON_BTN = { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
   const iconBtn = (icon, title, onclick) => { const b = h('button', { class: 'btn small', title, 'aria-label': title, style: ICON_BTN, onclick }); b.append(iconSvg(icon)); return b; };
@@ -1352,4 +1352,6 @@ export function mountHarmLive(el, appCtx) {
   load();
   // po wyjściu z modułu: zamknięcie nasłuchu Harmonogramu i Grafiku (bazy Firebase)
   const life = setInterval(() => { if (el.isConnected) return; clearInterval(life); if (stop) stop(); if (grWatch) { grWatch.stop(); grWatch = null; } }, 3000);
+  // po ponownym pokazaniu modułu (trzymanego w tle) – ponowne narysowanie widocznego okna wierszy
+  return Object.assign(() => {}, { onShow: () => { try { if (st.data) paintWindow(); } catch { /* ignorujemy */ } } });
 }

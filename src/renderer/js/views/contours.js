@@ -55,13 +55,23 @@ export function mountContours(el, ctx) {
   // rysowanie: siatka, przyciąganie, przeciąganie punktów i odcinków, rejony ostrze / oprawka
   let saveVBtn = null, plateBtn = null, platePanel = null;
   const pv = { snap: true, step: 0, drag: null, view: null, sel: null, showIns: true, insSel: null, ptEdit: null, dims: dimsOn(), dimEdit: null, zoom: 1, pan: { x: 0, y: 0 } };
-  const snapI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.snap = snapI.checked; } });
+  // ustawienia podglądu (przyciąganie, krok siatki, płytki) zapamiętane na tym komputerze
+  const PREF_KEY = 'zks.contours.prefs';
+  const prefs = (() => { try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {}; } catch { return {}; } })();
+  const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify({ snap: pv.snap, step: pv.step, showIns: pv.showIns })); } catch { /* bez pamięci */ } };
+  if (typeof prefs.snap === 'boolean') pv.snap = prefs.snap;
+  if (typeof prefs.showIns === 'boolean') pv.showIns = prefs.showIns;
+  if (Number.isFinite(prefs.step) && prefs.step >= 0) pv.step = prefs.step;
+  const snapI = h('input', { type: 'checkbox', checked: pv.snap, onchange: () => { pv.snap = snapI.checked; savePrefs(); } });
   // krok siatki / przyciągania: auto, standardowe oraz drobniejsze (do 0,01 mm) i dowolny wpisany
-  const customStep = h('input', { type: 'number', min: 0.001, step: 'any', value: 0.03, title: 'Własny krok siatki i przyciągania, mm', style: { width: '64px', display: 'none' }, oninput: () => { const v = Number(customStep.value); if (v > 0) { pv.step = v; drawPreview(); } } });
+  const customStep = h('input', { type: 'number', min: 0.001, step: 'any', value: 0.03, title: 'Własny krok siatki i przyciągania, mm', style: { width: '64px', display: 'none' }, oninput: () => { const v = Number(customStep.value); if (v > 0) { pv.step = v; savePrefs(); drawPreview(); } } });
   const stepSel = h('select', { title: 'Krok siatki i przyciągania', onchange: () => {
     const custom = stepSel.value === 'custom'; customStep.style.display = custom ? '' : 'none';
-    pv.step = custom ? (Number(customStep.value) > 0 ? Number(customStep.value) : 0) : Number(stepSel.value); drawPreview(); } },
+    pv.step = custom ? (Number(customStep.value) > 0 ? Number(customStep.value) : 0) : Number(stepSel.value); savePrefs(); drawPreview(); } },
     ...[['0', 'siatka: auto'], ['0.01', '0,01 mm'], ['0.02', '0,02 mm'], ['0.05', '0,05 mm'], ['0.1', '0,1 mm'], ['0.2', '0,2 mm'], ['0.5', '0,5 mm'], ['1', '1 mm'], ['2', '2 mm'], ['5', '5 mm'], ['10', '10 mm'], ['20', '20 mm'], ['custom', 'własny…']].map(([v, l]) => h('option', { value: v }, l)));
+  // lista kroków siatki: zapamiętany krok (standardowy albo własny) przywracany po utworzeniu listy
+  const restoreStep = () => { const std = [...stepSel.options].find((o) => o.value !== 'custom' && Number(o.value) === pv.step); if (std || !pv.step) stepSel.value = std ? std.value : '0'; else { stepSel.value = 'custom'; customStep.value = String(pv.step); customStep.style.display = ''; } };
+  restoreStep();
   const fitBtn = h('button', { class: 'btn small', title: 'Dopasuj widok do konturu (wyzeruj przesunięcie i powiększenie)', onclick: () => { pv.zoom = 1; pv.pan = { x: 0, y: 0 }; pv.view = null; drawPreview(); } }, '⌖ Dopasuj');
   const regionBar = h('span', { class: 'row', style: { gap: '4px' } });
   const prev3d = h('div', { style: { flex: 1, minHeight: '320px', border: '1px solid #ccc', display: 'none' } });
@@ -69,7 +79,7 @@ export function mountContours(el, ctx) {
   // płytki w 3D: liczba zębów z= (kopie płytki co 360°/z) i pochylenie wyciągnięcia (przyłożenie z tyłu płytki) – zapamiętywane dla narzędzia
   const zI = h('input', { type: 'number', min: 1, max: 60, style: { width: '46px' }, title: 'Liczba płytek (zębów) na obwodzie – widok 3D', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { z: Number(zI.value) }); drawPreview(); } } });
   const drI = h('input', { type: 'number', min: 0, max: 30, step: 0.5, style: { width: '46px' }, title: 'Pochylenie ścian płytki (wyciągnięcie z przyłożeniem), °', onchange: () => { if (st.tool) { saveInsertSetup(st.tool, { draft: Number(drI.value) }); drawPreview(); } } });
-  const insI = h('input', { type: 'checkbox', checked: true, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; drawPreview(); } });
+  const insI = h('input', { type: 'checkbox', checked: pv.showIns, onchange: () => { pv.showIns = insI.checked; pv.insSel = null; savePrefs(); drawPreview(); } });
   const previewBar = h('div', { class: 'row', style: { gap: '8px', fontSize: '12px', flexWrap: 'wrap' } }, h('label', { class: 'row', style: { gap: '3px' } }, snapI, 'przyciągaj do siatki'), stepSel, customStep, fitBtn,
     h('label', { class: 'row', style: { gap: '3px' } }, insI, 'płytki'), dimsToggle(() => { pv.dims = dimsOn(); pv.dimEdit = null; pv.view = null; drawPreview(); }), (plateBtn = h('button', { class: 'btn small', style: { background: '#c8a400', color: '#000', borderColor: '#8a6d00', fontWeight: 600 }, title: 'Rodzaj płytki (centralna / obwodowa), wiele płytek i ich położenie na narzędziu – tabela po lewej stronie rysunku', onclick: () => togglePlatePanel() }, 'Płytki…')), h('label', { class: 'row', style: { gap: '3px' } }, 'z=', zI), h('label', { class: 'row', style: { gap: '3px' } }, 'pochylenie', drI, '°'), mode3d,
     h('span', { class: 'muted' }, 'Przeciągnij punkt albo odcinek; kliknij rejon, aby nadać funkcję. Kółko myszy – powiększenie, przeciągnięcie tła – przesuwanie widoku.'), regionBar);

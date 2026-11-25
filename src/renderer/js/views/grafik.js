@@ -48,6 +48,16 @@ export function mountGrafik(el, ctx) {
     filters: {}, sorts: [], ...loadFilters(), zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null, widths: lsGet('grafik.widths', {}) || {}, glow: true,   // podświetlenie wiersza zawsze włączone
 
   };
+  // zakres dat: ostatnio użyty przycisk (Teraz / Miesiąc / Tydzień / Rok – liczony od dzisiejszej daty) albo dowolny zakres – pamiętany na tym komputerze
+  const PRESETS = {
+    teraz: (t) => [addDays(t, -3), addDays(t, 7)],
+    miesiac: (t) => [t.slice(0, 8) + '01', F.daysBetween(t.slice(0, 8) + '01', addDays(t.slice(0, 8) + '28', 4)).filter((d) => d.slice(0, 7) === t.slice(0, 7)).pop()],
+    tydzien: (t) => F.isoWeekRange(...weekOf(t)),
+    rok: (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31'],
+  };
+  { const r = lsGet('grafik.range', null);
+    if (r && PRESETS[r.mode]) { try { [st.from, st.to] = PRESETS[r.mode](today()); } catch { /* zostaje domyślny */ } }
+    else if (r && /^\d{4}-\d{2}-\d{2}$/.test(r.from || '') && /^\d{4}-\d{2}-\d{2}$/.test(r.to || '')) { st.from = r.from; st.to = r.to; } }
   const body = h('div', { tabindex: '0', class: 'gr', style: { flex: 1, minHeight: 0, overflow: 'auto', outline: 'none', background: '#fff', position: 'relative' } });
   const info = h('span', { class: 'muted' });
   const fromIn = h('input', { type: 'date', value: st.from, onchange: () => setRange(fromIn.value, toIn.value) });
@@ -69,9 +79,10 @@ export function mountGrafik(el, ctx) {
     } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message || String(e)), sheetBtn()); }
   }
   const sheetBtn = () => (acc.sheet ? h('button', { class: 'btn', style: { margin: '0 12px' }, onclick: openSheet }, 'Grafik z arkusza (dawny)') : null);
-  function setRange(a, b) {
+  function setRange(a, b, mode = 'custom') {
     if (!a || !b) return;
     if (b < a) [a, b] = [b, a];
+    lsSet('grafik.range', { mode, from: a, to: b });
     st.from = a; st.to = b; fromIn.value = a; toIn.value = b; st.sel = null;
     fillPickers();
     if (st.watcher) st.watcher.setMonths(neededMonths());
@@ -96,7 +107,7 @@ export function mountGrafik(el, ctx) {
     weekSel.value = [...weekSel.options].some((o) => o.value === cur) ? cur : '';
   }
   fillPickers();
-  const preset = (label, fn, title) => h('button', { class: 'btn small', title, onclick: () => { const [a, b] = fn(today()); setRange(a, b); } }, label);
+  const preset = (label, key, title) => h('button', { class: 'btn small', title, onclick: () => { const [a, b] = PRESETS[key](today()); setRange(a, b, key); } }, label);
 
   // ---------- model ekranu ----------
   // cała lista (zapisy) i widoczni w Grafiku – bez wyłączonych w Kompetencjach (people[].off)
@@ -522,10 +533,10 @@ export function mountGrafik(el, ctx) {
 
   el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
   el.append(h('div', { class: 'row panel' }, 'Od', fromIn, 'do', toIn,
-    preset('Teraz', (t) => [addDays(t, -3), addDays(t, 7)], 'Od 3 dni wstecz do 7 dni naprzód (jak w arkuszu)'),
-    preset('Miesiąc', (t) => [t.slice(0, 8) + '01', F.daysBetween(t.slice(0, 8) + '01', addDays(t.slice(0, 8) + '28', 4)).filter((d) => d.slice(0, 7) === t.slice(0, 7)).pop()]),
-    preset('Tydzień', (t) => F.isoWeekRange(...weekOf(t)), 'Bieżący tydzień (pon–niedz)'),
-    preset('Rok', (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31']),
+    preset('Teraz', 'teraz', 'Od 3 dni wstecz do 7 dni naprzód (jak w arkuszu)'),
+    preset('Miesiąc', 'miesiac'),
+    preset('Tydzień', 'tydzien', 'Bieżący tydzień (pon–niedz)'),
+    preset('Rok', 'rok'),
     monthSel, weekSel,
     h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
     ...groupBtns,

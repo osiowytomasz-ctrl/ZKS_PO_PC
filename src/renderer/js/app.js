@@ -18,10 +18,41 @@ const lazy = (load, name) => (el, c) => {
   load().then((m) => {
     if (dead) return;
     clear(el);
-    Promise.resolve(m[name](el, c)).then((r) => { if (typeof r === 'function') { if (dead) r(); else inner = r; } });
+    owner = el;                       // nasłuchy klawiatury modułu na dokumencie działają tylko, gdy jego ekran jest widoczny (patrz niżej)
+    let res; try { res = m[name](el, c); } finally { owner = null; }
+    Promise.resolve(res).then((r) => { if (typeof r === 'function') { if (dead) r(); else inner = r; } });
   }).catch((e) => { if (!dead) { clear(el); el.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Nie wczytano modułu: ' + e.message)); } });
-  return () => { dead = true; if (inner) inner(); };
+  const stop = () => { dead = true; if (inner) inner(); };
+  stop.onShow = () => { if (inner && inner.onShow) inner.onShow(); };
+  return stop;
 };
+
+// Moduły trzymane w tle przez całą sesję: po wyjściu ekran jest tylko ukrywany, po powrocie wraca w tym samym stanie (bez ponownego
+// wczytywania, filtry, zaznaczenie, przewinięcie). Nasłuchy klawiatury i schowka, które moduł dodaje na `document`, są owijane tak,
+// by ukryty moduł nie reagował na klawisze wciśnięte w innym module.
+let owner = null;
+const GUARDED = new Set(['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut']);
+const wrappedListeners = new WeakMap();
+{
+  const add = document.addEventListener.bind(document), rm = document.removeEventListener.bind(document);
+  document.addEventListener = function (type, listener, opts) {
+    if (owner && GUARDED.has(type) && typeof listener === 'function') {
+      const screen = owner;
+      let w = wrappedListeners.get(listener);
+      if (!w) { w = function (e) { if (screen.style.display === 'none') return undefined; return listener.call(this, e); }; wrappedListeners.set(listener, w); }
+      return add(type, w, opts);
+    }
+    return add(type, listener, opts);
+  };
+  document.removeEventListener = function (type, listener, opts) { return rm(type, wrappedListeners.get(listener) || listener, opts); };
+}
+const KEEP_IDS = new Set(['grafik', 'plan', 'harmonogram-fb', 'mistrz', 'kompetencje', 'zakupy', 'toolbuilder', 'assemtool', 'tooltrack', 'czesci', 'produkty', 'pomiarowe', 'zniszczone']);
+const kept = new Map();   // id modułu → { screen, cleanup }
+/** Zamyka wszystkie moduły trzymane w tle (po zmianie użytkownika, uprawnień albo klucza – muszą się zbudować od nowa). */
+export function purgeKept() {
+  for (const k of kept.values()) { try { if (k.cleanup) k.cleanup(); } catch { /* ignorujemy */ } k.screen.remove(); }
+  kept.clear();
+}
 const mountHome = lazy(() => import('./views/home.js'), 'mountHome');
 const mountSettings = lazy(() => import('./views/settings.js'), 'mountSettings');
 const mountCompetence = lazy(() => import('./views/competence.js'), 'mountCompetence');
@@ -108,7 +139,7 @@ export const ctx = {
         if (fresh) { ctx.user = u; return; }
         const before = JSON.stringify(ctx.user || null);
         ctx.user = u;
-        if (meta && !meta.cached && current && before !== 'null' && before !== JSON.stringify(u || null)) go(current);
+        if (meta && !meta.cached && current && before !== 'null' && before !== JSON.stringify(u || null)) { purgeKept(); go(current); }
       }, { force: fresh });
       ctx.userError = null;
       try { localStorage.setItem('zks.level', grafikLevelOf(ctx.user)); } catch { /* bez pamięci */ }   // zapamiętany poziom (Ustawienia, gdy serwer nie odpowiada)
@@ -194,10 +225,13 @@ export function go(id) {
   }
   { const m = MODULES.find((x) => x.id === id); if (m && m.inToolRoom) { try { localStorage.setItem('zks.toolroom.last', id); } catch { /* bez pamięci */ } } }
   try { sessionStorage.setItem('zks.current', id); } catch { /* bez pamięci sesji */ }
+  if (current === 'settings' && id !== 'settings') purgeKept();   // po Ustawieniach (nowy klucz, adres) moduły w tle budują się od nowa
   if (cleanup) { try { cleanup(); } catch (e) { /* ignorujemy */ } cleanup = null; }
   current = id;
-  clear(root);
-  const screen = h('div', { class: 'screen' });
+  // moduły trzymane w tle zostają w drzewie (ukryte), reszta jest usuwana
+  for (const c of [...root.children]) { if (c.dataset && c.dataset.kept) c.style.display = 'none'; else c.remove(); }
+  const back = kept.get(id);
+  const screen = back ? back.screen : h('div', { class: 'screen' });
   let title = 'ZKS PO';
   let mount;
   if (id === 'home') { mount = mountHome; }
@@ -215,11 +249,20 @@ export function go(id) {
   const parent = own && (own.inToolRoom || own.inHelp || own.inMistrz) ? MODULES.find((m) => m.id === backTarget(id)) : own;
   const modColor = id === 'home' ? (ctx.homeTab === 'workflow' ? TAB_COLORS.workflow : TAB_COLORS.braki) : parent && parent.color;
   root.style.setProperty('--modcolor', modColor || '');
-  if (modColor) screen.classList.add('themed');
-  root.append(topbar(title, id !== 'home'), screen);
+  if (modColor) screen.classList.add('themed'); else screen.classList.remove('themed');
+  root.prepend(topbar(title, id !== 'home'));
   document.title = id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
+  if (back) {
+    screen.style.display = '';
+    if (!screen.isConnected) root.append(screen);
+    try { if (back.cleanup && back.cleanup.onShow) back.cleanup.onShow(); } catch { /* ignorujemy */ }
+    window.dispatchEvent(new Event('resize'));   // widoki liczące rozmiar (Plan) odświeżają się po ponownym pokazaniu
+    return;
+  }
+  root.append(screen);
   const result = mount(screen, ctx);
-  if (typeof result === 'function') cleanup = result;
+  if (KEEP_IDS.has(id) && own && !(own.visible && !own.visible())) { screen.dataset.kept = '1'; kept.set(id, { screen, cleanup: typeof result === 'function' ? result : null }); }
+  else if (typeof result === 'function') cleanup = result;
 }
 
 window.addEventListener('unhandledrejection', (e) => { toast('Błąd: ' + (e.reason && e.reason.message || e.reason), true); });

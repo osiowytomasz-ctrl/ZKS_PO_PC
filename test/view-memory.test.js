@@ -55,3 +55,12 @@ test('viewMemory: zwykłe pola (q, sort, dir, wartości logiczne) i brak pamięc
   assert.equal(viewMemory('x', {}, ['q']).load(), false);   // bez localStorage (np. tryb prywatny) – tylko brak zapisanych danych
   assert.doesNotThrow(() => viewMemory('x', { q: '1' }, ['q']).save());
 });
+
+test('moduły trzymane w tle w sesji (app.js): wszystkie identyfikatory z listy istnieją w MODULES, a Skaner (kamera) i Ustawienia nie są trzymane', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/renderer/js/app.js', import.meta.url), 'utf8');
+  const keep = (src.match(/const KEEP_IDS = new Set\(\[([^\]]*)\]\)/) || [, ''])[1].match(/'([^']+)'/g).map((x) => x.slice(1, -1));
+  assert.ok(keep.length > 5);
+  for (const id of keep) assert.ok(src.includes(`id: '${id}'`), id);
+  assert.ok(!keep.includes('skaner') && !keep.includes('home') && !keep.includes('settings'));
+});
