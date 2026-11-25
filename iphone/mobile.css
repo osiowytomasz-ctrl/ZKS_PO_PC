@@ -28,3 +28,10 @@ body { font-size: 15px; }
 .presence-panel input[type=text], .presence-panel textarea { font-size: 16px; }
 .presence-tabs button, .presence-chip { padding: 8px 10px; }
 .presence-close { display: none; }   /* zamknięcie = przejście na kartę Skaner w dolnym pasku */
+/* Tablica (Workflow) i dzwonek powiadomień */
+#m-bell .bell { background: #555; color: #fff; border: 1px solid #777; border-radius: 0; padding: 6px 12px; font-size: 16px; }
+.bell-menu { left: 8px !important; right: 8px !important; width: auto !important; top: calc(52px + env(safe-area-inset-top)) !important; max-height: calc(100dvh - 140px) !important; }
+.bell-list { max-height: none !important; }
+.m-tab-wf .table-wrap { max-height: calc(100dvh - 250px) !important; }
+.m-nav button { font-size: 15px; padding: 10px 0; }
+.m-nav button:nth-child(2) { background: #e8d5b5; }

@@ -42,10 +42,26 @@ async function shell() {
   const badge = h('span', { class: 'm-badge', style: { display: 'none' } });
   const scanBtn = h('button', { class: 'on', onclick: () => select('scan') }, 'Skaner');
   const chatBtn = h('button', { onclick: () => select('chat') }, 'Chat', badge);
+  const wfBtn = h('button', { onclick: () => select('wf') }, 'Tablica');
   const head = h('div', { class: 'm-head' }, h('img', { src: 'img/logo.png', alt: 'ZKS PO' }),
     h('div', { class: 'm-title' }, h('b', {}, (ctx.user && (ctx.user.name || ctx.user.email)) || ''), h('span', {}, `ZKS PO · iPhone · wersja ${VERSION}`)),
+    h('span', { id: 'm-bell' }),
     h('button', { onclick: menu, title: 'Ustawienia' }, '⚙'));
-  clear(root).append(head, main, h('div', { class: 'm-nav' }, scanBtn, chatBtn));
+  const wfEl = h('div', { class: 'm-main m-tab-wf', style: { display: 'none' } });
+  clear(root).append(head, main, wfEl, h('div', { class: 'm-nav' }, scanBtn, wfBtn, chatBtn));
+
+  // Tablica (Workflow) i powiadomienia – ten sam kod i te same zasady co w programie PC (zmiany tylko MASTER i GOD, inni przeglądają)
+  const { createWorkflow } = await import('./js/views/workflow.js');
+  const { startWfNotify, bellButton } = await import('./js/views/wfBell.js');
+  const wf = createWorkflow(ctx);
+  wfEl.append(h('div', { class: 'panel', style: { margin: '8px', padding: '6px' } }, wf.node));
+  document.getElementById('m-bell').append(bellButton(ctx));
+  // licznik nieprzeczytanych powiadomień także na ikonie aplikacji (iOS 16.4+, aplikacja dodana do ekranu początkowego)
+  const bellHost = document.getElementById('m-bell');
+  const paintAppBadge = () => { const n = parseInt((bellHost.querySelector('.bell-badge') || {}).textContent, 10) || 0; try { if (navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()); } catch { /* bez licznika na ikonie */ } };
+  new MutationObserver(paintAppBadge).observe(bellHost, { childList: true, subtree: true, characterData: true });
+  startWfNotify(ctx);                                  // nasłuch zadań: dzwonek, wyskakujące komunikaty, powiadomienia systemowe (gdy aplikacja otwarta)
+  let wfLoaded = false;
 
   const { mountScanner } = await import('./js/views/scanner.js');
   mountScanner(scanEl, ctx);
@@ -60,11 +76,16 @@ async function shell() {
   mirror();
 
   function select(what) {
-    const chat = what === 'chat';
-    scanBtn.className = chat ? '' : 'on'; chatBtn.className = chat ? 'on' : '';
-    main.style.visibility = chat ? 'hidden' : 'visible';   // układ zostaje (dolny pasek na swoim miejscu), kamera i pola Skanera ukryte
+    const chat = what === 'chat', tab = what === 'wf';
+    scanBtn.className = what === 'scan' ? 'on' : ''; wfBtn.className = tab ? 'on' : ''; chatBtn.className = chat ? 'on' : '';
+    main.style.display = what === 'scan' || chat ? '' : 'none';
+    main.style.visibility = chat ? 'hidden' : 'visible';   // przy Chacie układ zostaje (dolny pasek na swoim miejscu), kamera i pola Skanera ukryte
+    wfEl.style.display = tab ? '' : 'none';
+    if (tab && !wfLoaded) { wfLoaded = true; wf.refresh(); }
     presence.toggle(chat);
   }
+  ctx.go = () => select('wf');                         // kliknięcie powiadomienia w dzwonku otwiera Tablicę
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && wfLoaded) wf.refresh(); });   // po powrocie do aplikacji – świeże dane
   select('scan');
 
   function menu() {
@@ -87,6 +108,17 @@ async function start() {
   catch (e) { await loginView('Nie zalogowano: ' + (e.message || e)); return; }
   await shell();
 }
+
+// Safari na iPhone'ie nie wysyła „dblclick” przy podwójnym stuknięciu – dodajemy je (edycja komórek tabel jak dwuklik na komputerze)
+let lastTap = { t: 0, el: null };
+document.addEventListener('touchend', (e) => {
+  const el = e.target, now = Date.now();
+  if (lastTap.el === el && now - lastTap.t < 350 && el.closest && el.closest('td, th')) {
+    const t = e.changedTouches[0];
+    el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY }));
+    lastTap = { t: 0, el: null };
+  } else lastTap = { t: now, el };
+}, { passive: true });
 
 window.addEventListener('unhandledrejection', (e) => { try { toast('Błąd: ' + ((e.reason && e.reason.message) || e.reason), true); } catch { /* bez komunikatu */ } });
 start();

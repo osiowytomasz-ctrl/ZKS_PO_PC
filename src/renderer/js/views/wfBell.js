@@ -64,7 +64,7 @@ function paintMenu() {
       h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px 0' } },
         chk('newTasks', 'Nowe zadania'), chk('status', 'Zmiany statusu zadań'), chk('mineOnly', 'Zmiany statusu tylko moich zleceń', 'Zadania, w których jesteś zlecającym (kolumna G)'),
         h('div', { class: 'row', style: { gap: '6px', alignItems: 'center', flexWrap: 'wrap' } }, chk('stale', 'Raz dziennie: zaległe – wstrzymane >'), num('heldDays'), 'dni, w trakcie >', num('progressDays'), 'dni'),
-        chk('sound', 'Dźwięk przy nowym powiadomieniu'), chk('system', 'Powiadomienia systemowe (Windows)'))));
+        chk('sound', 'Dźwięk przy nowym powiadomieniu'), chk('system', S.ctx && S.ctx.platform === 'ios' ? 'Powiadomienia systemowe (działają, gdy aplikacja jest otwarta)' : 'Powiadomienia systemowe (Windows)'))));
 }
 /** Przycisk dzwonka do paska (każde przebudowanie paska tworzy nowy przycisk; stan jest wspólny). */
 export function bellButton(ctx) {
