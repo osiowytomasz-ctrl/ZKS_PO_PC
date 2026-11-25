@@ -6,6 +6,9 @@ import { newCode, hashCode, codeRows, hashesOf } from '../logic/grafikCodes.js';
 
 const when = (ms) => (ms ? new Date(ms).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
+/** Adres aplikacji na iPhone'a (Skaner i Chat; GitHub Pages z katalogu iphone/ – patrz iphone/README.md). */
+export const IPHONE_APP_URL = 'https://osiowytomasz-ctrl.github.io/ZKS_PO_PC/';
+
 export async function openGrafikCodes({ people, user }) {
   const { sdk, db } = await firebase();
   const ref = sdk.doc(db, 'gr_codes', 'main');
@@ -40,7 +43,8 @@ export async function openGrafikCodes({ people, user }) {
     try {
       await write(r.pid, { hash: await hashCode(code), item: { pid: r.pid, name: r.name, by: (user && (user.name || user.email)) || '', at: Date.now() } });
       await alertBox('Kod dostępu do Grafiku', `${r.name}\n\nKod: ${code.slice(0, 4)} ${code.slice(4)}\n\n`
-        + (link ? `Adres strony (Safari / Chrome na telefonie):\n${link}\n\n` : '')
+        + (link ? `Grafik i Plan do wglądu (kod 8 cyfr) – adres strony (Safari / Chrome na telefonie):\n${link}\n\n` : '')
+        + `Skaner i Chat (klucz użytkownika, nie ten kod) – aplikacja na iPhone'a:\n${IPHONE_APP_URL}\n\n`
         + 'Zapisz albo przekaż kod teraz – później nie będzie można go odczytać (w bazie jest tylko skrót). Na telefonie: Udostępnij → Do ekranu początkowego.');
     } catch (e) { toast('Nie zapisano kodu: ' + (e.message || e), true); }
   };
@@ -50,8 +54,11 @@ export async function openGrafikCodes({ people, user }) {
   };
 
   const m = modal('Kody iPhone – Grafik i Plan do wglądu na telefonie', h('div', {},
-    h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Każdy pracownik ma osobny kod (8 cyfr). Po wpisaniu kodu widzi cały grafik (zmiany i komentarze, bez urlopów, godzin i absencji) i Plan – bez możliwości zmian.'),
-    link ? h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Adres strony: ', h('code', { style: { userSelect: 'all' } }, link)) : null,
+    h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, 'Kody z listy poniżej dotyczą tylko podglądu Grafiku i Planu. Każdy pracownik ma osobny kod (8 cyfr). Po wpisaniu kodu widzi cały grafik (zmiany i komentarze, bez urlopów, godzin i absencji) i Plan – bez możliwości zmian.'),
+    h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, h('b', {}, 'Aplikacja na iPhone\'a – Skaner i Chat'), ' (logowanie kluczem użytkownika, jak w aplikacji na Androida; w Safari: Udostępnij → Do ekranu początkowego):', h('br'), h('code', { style: { userSelect: 'all' } }, IPHONE_APP_URL), ' ',
+      h('button', { class: 'btn small', onclick: async () => { await window.zks.copyText(IPHONE_APP_URL); toast('Skopiowano adres aplikacji'); } }, 'Kopiuj')),
+    link ? h('p', { style: { margin: '0 0 6px', fontSize: '13px' } }, h('b', {}, 'Grafik i Plan do wglądu'), ' (kod z poniższej listy): ', h('code', { style: { userSelect: 'all' } }, link), ' ',
+      h('button', { class: 'btn small', onclick: async () => { await window.zks.copyText(link); toast('Skopiowano adres'); } }, 'Kopiuj')) : null,
     h('div', { class: 'row' }, search), list,
     h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => m.close() }, 'Zamknij'))), { wide: true, onClose: () => stop() });
   const stop = sdk.onSnapshot(ref, (s) => { codes = (s.exists() && s.data().codes) || {}; draw(); },
