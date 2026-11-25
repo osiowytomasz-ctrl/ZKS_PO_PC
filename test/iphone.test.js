@@ -67,3 +67,19 @@ test('powłoka iPhone\'a: karty Grafik i Plan z tych samych widoków co w progra
   assert.match(js, /editPlan/);
   for (const f of ['src/renderer/js/views/grafik.js', 'src/renderer/js/views/plan.js']) assert.ok(fs.existsSync(new URL('../' + f, import.meta.url)));
 });
+
+test('BarcodeDetector: wieloprzebiegowy odczyt – kolejne skale/wycinki do pierwszego trafienia, współrzędne w układzie całej klatki, negatyw co drugą klatkę', async () => {
+  const pt = (x, y) => ({ getX: () => x, getY: () => y });
+  const calls = []; let okAt = 2;
+  class Reader { setHints() {} reset() {} decode(bitmap) { calls.push(bitmap.w); if (calls.length === okAt || bitmap.inv) return { getText: () => 'OK', getBarcodeFormat: () => 11, getResultPoints: () => [pt(10, 10), pt(30, 10), pt(30, 30)] }; throw new Error('nf'); } }
+  class Src { constructor(l, w, h) { this.l = l; this.w = w; this.h = h; } }
+  class Inv extends Src { constructor(s) { super(s.l, s.w, s.h); this.inv = true; } }
+  const ZX = { DecodeHintType: { POSSIBLE_FORMATS: 1, TRY_HARDER: 2 }, BarcodeFormat: { QR_CODE: 11 }, MultiFormatReader: Reader, RGBLuminanceSource: Src, InvertedLuminanceSource: Inv, HybridBinarizer: class { constructor(s) { this.s = s; } }, BinaryBitmap: class { constructor(b) { this.w = b.s.w; this.inv = b.s.inv; } } };
+  const doc = { createElement: () => { const c = { width: 0, height: 0, getContext: () => ({ drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray(c.width * c.height * 4) }) }) }; return c; } };
+  const passes = [{ crop: 1, side: 400 }, { crop: 0.5, side: 300 }];
+  const D = makeDetectorClass(ZX, doc, passes);
+  const r = await new D().detect({ videoWidth: 1600, videoHeight: 800 });   // 1. przebieg (400 px) nie trafia, 2. (300 px) trafia
+  assert.deepEqual(calls, [400, 300]); assert.equal(r[0].rawValue, 'OK');
+  // wycinek ½ klatki zaczyna się w (400, 200): punkt (10,10) przy skali 300/800 → 400 + 10/0.375
+  assert.ok(Math.abs(r[0].cornerPoints[0].x - (400 + 10 / 0.375 - 6 / 0.375)) < 1);
+});

@@ -393,7 +393,8 @@ export function mountScanner(el, ctx) {
     const camBox = h('div', { style: { position: 'relative', overflow: 'hidden', background: '#000', height: prefs.height + 'px' } }, video, overlay, reticle);
     const handle = h('div', { title: 'Przeciągnij: wysokość obszaru wyświetlania i skanowania', style: { height: '12px', background: '#e0e0e0', cursor: 'ns-resize', display: 'flex', justifyContent: 'center', alignItems: 'center' } },
       h('div', { style: { width: '48px', height: '4px', background: '#999' } }));
-    const camArea = h('div', { style: { display: 'none', marginBottom: '6px' } }, camBox, handle);
+    const camArea = h('div', { style: { display: 'none', marginBottom: '6px' } }, camBox, handle,
+      ctx && ctx.platform === 'ios' ? h('div', { class: 'muted', style: { fontSize: '12px', padding: '2px 4px' } }, 'Trzymaj telefon 15–25 cm od kodu i stuknij w obraz, aby złapać ostrość.') : null);
     const applyPrefs = () => {
       camBox.style.height = prefs.height + 'px';
       video.style.transform = `scale(${prefs.zoom})`;
@@ -421,7 +422,16 @@ export function mountScanner(el, ctx) {
     async function toggleCamera() {
       if (stream) { stopCamera(); camArea.style.display = 'none'; camBtn.textContent = 'Skanuj kamerą'; return; }
       if (!('BarcodeDetector' in window)) { toast('Ta wersja nie obsługuje skanowania kamerą. Użyj skanera USB lub wpisz kod.', true); return; }
-      try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); } catch (e) { toast('Brak dostępu do kamery.', true); return; }
+      // iPhone: domyślnie Safari daje obraz ~640×480 – kody QR mają wtedy po kilka pikseli na moduł; prosimy o Full HD i ciągły autofokus
+      const phone = ctx && ctx.platform === 'ios';
+      const constraints = phone ? { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } : { facingMode: 'environment' };
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: constraints }); } catch (e) { toast('Brak dostępu do kamery.', true); return; }
+      const track = stream.getVideoTracks()[0];
+      const caps = (track && track.getCapabilities && track.getCapabilities()) || {};
+      const focusMode = (mode) => (track && caps.focusMode && caps.focusMode.includes(mode) ? track.applyConstraints({ advanced: [{ focusMode: mode }] }).catch(() => {}) : Promise.resolve());
+      if (phone) focusMode('continuous');
+      // stuknięcie w obraz – ponowne złapanie ostrości (iPhone), potem znów ciągły autofokus
+      camBox.onclick = phone ? async () => { await focusMode('single-shot'); setTimeout(() => focusMode('continuous'), 1200); } : null;
       camArea.style.display = ''; applyPrefs();
       video.srcObject = stream; await video.play(); camBtn.textContent = 'Zatrzymaj kamerę';
       const detector = new BarcodeDetector();
