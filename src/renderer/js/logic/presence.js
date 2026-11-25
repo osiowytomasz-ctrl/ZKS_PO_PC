@@ -19,11 +19,13 @@ export const statusOf = (id) => BY_ID.get(id) || { id: '', label: 'Brak statusu'
 export const HISTORY_USERS = ['Osiowy Tomasz', 'Kumała Łukasz', 'Skupnik Adam'];
 /** Osoby, które przy nazwisku widzą wersję oprogramowania i rodzaj urządzenia (PC / Android). */
 export const DEVICE_USERS = ['Osiowy Tomasz'];
+/** Platformy zgłaszające urządzenie (PC – program Electron, android – aplikacja, ios – wersja na iPhone'a). */
+export const PLATFORMS = ['pc', 'android', 'ios'];
 /** Czas (ms), po którym urządzenie uznajemy za dawno nieużywane (brak zgłoszenia od 7 dni). */
 export const DEVICE_STALE_MS = 7 * 86400000;
-/** Zgłoszenie urządzenia do zapisu: { name, email, platform: 'pc' | 'android', ver, seenAt }; nieznana platforma – null. */
+/** Zgłoszenie urządzenia do zapisu: { name, email, platform: 'pc' | 'android' | 'ios', ver, seenAt }; nieznana platforma – null. */
 export function makeDevice(user, platform, ver, now = Date.now()) {
-  if (!['pc', 'android'].includes(platform)) return null;
+  if (!PLATFORMS.includes(platform)) return null;
   return { name: String((user && (user.name || user.email)) || '').trim(), email: String((user && user.email) || '').trim(), platform, ver: String(ver ?? '').trim(), seenAt: now };
 }
 /** Urządzenia osoby o uid [uid] z dokumentów presence_dev (id = „{uid}_{platforma}”): [{ platform, ver, seenAt, stale }] – PC przed Androidem. */
@@ -33,7 +35,7 @@ export function devicesFor(uid, devMap, now = Date.now()) {
     if (!id.startsWith(String(uid) + '_') || !d) continue;
     out.push({ platform: d.platform, ver: String(d.ver ?? ''), seenAt: Number(d.seenAt) || 0, stale: now - (Number(d.seenAt) || 0) > DEVICE_STALE_MS });
   }
-  return out.sort((a, b) => (a.platform === b.platform ? 0 : a.platform === 'pc' ? -1 : 1));
+  return out.sort((a, b) => PLATFORMS.indexOf(a.platform) - PLATFORMS.indexOf(b.platform));
 }
 /** Nazwa bez wielkości liter, spacji na brzegach i polskich znaków – „Kumala Łukasz” = „Kumała Łukasz”. */
 export const normName = (s) => String(s ?? '').trim().toLowerCase().replace(/ł/g, 'l').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');

@@ -65,8 +65,8 @@ export function mountPresence(ctx) {
   function deviceBadges(uid) {
     if (!mayDevices()) return [];
     const now = Date.now();
-    return P.devicesFor(uid, st.devs, now).map((d) => h('span', { class: 'presence-dev' + (d.stale ? ' stale' : ''), title: `${d.platform === 'pc' ? 'Program na komputer (PC)' : 'Aplikacja na Androida'}, wersja ${d.ver || '?'} · ostatnio: ${d.seenAt ? P.timeText(d.seenAt, now) : '—'}${d.stale ? ' (dawno nieużywane)' : ''}` },
-      ' ' + (d.platform === 'pc' ? '🖥' : '🤖'), h('span', { class: 'muted', style: { fontSize: '10px' } }, d.ver ? 'v' + d.ver : '')));
+    return P.devicesFor(uid, st.devs, now).map((d) => h('span', { class: 'presence-dev' + (d.stale ? ' stale' : ''), title: `${{ pc: 'Program na komputer (PC)', android: 'Aplikacja na Androida', ios: 'Wersja na iPhone\'a' }[d.platform] || d.platform}, wersja ${d.ver || '?'} · ostatnio: ${d.seenAt ? P.timeText(d.seenAt, now) : '—'}${d.stale ? ' (dawno nieużywane)' : ''}` },
+      ' ' + ({ pc: '🖥', android: '🤖', ios: '📱' }[d.platform] || '•'), h('span', { class: 'muted', style: { fontSize: '10px' } }, d.ver ? 'v' + d.ver : '')));
   }
   function listView() {
     const now = Date.now(), items = P.sortPresence([...st.states.entries()].map(([uid, p]) => ({ ...p, uid })), now);
@@ -114,7 +114,7 @@ export function mountPresence(ctx) {
     const tabs = h('div', { class: 'presence-tabs' }, h('button', { class: st.tab === 'list' ? 'on' : '', onclick: () => { st.tab = 'list'; paintPanel(); } }, 'Status'),
       h('button', { class: st.tab === 'chat' ? 'on' : '', onclick: () => { st.tab = 'chat'; openChat(); } }, 'Rozmowy' + (un ? ` (${un})` : '')),
       mayHistory() ? h('button', { class: st.tab === 'hist' ? 'on' : '', onclick: () => { st.tab = 'hist'; if (st.hist.rows == null) loadHistory(); else paintPanel(); } }, 'Historia') : null,
-      h('span', { class: 'grow' }), h('button', { title: 'Zamknij', onclick: () => toggle(false) }, '✕'));
+      h('span', { class: 'grow' }), h('button', { class: 'presence-close', title: 'Zamknij', onclick: () => toggle(false) }, '✕'));
     if (st.tab === 'hist' && !mayHistory()) st.tab = 'list';
     panel.append(tabs, st.tab === 'hist' ? historyView() : st.tab === 'chat' ? chatView() : h('div', {}, formView(), listView()));
     if (st.tab === 'chat') { const l = panel.querySelector('.chat-log'); if (l) l.scrollTop = l.scrollHeight; }
@@ -199,8 +199,9 @@ export function mountPresence(ctx) {
   async function reportDevice() {
     const send = async () => {
       try {
-        const d = P.makeDevice(user(), 'pc', ctx.version);
-        if (d && st.uid && st.sdk) await st.sdk.setDoc(st.sdk.doc(st.db, 'presence_dev', st.uid + '_pc'), d);
+        const platform = ctx.platform || 'pc';   // wersja na iPhone'a ustawia 'ios'
+        const d = P.makeDevice(user(), platform, ctx.version);
+        if (d && st.uid && st.sdk) await st.sdk.setDoc(st.sdk.doc(st.db, 'presence_dev', st.uid + '_' + platform), d);
       } catch { /* bez zgłoszenia – nic nie psuje */ }
     };
     await send(); setInterval(send, 20 * 60 * 1000);

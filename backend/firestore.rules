@@ -143,10 +143,10 @@ service cloud.firestore {
       allow create, update: if request.auth != null && request.auth.uid == uid;
       allow delete: if request.auth != null && request.auth.uid == uid || isGod();
     }
-    // Urządzenia pracowników (wersja programu PC i aplikacji na Androida, id = {uid}_{pc|android}): zgłasza własne każdy zalogowany, czyta tylko wskazana osoba (claim `name`).
+    // Urządzenia pracowników (wersja programu PC, aplikacji na Androida i wersji na iPhone'a, id = {uid}_{pc|android|ios}): zgłasza własne każdy zalogowany, czyta tylko wskazana osoba (claim `name`).
     match /presence_dev/{id} {
       allow read: if request.auth != null && tok().get('name', '').lower() in ['osiowy tomasz'];
-      allow create, update: if request.auth != null && id.matches(request.auth.uid + '_(pc|android)');
+      allow create, update: if request.auth != null && id.matches(request.auth.uid + '_(pc|android|ios)');
       allow delete: if isGod();
     }
     match /presence_log/{day} {

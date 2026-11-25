@@ -32,7 +32,9 @@ test('wersja i urządzenie przy nazwisku: tylko Osiowy Tomasz; urządzenia osoby
   assert.ok(P.canSeeDevices('Osiowy Tomasz')); assert.ok(P.canSeeDevices(' osiowy  tomasz ')); assert.ok(!P.canSeeDevices('Skupnik Adam')); assert.ok(!P.canSeeDevices('Kumała Łukasz')); assert.ok(!P.canSeeDevices(''));
   const now = 1e12;
   assert.deepEqual(P.makeDevice({ name: 'Jan K', email: 'j@x.pl' }, 'pc', '1.93.0', now), { name: 'Jan K', email: 'j@x.pl', platform: 'pc', ver: '1.93.0', seenAt: now });
-  assert.equal(P.makeDevice({ name: 'X' }, 'ios', '1'), null);
+  assert.equal(P.makeDevice({ name: 'X' }, 'windows', '1'), null);
+  assert.equal(P.makeDevice({ name: 'X', email: 'x@y.pl' }, 'ios', '2.0').platform, 'ios');   // wersja na iPhone'a
+  assert.deepEqual(P.devicesFor('u1', { u1_ios: { platform: 'ios', ver: '1', seenAt: 5 }, u1_pc: { platform: 'pc', ver: '2', seenAt: 5 }, u1_android: { platform: 'android', ver: '3', seenAt: 5 } }, 6).map((d) => d.platform), ['pc', 'android', 'ios']);
   const devs = new Map([['u1_android', { platform: 'android', ver: '1.38.0', seenAt: now - 1000 }], ['u1_pc', { platform: 'pc', ver: '1.93.0', seenAt: now - 8 * 86400000 }], ['u2_pc', { platform: 'pc', ver: '1.0', seenAt: now }]]);
   const d = P.devicesFor('u1', devs, now);
   assert.deepEqual(d.map((x) => [x.platform, x.ver, x.stale]), [['pc', '1.93.0', true], ['android', '1.38.0', false]]);
