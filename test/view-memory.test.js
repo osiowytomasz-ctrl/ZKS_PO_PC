@@ -64,3 +64,10 @@ test('moduły trzymane w tle w sesji (app.js): wszystkie identyfikatory z listy 
   for (const id of keep) assert.ok(src.includes(`id: '${id}'`), id);
   assert.ok(!keep.includes('skaner') && !keep.includes('home') && !keep.includes('settings'));
 });
+
+test('moduły w tle: po ponownym pokazaniu ekran odzyskuje swój układ (display ustawiony przez moduł), inaczej tabela traci własne przewijanie', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/renderer/js/app.js', import.meta.url), 'utf8');
+  assert.match(src, /dataset\.disp = c\.style\.display/);
+  assert.match(src, /screen\.style\.display = screen\.dataset\.disp \|\| ''/);
+});

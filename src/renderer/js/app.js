@@ -229,7 +229,8 @@ export function go(id) {
   if (cleanup) { try { cleanup(); } catch (e) { /* ignorujemy */ } cleanup = null; }
   current = id;
   // moduły trzymane w tle zostają w drzewie (ukryte), reszta jest usuwana
-  for (const c of [...root.children]) { if (c.dataset && c.dataset.kept) c.style.display = 'none'; else c.remove(); }
+  // (układ ekranu – np. flex ustawiony przez moduł – jest zapamiętany i przywracany po powrocie, inaczej tabela traci własne przewijanie)
+  for (const c of [...root.children]) { if (c.dataset && c.dataset.kept) { if (c.style.display !== 'none') c.dataset.disp = c.style.display; c.style.display = 'none'; } else c.remove(); }
   const back = kept.get(id);
   const screen = back ? back.screen : h('div', { class: 'screen' });
   let title = 'ZKS PO';
@@ -253,7 +254,7 @@ export function go(id) {
   root.prepend(topbar(title, id !== 'home'));
   document.title = id === 'home' ? 'ZKS PO' : `${title} – ZKS PO`;
   if (back) {
-    screen.style.display = '';
+    screen.style.display = screen.dataset.disp || '';
     if (!screen.isConnected) root.append(screen);
     try { if (back.cleanup && back.cleanup.onShow) back.cleanup.onShow(); } catch { /* ignorujemy */ }
     window.dispatchEvent(new Event('resize'));   // widoki liczące rozmiar (Plan) odświeżają się po ponownym pokazaniu
