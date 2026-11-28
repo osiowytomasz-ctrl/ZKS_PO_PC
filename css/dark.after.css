@@ -1,0 +1,3 @@
+/* Tekst sformatowany przez użytkownika (Tablica, Workflow): kolory czcionek z Worda/Excela zakładają jasne tło – pole zostaje „kartką” */
+html[data-theme="dark"] .rich, html[data-theme="dark"] div[contenteditable="true"] { background-color: #fffbe6 !important; color: #000 !important; border-color: #b8a86a !important; }
+html[data-theme="dark"] .rich a { color: #0b57d0; }

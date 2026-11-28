@@ -1,0 +1,583 @@
+// Grafik z Firebase: kody zmian i nieobecności pracowników na każdy dzień, na żywo u wszystkich. Kolory, „UT=”, urlopy, godziny
+// i nieobecności liczone w programie tak jak w karcie G arkusza (logic/grafikFb.js). Obsługa jak w Excelu: klik / Shift / przeciąganie
+// – zaznaczenie, strzałki, Tab, Enter, pisanie w komórce, F2 / dwuklik, Delete, Ctrl+C / Ctrl+V (zgodne z Excelem), Ctrl+Z / Ctrl+Y.
+// Komentarz do komórki: prawy przycisk → „Komentarz…” (znaczek w rogu komórki, treść po najechaniu). Każda zmiana zapisuje się od razu
+// w bazie, a w okresie przejściowym także w karcie G (graf_norm, wersja webowa).
+import { h, clear, toast, modal, confirmBox, columnFilterDialog } from '../ui.js';
+import * as F from '../logic/grafikFb.js';
+import { visibleRows, filterOptions, sortRows } from '../logic/tableFilter.js';
+import { iconSvg } from './harmIcons.js';
+import { watchGrafik, saveCells, saveMeta } from '../grafikStore.js';
+import { stationList } from '../logic/harmModel.js';
+import { grafikAccess, grafikLevelOf } from '../logic/grafikAccess.js';
+import { openPersonCard } from './personCard.js';
+import { syncButton } from '../syncStore.js';
+
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bez pamięci */ } };
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** [rok ISO, tydzień ISO] dnia. */
+const weekOf = (iso) => { const w = F.isoWeek(iso), y = Number(iso.slice(0, 4)), m = iso.slice(5, 7); return [m === '01' && w > 50 ? y - 1 : m === '12' && w === 1 ? y + 1 : y, w]; };
+const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const plDate = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+const sheetDate = (iso) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;   // format nagłówka karty G
+// kolumny urlopów: zielony gradient od pasteli (Plan) do zieleni (Pozostały) – jak kolumna „UT” w karcie G
+const mix = (a, b, t) => '#' + [0, 2, 4].map((i) => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('');
+const utShade = (i, n, head) => (head ? mix('#d8ecc9', '#6aa84f', n > 1 ? i / (n - 1) : 1) : mix('#f1f8ec', '#b6d7a8', n > 1 ? i / (n - 1) : 1));
+const MON3 = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+const WD = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'so'];
+
+// Filtry i sortowanie zapamiętane na tym komputerze (jak w Harmonogramie): wartości filtra jako listy
+function loadFilters() {
+  const saved = lsGet('grafik.filters', {}) || {};
+  const filters = {};
+  for (const [k, v] of Object.entries(saved.filters || {})) if (Array.isArray(v)) filters[k] = new Set(v);
+  return { filters, sorts: Array.isArray(saved.sorts) ? saved.sorts.filter((x) => x && x.key) : [] };
+}
+const saveFilters = (st) => lsSet('grafik.filters', { filters: Object.fromEntries(Object.entries(st.filters).map(([k, v]) => [k, [...v]])), sorts: st.sorts });
+
+export function mountGrafik(el, ctx) {
+  // poziom Grafiku (GOD / MASTER / CLERIK / TOURIST – logic/grafikAccess.js)
+  const acc = ctx.grafikAcc ? ctx.grafikAcc() : grafikAccess(grafikLevelOf(ctx.user));
+  const canWrite = acc.cells;
+  const allGroups = () => (acc.groups ? { ut: true, hours: true, abs: true } : { ut: false, hours: false, abs: false });
+  const today = () => isoOf(new Date());
+  const st = {
+    from: addDays(today(), -3), to: addDays(today(), 7), meta: null, months: {}, codes: {}, notes: {}, sel: null, editing: null,
+    filters: {}, sorts: [], ...loadFilters(), zoom: lsGet('grafik.zoom', 100), groups: { ut: true, hours: false, abs: false, ...lsGet('grafik.groups', {}) }, undo: [], redo: [], watcher: null, ready: false, cfg: null, widths: lsGet('grafik.widths', {}) || {}, glow: true,   // podświetlenie wiersza zawsze włączone
+
+  };
+  // zakres dat: ostatnio użyty przycisk (Teraz / Miesiąc / Tydzień / Rok – liczony od dzisiejszej daty) albo dowolny zakres – pamiętany na tym komputerze
+  const PRESETS = {
+    teraz: (t) => [addDays(t, -3), addDays(t, 7)],
+    miesiac: (t) => [t.slice(0, 8) + '01', F.daysBetween(t.slice(0, 8) + '01', addDays(t.slice(0, 8) + '28', 4)).filter((d) => d.slice(0, 7) === t.slice(0, 7)).pop()],
+    tydzien: (t) => F.isoWeekRange(...weekOf(t)),
+    rok: (t) => [t.slice(0, 4) + '-01-01', t.slice(0, 4) + '-12-31'],
+  };
+  // wybór kilku miesięcy i/lub tygodni (np. styczeń, marzec, czerwiec; tydz. 3, 5, 34): st.days = wszystkie wybrane dni; null = zwykły zakres od–do
+  const picks = { months: [], weeks: [] };   // [{ y, n }]
+  const picksDays = () => {
+    const out = new Set();
+    for (const { y, n } of picks.months) { const [a, b] = F.monthRange(y, n); F.daysBetween(a, b).forEach((d) => out.add(d)); }
+    for (const { y, n } of picks.weeks) { const [a, b] = F.isoWeekRange(y, n); F.daysBetween(a, b).forEach((d) => out.add(d)); }
+    return [...out].sort();
+  };
+  { const r = lsGet('grafik.range', null);
+    if (r && r.mode === 'multi') {
+      const ok = (l) => (Array.isArray(l) ? l.filter((x) => x && Number.isInteger(x.y) && Number.isInteger(x.n)) : []);
+      picks.months = ok(r.months); picks.weeks = ok(r.weeks);
+      const d = picksDays(); if (d.length) { st.days = d; st.from = d[0]; st.to = d[d.length - 1]; }
+    } else if (r && PRESETS[r.mode]) { try { [st.from, st.to] = PRESETS[r.mode](today()); } catch { /* zostaje domyślny */ } }
+    else if (r && /^\d{4}-\d{2}-\d{2}$/.test(r.from || '') && /^\d{4}-\d{2}-\d{2}$/.test(r.to || '')) { st.from = r.from; st.to = r.to; } }
+  const body = h('div', { tabindex: '0', class: 'gr', style: { flex: 1, minHeight: 0, overflow: 'auto', outline: 'none', background: '#fff', position: 'relative' } });
+  const info = h('span', { class: 'muted' });
+  const fromIn = h('input', { type: 'date', value: st.from, onchange: () => setRange(fromIn.value, toIn.value) });
+  const toIn = h('input', { type: 'date', value: st.to, onchange: () => setRange(fromIn.value, toIn.value) });
+  const zoomLabel = h('button', { class: 'btn small', title: 'Kliknij: 100%', onclick: () => setZoom(100) }, '100%');
+  // grupy kolumn jak w karcie G: urlopy (AP–AT, C, D), godziny w miesiącach (AD–AO), absencje (AU–BE)
+  const groupBtns = [['ut', 'Urlopy', 'Kolumny urlopów: plan, UT z lat, wykorzystane, zaplanowane, dostępny, pozostały'], ['hours', 'Godziny', 'Godziny przepracowane w każdym miesiącu'], ['abs', 'Absencje', 'Liczba nieobecności: NŻ, v, L4, OP, Ojc, OKL, HDK, BO, BHP, SZ, Sł']]
+    .map(([k, label, title]) => { const b = h('button', { class: 'btn small', title: acc.groups ? title : `${label}: niedostępne (poziom ${acc.label})`, disabled: !acc.groups, onclick: () => { if (!acc.groups) return; st.groups[k] = !st.groups[k]; lsSet('grafik.groups', st.groups); draw(); } }, label); b.dataset.g = k; return b; });
+
+  // ---------- dane na żywo ----------
+  // dni z widoku + cały bieżący rok (podsumowanie urlopów zawsze za bieżący rok)
+  const neededMonths = () => [...new Set([...(st.days ? [...new Set(st.days.map((d) => d.slice(0, 7) + '-01'))].flatMap((d) => F.monthsBetween(d, d)) : F.monthsBetween(st.from, st.to)), ...F.monthsBetween(`${today().slice(0, 4)}-01-01`, `${today().slice(0, 4)}-12-31`)])];
+  async function start() {
+    clear(body); body.append(h('div', { style: { padding: '12px' } }, 'Wczytywanie grafiku…'));
+    try {
+      st.watcher = await watchGrafik(neededMonths(), ({ meta, months, cfg, missingOnServer }) => {
+        st.meta = meta; st.months = months; st.cfg = cfg || null; st.missingOnServer = !!missingOnServer; const u = F.unpackMonths(months); st.codes = u.codes; st.notes = u.notes; st.ready = true; draw();
+      }, (e) => { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, 'Błąd bazy Grafiku: ' + (e.code === 'permission-denied' ? 'brak uprawnień (opublikuj reguły Firestore: gr_days, gr_meta)' : e.message || e))); });
+    } catch (e) { clear(body); body.append(h('div', { class: 'err', style: { padding: '12px' } }, e.message || String(e))); }
+  }
+  function setRange(a, b, mode = 'custom') {
+    if (!a || !b) return;
+    if (b < a) [a, b] = [b, a];
+    lsSet('grafik.range', { mode, from: a, to: b });
+    st.days = null; picks.months = []; picks.weeks = [];
+    st.from = a; st.to = b; fromIn.value = a; toIn.value = b; st.sel = null;
+    syncPickBtns();
+    if (st.watcher) st.watcher.setMonths(neededMonths());
+    draw();
+  }
+  // wybór dowolnego miesiąca i dowolnego tygodnia (rok poprzedni, bieżący, następny)
+  const pickYears = () => { const y = Number(today().slice(0, 4)); return [y - 1, y, y + 1]; };
+  const ddmm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+  /** Okno wyboru kilku miesięcy albo tygodni (zaznaczanie jak pola wyboru; rok do przełączania). */
+  function multiPick(kind) {
+    const isMonth = kind === 'months', list = picks[kind];
+    const years = pickYears();
+    let year = Number(today().slice(0, 4));
+    const has = (y, n) => list.some((x) => x.y === y && x.n === n);
+    const toggle = (y, n) => { const i = list.findIndex((x) => x.y === y && x.n === n); if (i >= 0) list.splice(i, 1); else list.push({ y, n }); };
+    const grid = h('div', { style: { display: 'grid', gridTemplateColumns: isMonth ? 'repeat(3, 1fr)' : 'repeat(auto-fill, minmax(62px, 1fr))', gap: '4px', margin: '8px 0' } });
+    const count = h('span', { class: 'muted' });
+    const yearBtns = h('div', { class: 'row', style: { gap: '4px' } });
+    const paint = () => {
+      clear(yearBtns); years.forEach((y) => yearBtns.append(h('button', { class: 'btn small' + (y === year ? ' primary' : ''), onclick: () => { year = y; paint(); } }, String(y))));
+      clear(grid);
+      const n = isMonth ? 12 : F.isoWeeksInYear(year);
+      for (let i = 1; i <= n; i++) {
+        const [a, b] = isMonth ? F.monthRange(year, i) : F.isoWeekRange(year, i);
+        grid.append(h('button', { class: 'btn small' + (has(year, i) ? ' primary' : ''), title: `${ddmm(a)}–${ddmm(b)}`, style: { textAlign: 'center' }, onclick: () => { toggle(year, i); paint(); } },
+          isMonth ? F.MONTHS[i - 1] : `tydz. ${i}`));
+      }
+      count.textContent = `Wybrano: ${list.length}` + (list.length ? ' (' + [...list].sort((p, q) => p.y - q.y || p.n - q.n).map((x) => (isMonth ? F.MONTHS[x.n - 1].slice(0, 3) : x.n) + (x.y !== year ? '/' + x.y : '')).join(', ') + ')' : '');
+    };
+    const m = modal(isMonth ? 'Wybierz miesiące' : 'Wybierz tygodnie', h('div', {},
+      h('p', { class: 'muted', style: { fontSize: '12px' } }, 'Kliknij, aby zaznaczyć kilka pozycji naraz (także z różnych lat). Grafik pokaże tylko wybrane dni.'),
+      yearBtns, grid, count,
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => { list.length = 0; paint(); } }, 'Wyczyść'),
+        h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'),
+        h('button', { class: 'btn primary', onclick: () => { m.close(); applyPicks(); } }, 'Pokaż'))));
+    paint();
+  }
+  function applyPicks() {
+    const d = picksDays();
+    if (!d.length) { const [a, b] = PRESETS.teraz(today()); setRange(a, b, 'teraz'); return; }
+    lsSet('grafik.range', { mode: 'multi', months: picks.months, weeks: picks.weeks });
+    st.days = d; st.from = d[0]; st.to = d[d.length - 1]; fromIn.value = st.from; toIn.value = st.to; st.sel = null;
+    syncPickBtns();
+    if (st.watcher) st.watcher.setMonths(neededMonths());
+    draw();
+  }
+  const monthBtn = h('button', { class: 'btn small', title: 'Wybierz jeden albo kilka miesięcy (np. styczeń, marzec, czerwiec)', onclick: () => multiPick('months') }, 'Miesiące…');
+  const weekBtn = h('button', { class: 'btn small', title: 'Wybierz jeden albo kilka tygodni (ISO, pon–niedz; np. 3, 5, 34)', onclick: () => multiPick('weeks') }, 'Tygodnie…');
+  function syncPickBtns() {
+    monthBtn.textContent = picks.months.length && st.days ? `Miesiące (${picks.months.length})` : 'Miesiące…';
+    weekBtn.textContent = picks.weeks.length && st.days ? `Tygodnie (${picks.weeks.length})` : 'Tygodnie…';
+    monthBtn.classList.toggle('primary', !!(picks.months.length && st.days)); weekBtn.classList.toggle('primary', !!(picks.weeks.length && st.days));
+  }
+  syncPickBtns();
+  const preset = (label, key, title) => h('button', { class: 'btn small', title, onclick: () => { const [a, b] = PRESETS[key](today()); setRange(a, b, key); } }, label);
+
+  // ---------- model ekranu ----------
+  // cała lista (zapisy) i widoczni w Grafiku – bez wyłączonych w Kompetencjach (people[].off)
+  const allPeople = () => ((st.meta && st.meta.people) || []);
+  const people = () => allPeople().filter((p) => !p.off);
+  // święta: wspólna lista programu (Ustawienia, config/main) + daty z karty i (import)
+  const holidays = () => new Set([...((st.cfg && st.cfg.holidays) || []).map((x) => (typeof x === 'string' ? x : x && x.date)), ...((st.meta && st.meta.holidays) || [])]);
+  const stations = () => stationList(st.cfg);
+  const code = (pid, iso) => ((st.codes[pid] || {})[iso] ?? '');
+  const note = (pid, iso) => ((st.notes[pid] || {})[iso] ?? '');
+  // rok podsumowań urlopów: zawsze bieżący – dni następnego roku w widoku to tylko prognoza (nie wchodzą do wykorzystanych / zaplanowanych)
+  const year = () => today().slice(0, 4);
+  const summaries = () => { const m = new Map(), t = today(); for (const p of people()) if (!p.sep) m.set(p.id, F.personSummary(p, st.codes[p.id] || {}, year(), t)); return m; };
+  const dates = () => (st.days ? st.days : F.daysBetween(st.from, st.to));
+  const columns = (g0 = st.groups) => {
+    const g = acc.groups ? g0 : { ut: false, hours: false, abs: false };
+    const y = year();
+    return [
+      { key: 'name', title: 'Pracownik', w: 170 }, { key: 'place', title: 'Miejsce', w: 52 },
+      ...(g.ut ? [
+        { key: 's:plan', title: 'Plan', full: `Plan urlopu ${y} (suma miesięcy)`, sum: 'planned' },
+        { key: 's:prev', title: `UT ${Number(y) - 1}`, full: `Urlop z ${Number(y) - 1} (wpisywany ręcznie – kliknij i wpisz)`, edit: 'prev' },
+        { key: 's:cur', title: `UT ${y}`, full: `Urlop ${y} (wpisywany ręcznie – kliknij i wpisz)`, edit: 'cur' },
+        { key: 's:used', title: 'Wykorz.', full: 'Wykorzystane do dziś (UT + NŻ)', sum: 'used' },
+        { key: 's:fut', title: 'Zaplan.', full: 'Zaplanowane (UT po dziś)', sum: 'future' },
+        { key: 's:avail', title: 'Dostęp.', full: 'UT dostępny (poprzedni + bieżący − wykorzystany)', sum: 'available' },
+        { key: 's:rem', title: 'Pozost.', full: 'UT pozostały (dostępny − zaplanowany)', sum: 'remaining' }].map((c, i, all) => ({ ...c, ut: i, utN: all.length })) : []),
+      ...(g.hours ? [...MON3.map((m, i) => ({ key: 'h:' + i, title: m, full: `Godziny przepracowane – ${F.MONTHS[i]} ${y}`, hours: i })), { key: 'h:sum', title: 'Razem', full: `Godziny ${y} razem`, hours: 'sum', w: 50 }] : []),
+      ...(g.abs ? F.ABSENCES.map(([k, label]) => ({ key: 'a:' + k, title: k, full: `${label} (${k}) – liczba dni w ${y}`, abs: k, w: 38 })) : []),
+      ...dates().map((iso) => ({ key: 'd:' + iso, iso, title: iso })),
+    ];
+  };
+  let sums = new Map();
+  const value = (p, col) => {
+    if (col.key === 'name') return p.name;
+    if (col.key === 'place') return p.place || '';
+    const s = sums.get(p.id);
+    if (col.edit) { const ut = (p.ut || {})[year()] || {}; return String(Number(ut[col.edit]) || 0); }
+    if (col.sum) return s ? String(s[col.sum]) : '';
+    if (col.hours !== undefined) { if (!s) return ''; const v = col.hours === 'sum' ? s.hoursToMonth[11] : s.hoursByMonth[col.hours]; return v ? String(v) : ''; }
+    if (col.abs) return s ? String(s.absences[col.abs] || 0) : '';   // jak w arkuszu: także 0
+    return code(p.id, col.iso);
+  };
+
+  // ---------- rysowanie ----------
+  let grid = [], cols = [], rows = [];
+  function draw() {
+    if (!st.ready) return;
+    for (const b of groupBtns) b.className = 'btn small' + (acc.groups && st.groups[b.dataset.g] ? ' primary' : '');
+    if (!st.meta) {
+      clear(body);
+      body.append(h('div', { style: { padding: '14px' } }, h('p', {}, 'Grafiku nie ma jeszcze w bazie.'),
+        h('p', { class: 'muted' }, st.missingOnServer ? 'Serwer Firebase potwierdza: brak dokumentu gr_meta/main (pracownicy Grafiku).' : 'Nie udało się potwierdzić na serwerze – sprawdź połączenie z internetem.'),
+        h('p', { class: 'muted' }, acc.importG ? 'Import z karty G: Ustawienia → „Import Grafiku z karty G” (GOD).' : 'Import z karty G robi osoba z poziomem GOD w Grafiku (Ustawienia).')));
+      return;
+    }
+    sums = summaries();
+    cols = columns();
+    // filtry i sortowanie działają też na kolumnach ukrytych grup (jak ukryte kolumny w Harmonogramie)
+    const fcols = columns(allGroups());
+    for (const k of Object.keys(st.filters)) if (!fcols.some((c) => c.key === k)) delete st.filters[k];
+    st.sorts = st.sorts.filter((x) => fcols.some((c) => c.key === x.key));
+    const getV = (pid, c) => { const p = people().find((x) => x.id === pid); return p ? value(p, c) : ''; };
+    const all = people().filter((p) => !p.sep).map((p) => p.id);
+    const filtered = visibleRows(all, fcols, st.filters, getV);
+    const sorted = st.sorts.length ? sortRows(filtered, fcols, st.sorts, getV) : filtered;
+    // separatory zostają w swoim miejscu, gdy nie ma sortowania (grupy jak w arkuszu)
+    rows = st.sorts.length ? sorted.map((id) => people().find((p) => p.id === id)) : people().filter((p) => p.sep ? !Object.keys(st.filters).length : sorted.includes(p.id));
+    const hol = holidays(), t = today(), hour = new Date().getHours(), labels = Object.fromEntries(st.sorts.map((x) => [x.key, sortLabel(x.key)])), stList = stations();
+    const sy = body.scrollTop, sx = body.scrollLeft;
+    clear(body);
+    const z = st.zoom / 100;
+    const table = h('table', { class: 't', style: { fontSize: 13 * z + 'px', borderCollapse: 'separate', borderSpacing: 0, borderLeft: '2px solid #000', borderTop: '2px solid #000' } });   // linie siatki Grafiku: czarne, 2 px
+    const fixed = FIXED;
+    // szerokości: własne (przeciągnięcie prawej krawędzi nagłówka, zapisywane na tym komputerze) albo domyślne; wszystkie dni – jedna szerokość
+    const wKey = (c) => (c.iso ? 'date' : c.key);
+    const widths = cols.map((c) => Math.round((st.widths[wKey(c)] ?? (c.iso ? 34 : c.w || 46)) * z));
+    const grip = (c) => h('div', { title: 'Przeciągnij: szerokość kolumny (Twoja, zapisywana na tym komputerze). Dwuklik: domyślna',
+      style: { position: 'absolute', right: '-3px', top: 0, width: '6px', height: '100%', cursor: 'col-resize', zIndex: 2 },
+      onclick: (e) => e.stopPropagation(), ondblclick: (e) => { e.stopPropagation(); delete st.widths[wKey(c)]; lsSet('grafik.widths', st.widths); draw(); },
+      onmousedown: (e) => startResize(e, c) });
+    const leftOf = (i) => widths.slice(0, i).reduce((a, b) => a + b, 0);
+    const weekH = Math.round(17 * z);
+    // nagłówek: wiersz tygodni (ISO) nad datami, pod nim daty w pionie „dd-mm-rrrr” jak w karcie G
+    const headM = h('tr', {}), head1 = h('tr', {}), head2 = h('tr', {});
+    const thBase = { position: 'sticky', cursor: 'pointer', padding: '2px 3px', fontWeight: 700, borderRight: '2px solid #000', borderBottom: '2px solid #000' };
+    cols.forEach((c, i) => {
+      if (c.iso) return;
+      const filt = !!st.filters[c.key];
+      headM.append(h('th', { rowspan: 3, title: (c.full || c.title) + '. Kliknij: filtr i sortowanie', onclick: () => openFilter(c),
+        style: { ...thBase, top: 0, zIndex: i < fixed ? 5 : 3, background: filt ? '#ffb74d' : c.ut !== undefined ? utShade(c.ut, c.utN, true) : c.abs ? F.absenceStyle(c.abs).bg : '#e4e4e4', color: c.abs && !filt ? F.absenceStyle(c.abs).color : '#000', ...(c.abs ? { fontStyle: F.absenceStyle(c.abs).italic ? 'italic' : 'normal' } : {}), whiteSpace: 'normal', lineHeight: 1.1,
+          fontSize: (i >= 2 ? 11 : 12) * z + 'px', minWidth: widths[i] + 'px', maxWidth: widths[i] + 'px', ...(i < fixed ? { left: leftOf(i) + 'px' } : {}) } },
+      c.title + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : ''), grip(c)));
+    });
+    const dcols = cols.filter((c) => c.iso);
+    // wiersz miesięcy nad tygodniami
+    for (let i = 0; i < dcols.length;) {
+      const mk = dcols[i].iso.slice(0, 7); let n = 1;
+      while (i + n < dcols.length && dcols[i + n].iso.slice(0, 7) === mk) n++;
+      const mi = Number(mk.slice(5, 7)) - 1, label = `${F.MONTHS[mi]} ${mk.slice(0, 4)}`;
+      headM.append(h('th', { colspan: n, title: label, style: { ...thBase, cursor: 'default', top: 0, zIndex: 3, height: weekH + 'px', padding: '0 4px', fontSize: 11 * z + 'px', textAlign: 'left',
+        background: mi % 2 ? '#fce4d6' : '#fff2cc', color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: n * widths[cols.indexOf(dcols[i])] + 'px' } }, n >= 3 ? label : n === 2 ? MON3[mi] : MON3[mi].slice(0, 1)));
+      i += n;
+    }
+    for (let i = 0; i < dcols.length;) {
+      const wk = F.isoWeek(dcols[i].iso); let n = 1;
+      while (i + n < dcols.length && F.isoWeek(dcols[i + n].iso) === wk) n++;
+      head1.append(h('th', { colspan: n, title: `Tydzień ${wk} (ISO)`, style: { ...thBase, cursor: 'default', top: weekH + 'px', zIndex: 3, height: weekH + 'px', padding: '0 2px', fontSize: 11 * z + 'px', background: wk % 2 ? '#d9e1f2' : '#eef2f9', color: '#000', whiteSpace: 'nowrap' } },
+        n >= 2 ? `tydz. ${wk}` : String(wk)));
+      i += n;
+    }
+    for (const c of dcols) {
+      const hs = F.headerStyle(c.iso, hol.has(c.iso)), filt = !!st.filters[c.key], wd = WD[new Date(c.iso + 'T00:00:00Z').getUTCDay()];
+      head2.append(h('th', { title: `${sheetDate(c.iso)} (${wd}), tydzień ${F.isoWeek(c.iso)}. Kliknij: filtr i sortowanie`, onclick: () => openFilter(c),
+        style: { ...thBase, top: 2 * weekH + 'px', zIndex: 3, padding: '3px 0', minWidth: widths[cols.indexOf(c)] + 'px', maxWidth: widths[cols.indexOf(c)] + 'px', fontSize: 11 * z + 'px', fontWeight: 400,
+          background: filt ? '#ffb74d' : c.iso === t ? '#00b050' : hs.bg, color: filt || c.iso === t ? '#000' : hs.color } },
+      h('div', { style: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', margin: '0 auto', lineHeight: 1 } }, sheetDate(c.iso) + (filt ? ' ▼' : '') + (labels[c.key] ? ' ' + labels[c.key] : '')), grip(c)));
+    }
+    const tbody = h('tbody', {});
+    grid = [];
+    rows.forEach((p, ri) => {
+      const tr = h('tr', {});
+      if (p.sep) {
+        tr.append(h('td', { colspan: cols.length, style: { background: '#444', color: '#fff', height: 6 * z + 'px', padding: 0, fontSize: '1px' } }, ''));
+        tbody.append(tr); grid.push(null); return;
+      }
+      const s = sums.get(p.id);
+      grid.push(p);
+      cols.forEach((c, ci) => {
+        const fixedCell = ci < fixed;
+        let txt = value(p, c), style = { borderRight: '2px solid #000', borderBottom: '2px solid #000', padding: '1px 4px', whiteSpace: 'nowrap', textAlign: c.key === 'name' ? 'left' : 'center' };
+        const stn = F.placeStation(p.place, stList);
+        if (c.key === 'name') { txt = acc.summary ? F.displayName(p, s ? s.remaining : 0) : p.name + (p.suffix ? ' ' + p.suffix : ''); style = { ...style, fontWeight: 600, ...(stn ? { background: stn.bg, color: stn.color } : {}) }; }
+        if (c.ut !== undefined) style = { ...style, background: utShade(c.ut, c.utN, false) };
+        if (c.key === 'place') { if (stn) style = { ...style, background: stn.bg, color: stn.color, fontWeight: 700 }; }
+        if (c.sum === 'remaining' || c.sum === 'available') { if (Number(txt) < 0) style.background = '#ff0000'; }
+        if (c.edit) style = { ...style, cursor: canWrite ? 'cell' : 'default', fontWeight: 700 };
+        if (c.hours !== undefined) style = { ...style, background: '#e2efda' };
+        if (c.abs) { const as = F.absenceStyle(c.abs); style = { ...style, background: as.bg, color: as.color, fontWeight: as.bold ? 700 : 400, fontStyle: as.italic ? 'italic' : 'normal' }; }
+        if (c.iso) {
+          const cs = F.cellStyle(txt, c.iso, { todayIso: t, hour, holiday: hol.has(c.iso), utNegative: s && s.remaining < 0 });
+          style = { ...style, background: cs.bg, color: cs.color, fontWeight: cs.bold ? 700 : 400, fontStyle: cs.italic ? 'italic' : 'normal', position: 'relative', cursor: canWrite ? 'cell' : 'default' };
+        }
+        if (fixedCell) style = { ...style, position: 'sticky', left: leftOf(ci) + 'px', zIndex: 2, background: style.background || '#fff', overflow: 'hidden', textOverflow: 'ellipsis' };
+        style = { ...style, minWidth: widths[ci] + 'px', maxWidth: widths[ci] + 'px', ...(c.iso ? { overflow: 'hidden', padding: '1px 2px' } : {}) };
+        const td = h('td', { style, 'data-r': ri, 'data-c': ci }, txt);
+        const n = c.iso ? note(p.id, c.iso) : '';
+        if (n) { td.title = 'Komentarz: ' + n; td.append(h('span', { style: { position: 'absolute', right: 0, top: 0, width: 0, height: 0, borderTop: '7px solid #ff6d00', borderLeft: '7px solid transparent' } })); }
+        if (c.key === 'name') td.title = `${p.name}${p.nr ? ' · ' + p.nr : ''}. Dwuklik / prawy przycisk: podsumowanie urlopów i godzin`;
+        if (c.key === 'place') { td.title = stn ? `Stanowisko ${stn.name} (kolor jak w Harmonogramie)` : 'Miejsce pracy bez stanowiska w Harmonogramie'; }
+        if (c.hours !== undefined && typeof c.hours === 'number' && s) td.title = `${F.MONTHS[c.hours]}: ${s.hoursByMonth[c.hours]} h · narastająco do końca miesiąca: ${s.hoursToMonth[c.hours]} h`;
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+    table.append(h('thead', {}, headM, head1, head2), tbody);
+    body.append(table);
+    body.scrollTop = sy; body.scrollLeft = sx;
+    paintSel();
+    info.textContent = `Pracowników: ${grid.filter(Boolean).length}` + ` · ${acc.label}` + (canWrite ? ' · zmiany zapisują się od razu' : ' · tylko przeglądanie') + (Object.keys(st.filters).length ? ` · filtry: ${Object.keys(st.filters).length}` : '') + (st.undo.length ? ` · cofnij: ${st.undo.length}` : '');
+  }
+
+  // ---------- zaznaczenie i klawiatura (jak w Excelu) ----------
+  const FIXED = 2;   // przyklejone kolumny: pracownik i miejsce
+  const fixedCount = () => Math.max(FIXED, cols.findIndex((c) => c.iso));
+  const cellEl = (r, c) => body.querySelector(`td[data-r="${r}"][data-c="${c}"]`);
+  function paintSel() {
+    body.querySelectorAll('td.gsel, td.gglow').forEach((td) => { td.classList.remove('gsel', 'gglow'); td.style.outline = ''; td.style.boxShadow = ''; });
+    if (!st.sel) return;
+    const { r0, c0, r1, c1 } = st.sel, ra = Math.min(r0, r1), rb = Math.max(r0, r1), ca = Math.min(c0, c1), cb = Math.max(c0, c1);
+    // podświetlenie (lekka zielona poświata) wiersza edytowanej komórki – zawsze włączone
+    if (st.glow) body.querySelectorAll(`td[data-r="${r1}"]`).forEach((td) => { td.classList.add('gglow'); td.style.boxShadow = 'inset 0 0 0 999px rgba(0,176,80,.10), inset 0 2px 0 rgba(0,176,80,.75), inset 0 -2px 0 rgba(0,176,80,.75), 0 0 6px rgba(0,176,80,.45)'; });
+    for (let r = ra; r <= rb; r++) for (let c = ca; c <= cb; c++) { const td = cellEl(r, c); if (td) { td.classList.add('gsel'); td.style.boxShadow = 'inset 0 0 0 999px rgba(26,115,232,.18)' + (st.glow && r === r1 ? ', inset 0 2px 0 rgba(0,176,80,.75), inset 0 -2px 0 rgba(0,176,80,.75)' : ''); } }
+    const a = cellEl(r1, c1); if (a) { a.style.outline = '2px solid #0b57d0'; a.style.outlineOffset = '-2px'; a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  }
+  /** Zmiana szerokości kolumny przeciągnięciem krawędzi nagłówka (podgląd linią, zapis po puszczeniu). */
+  function startResize(e, c) {
+    e.preventDefault(); e.stopPropagation();
+    const z = st.zoom / 100, key = c.iso ? 'date' : c.key, base = st.widths[key] ?? (c.iso ? 34 : c.w || 46), x0 = e.clientX;
+    let v = base;
+    const guide = h('div', { style: { position: 'fixed', top: 0, bottom: 0, left: e.clientX + 'px', width: '1px', background: '#0b57d0', zIndex: 9999, pointerEvents: 'none' } });
+    const tip = h('div', { style: { position: 'fixed', zIndex: 9999, background: '#333', color: '#fff', padding: '2px 6px', fontSize: '12px', pointerEvents: 'none' } });
+    document.body.append(guide, tip);
+    const move = (ev) => { v = Math.round(Math.max(20, Math.min(400, base + (ev.clientX - x0) / z))); guide.style.left = ev.clientX + 'px'; Object.assign(tip.style, { left: ev.clientX + 12 + 'px', top: ev.clientY + 12 + 'px' }); tip.textContent = `Szerokość: ${v} px${c.iso ? ' (wszystkie dni)' : ''}`; };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); guide.remove(); tip.remove(); if (v !== base) { st.widths[key] = v; lsSet('grafik.widths', st.widths); draw(); } };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
+  const dataRow = (r, d) => { let x = r + d; while (x >= 0 && x < grid.length && !grid[x]) x += d > 0 ? 1 : -1; return x >= 0 && x < grid.length && grid[x] ? x : r; };
+  function setSel(r, c, extend) {
+    if (!grid.length) return;
+    c = Math.max(0, Math.min(cols.length - 1, c));
+    if (r < 0 || r >= grid.length || !grid[r]) return;
+    st.sel = extend && st.sel ? { ...st.sel, r1: r, c1: c } : { r0: r, c0: c, r1: r, c1: c };
+    paintSel();
+  }
+  const posOf = (e) => { const td = e.target.closest && e.target.closest('td[data-r]'); return td ? { r: +td.dataset.r, c: +td.dataset.c } : null; };
+  let dragging = false;
+  body.addEventListener('mousedown', (e) => {
+    if (st.editing) return;
+    const p = posOf(e); if (!p || e.button !== 0) return;
+    e.preventDefault(); body.focus(); setSel(p.r, p.c, e.shiftKey); dragging = true;
+  });
+  body.addEventListener('mousemove', (e) => { if (!dragging || !(e.buttons & 1)) { dragging = false; return; } const p = posOf(e); if (p && st.sel && (p.r !== st.sel.r1 || p.c !== st.sel.c1) && grid[p.r]) { st.sel = { ...st.sel, r1: p.r, c1: p.c }; paintSel(); } });
+  body.addEventListener('dblclick', (e) => { const p = posOf(e); if (!p) return; setSel(p.r, p.c); if (cols[p.c].key === 'name') { if (acc.summary) personDialog(grid[p.r]); } else beginEdit(null); });
+  body.addEventListener('contextmenu', (e) => { const p = posOf(e); if (!p) return; e.preventDefault(); setSel(p.r, p.c); contextMenu(e, p); });
+  body.addEventListener('keydown', (e) => {
+    if (st.editing || !st.meta) return;
+    const ctrl = e.ctrlKey || e.metaKey, s = st.sel;
+    if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); undoRedo(st.undo, st.redo); return; }
+    if (ctrl && e.key.toLowerCase() === 'y') { e.preventDefault(); undoRedo(st.redo, st.undo); return; }
+    if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); st.sel = { r0: 0, c0: fixedCount(), r1: grid.length - 1, c1: cols.length - 1 }; paintSel(); return; }
+    if (!s) { if (e.key.startsWith('Arrow')) { e.preventDefault(); setSel(dataRow(-1, 1), fixedCount()); } return; }
+    const mv = (dr, dc, ext) => { e.preventDefault(); setSel(dr ? dataRow(s.r1, dr) : s.r1, s.c1 + dc, ext); };
+    switch (e.key) {
+      case 'ArrowDown': return mv(1, 0, e.shiftKey);
+      case 'ArrowUp': return mv(-1, 0, e.shiftKey);
+      case 'ArrowRight': return mv(0, 1, e.shiftKey);
+      case 'ArrowLeft': return mv(0, -1, e.shiftKey);
+      case 'Tab': return mv(0, e.shiftKey ? -1 : 1, false);
+      case 'Enter': return mv(e.shiftKey ? -1 : 1, 0, false);
+      case 'Home': e.preventDefault(); return setSel(s.r1, fixedCount(), e.shiftKey);
+      case 'End': e.preventDefault(); return setSel(s.r1, cols.length - 1, e.shiftKey);
+      case 'F2': e.preventDefault(); return beginEdit(null);
+      case 'Delete': case 'Backspace': e.preventDefault(); return clearSel();
+      default: if (!ctrl && !e.altKey && e.key.length === 1) { e.preventDefault(); beginEdit(e.key); }
+    }
+  });
+  const selCells = () => { const { r0, c0, r1, c1 } = st.sel, out = []; for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) { if (!grid[r]) continue; for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) if (cols[c].iso) out.push({ p: grid[r], iso: cols[c].iso }); } return out; };
+
+  // ---------- zapis (od razu do bazy), cofanie ----------
+  async function apply(items, label) {
+    if (!canWrite) { toast(`Grafik: tylko przeglądanie (poziom ${acc.label}; poziomy ustawia administrator w zakładce Uzytkownicy, kolumna „Grafik dostęp”)`); return; }
+    const changes = [], before = [];
+    for (const it of items) {
+      const ch = { pid: it.p.id, iso: it.iso };
+      if (it.code !== undefined) { const v = F.cleanCode(it.code); if (v === code(it.p.id, it.iso)) continue; ch.code = v; }
+      if (it.note !== undefined) { if (it.note === note(it.p.id, it.iso)) continue; ch.note = it.note; }
+      if (ch.code === undefined && ch.note === undefined) continue;
+      before.push({ pid: ch.pid, iso: ch.iso, ...(ch.code !== undefined ? { code: code(ch.pid, ch.iso) } : {}), ...(ch.note !== undefined ? { note: note(ch.pid, ch.iso) } : {}) });
+      changes.push(ch);
+    }
+    if (!changes.length) return;
+    try {
+      const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row])), namesMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.name]));
+      const r = await saveCells(changes, rowsMap, namesMap);
+      st.undo.push({ label, before, after: changes }); if (st.undo.length > 100) st.undo.shift(); st.redo = [];
+    } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+  }
+  async function undoRedo(from, to) {
+    const step = from.pop(); if (!step) return;
+    const rowsMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.row])), namesMap = Object.fromEntries(people().filter((p) => p.row).map((p) => [p.id, p.name]));
+    try { await saveCells(from === st.undo ? step.before : step.after, rowsMap, namesMap); to.push(step); toast((from === st.undo ? 'Cofnięto: ' : 'Ponowiono: ') + step.label); }
+    catch (e) { from.push(step); toast('Nie zapisano: ' + (e.message || e), true); }
+  }
+  /** Urlop z poprzedniego / bieżącego roku wpisany w tabeli (kolumny „UT rrrr”) – zapis w danych pracownika. */
+  async function saveUt(p, field, text) {
+    const n = Number(String(text).replace(',', '.').trim() || 0);
+    if (!Number.isFinite(n)) { toast('Wpisz liczbę dni urlopu'); return; }
+    const y = year(), cur = (p.ut || {})[y] || {};
+    if ((Number(cur[field]) || 0) === n) return;
+    const list = allPeople().map((x) => x.id !== p.id ? x : { ...x, ut: { ...(x.ut || {}), [y]: { prev: 0, cur: 0, plan: [], ...cur, [field]: n } } });
+    try { await saveMeta({ people: list }); toast(`${p.name}: UT ${field === 'prev' ? Number(y) - 1 : y} = ${n}`); } catch (e) { toast('Nie zapisano: ' + (e.code === 'permission-denied' ? 'brak uprawnień' : e.message || e), true); }
+  }
+  function clearSel() { const items = selCells().filter((x) => code(x.p.id, x.iso) !== '').map((x) => ({ ...x, code: '' })); if (items.length) apply(items, `Wyczyszczenie: ${items.length}`); }
+
+  // ---------- edycja w komórce ----------
+  function beginEdit(typed) {
+    if (!st.sel) return;
+    const c = cols[st.sel.c1], p = grid[st.sel.r1];
+    if (!p) return;
+    if (c.key === 'name') { if (acc.summary) personDialog(p); return; }
+    if (!c.iso && !c.edit) return;
+    if (c.edit && !acc.manage) { toast(`Urlopy zmienia poziom MASTER lub GOD (masz ${acc.label})`); return; }
+    if (!canWrite) { toast('Grafik: tylko odczyt'); return; }
+    const td = cellEl(st.sel.r1, st.sel.c1); if (!td) return;
+    const r = td.getBoundingClientRect(), b = body.getBoundingClientRect();
+    const input = h('input', { value: typed != null ? typed : c.edit ? value(p, c) : code(p.id, c.iso), style: { position: 'absolute', zIndex: 10, left: r.left - b.left + body.scrollLeft + 'px', top: r.top - b.top + body.scrollTop + 'px', width: Math.max(r.width, 70) + 'px', height: r.height + 'px', boxSizing: 'border-box', border: '2px solid #0b57d0', font: 'inherit', padding: '0 3px' } });
+    st.editing = input; body.append(input); input.focus();
+    if (typed == null) input.select();
+    const finish = (commit, move) => {
+      if (st.editing !== input) return;
+      st.editing = null; const v = input.value; input.remove(); body.focus();
+      if (commit) { if (c.edit) saveUt(p, c.edit, v); else apply([{ p, iso: c.iso, code: v }], `${p.name} ${plDate(c.iso)}`); }
+      if (move) move();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); finish(true, () => setSel(dataRow(st.sel.r1, e.shiftKey ? -1 : 1), st.sel.c1)); }
+      else if (e.key === 'Tab') { e.preventDefault(); finish(true, () => setSel(st.sel.r1, st.sel.c1 + (e.shiftKey ? -1 : 1))); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  // ---------- schowek (zgodny z Excelem) ----------
+  const tsvCell = (t) => { const s = String(t ?? ''); return /[\t\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  function parseTsv(text) {
+    const s = String(text ?? '').replace(/\r\n?/g, '\n'), out = []; let row = [], cell = '', q = false, start = true;
+    for (let i = 0; i < s.length; i++) { const ch = s[i];
+      if (q) { if (ch === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; continue; }
+      if (ch === '"' && start) { q = true; start = false; continue; }
+      if (ch === '\t') { row.push(cell); cell = ''; start = true; continue; }
+      if (ch === '\n') { row.push(cell); out.push(row); row = []; cell = ''; start = true; continue; }
+      cell += ch; start = false; }
+    if (cell !== '' || row.length) { row.push(cell); out.push(row); }
+    return out;
+  }
+  const active = () => { if (!el.isConnected) { cleanup(); return false; } return document.activeElement === body && st.sel && !st.editing; };
+  function onCopy(e) {
+    if (!active()) return; e.preventDefault();
+    const { r0, c0, r1, c1 } = st.sel, out = [];
+    for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) { if (!grid[r]) continue; const row = []; for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) row.push(value(grid[r], cols[c])); out.push(row.map(tsvCell).join('\t')); }
+    e.clipboardData.setData('text/plain', out.join('\r\n'));
+  }
+  function onCut(e) { if (!active()) return; onCopy(e); clearSel(); }
+  function onPaste(e) {
+    if (!active()) return; e.preventDefault();
+    const data = parseTsv(e.clipboardData.getData('text/plain')); if (!data.length) return;
+    const { r0, c0, r1, c1 } = st.sel, items = [];
+    if (data.length === 1 && data[0].length === 1 && (r0 !== r1 || c0 !== c1)) { for (const x of selCells()) items.push({ ...x, code: data[0][0] }); }
+    else {
+      let r = Math.min(r0, r1);
+      for (const row of data) { while (r < grid.length && !grid[r]) r++; if (r >= grid.length) break;
+        row.forEach((v, j) => { const c = cols[Math.min(c0, c1) + j]; if (c && c.iso) items.push({ p: grid[r], iso: c.iso, code: v }); }); r++; }
+    }
+    apply(items, `Wklejenie: ${items.length}`);
+  }
+  document.addEventListener('copy', onCopy); document.addEventListener('cut', onCut); document.addEventListener('paste', onPaste);
+
+  // ---------- komentarze, menu, podsumowanie pracownika ----------
+  function contextMenu(e, pos) {
+    document.querySelectorAll('.gr-menu').forEach((m) => m.remove());
+    const c = cols[pos.c], p = grid[pos.r]; if (!p) return;
+    const items = [];
+    if (c.iso) {
+      const n = note(p.id, c.iso);
+      if (canWrite) items.push([n ? 'Edytuj komentarz…' : 'Komentarz…', () => noteDialog(p, c.iso)]);
+      if (canWrite && n) items.push(['Usuń komentarz', () => apply([{ p, iso: c.iso, note: '' }], 'Usunięcie komentarza')]);
+    }
+    if (acc.summary) items.push(['Podsumowanie pracownika…', () => personDialog(p)]);
+    if (!items.length) return;
+    const menu = h('div', { class: 'gr-menu', style: { position: 'fixed', left: e.clientX + 'px', top: e.clientY + 'px', zIndex: 9999, background: '#fff', border: '1px solid #888', boxShadow: '0 3px 10px rgba(0,0,0,.3)', minWidth: '200px' } },
+      ...items.map(([label, fn]) => h('div', { style: { padding: '6px 12px', cursor: 'pointer' }, onmouseenter: (ev) => { ev.target.style.background = '#e8f0fe'; }, onmouseleave: (ev) => { ev.target.style.background = ''; }, onmousedown: (ev) => { ev.preventDefault(); menu.remove(); fn(); } }, label)));
+    document.body.append(menu);
+    const off = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', off, true); } };
+    setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+  }
+  function noteDialog(p, iso) {
+    const ta = h('textarea', { rows: 4, style: { width: '100%', padding: '6px' } }); ta.value = note(p.id, iso);
+    const m = modal(`Komentarz – ${p.name}, ${plDate(iso)}`, h('div', {}, ta, h('div', { class: 'actions' },
+      h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'),
+      h('button', { class: 'btn primary', onclick: () => { m.close(); apply([{ p, iso, note: ta.value.trim() }], 'Komentarz'); } }, 'OK'))));
+    ta.focus();
+  }
+  /** Podsumowanie pracownika – ta sama karta co w Kompetencjach i Planie (views/personCard.js); MASTER / GOD – „Zmień dane…”. */
+  function personDialog(p) {
+    openPersonCard({ id: p.id, name: p.name }, { access: acc, extra: acc.manage ? [['Zmień dane…', () => personEdit(p)]] : [] });
+  }
+  function personEdit(p) {
+    const y = year(), ut = (p.ut || {})[y] || {};
+    const inp = (v, w = '70px') => h('input', { value: v ?? '', style: { width: w, padding: '3px' } });
+    const place = inp(p.place, '90px'), suffix = inp(p.suffix, '120px'), prev = inp(ut.prev ?? 0), cur = inp(ut.cur ?? 0);
+    const plan = F.MONTHS.map((_, i) => inp((ut.plan || [])[i] || '', '40px'));
+    const m = modal(`${p.name} – dane`, h('div', {},
+      h('div', { class: 'row' }, 'Miejsce pracy (np. 1Si1):', place, ' Dopisek przy nazwisku:', suffix),
+      h('div', { class: 'row', style: { marginTop: '6px' } }, `UT z ${Number(y) - 1}:`, prev, ` UT ${y}:`, cur),
+      h('div', { style: { marginTop: '6px' } }, `Plan urlopu ${y}: `, ...plan.flatMap((x, i) => [h('span', { class: 'muted' }, ' ' + (i + 1) + ':'), x])),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Anuluj'),
+        h('button', { class: 'btn primary', onclick: async () => {
+          const list = allPeople().map((x) => x.id !== p.id ? x : { ...x, place: place.value.trim(), suffix: suffix.value.trim(),
+            ut: { ...(x.ut || {}), [y]: { prev: Number(prev.value) || 0, cur: Number(cur.value) || 0, plan: plan.map((q) => Number(q.value) || 0) } } });
+          try { await saveMeta({ people: list }); m.close(); toast('Zapisano dane pracownika'); } catch (e) { toast('Nie zapisano: ' + (e.message || e), true); }
+        } }, 'Zapisz'))));
+  }
+
+  // ---------- filtry i sortowanie (jak autofiltr) ----------
+  const sortLabel = (key) => { const i = st.sorts.findIndex((x) => x.key === key); return i < 0 ? '' : (st.sorts[i].ascending ? '↑' : '↓') + (st.sorts.length > 1 ? i + 1 : ''); };
+  /**
+   * Filtr i sortowanie kolumny – zasady Harmonogramu: lista wartości z liczbą wierszy (z uwzględnieniem pozostałych filtrów),
+   * ostatnio wybrane sortowanie jest pierwszym poziomem (kolejne kolumny – następne poziomy, numer przy strzałce),
+   * na górze okna wybór innej kolumny, także z ukrytych grup; filtry i sortowanie zapamiętane na tym komputerze.
+   */
+  function openFilter(c) {
+    const fcols = columns(allGroups());
+    const getV = (pid, col) => { const p = people().find((x) => x.id === pid); return p ? value(p, col) : ''; };
+    const all = people().filter((p) => !p.sep).map((p) => p.id);
+    const cur = st.sorts.find((x) => x.key === c.key);
+    const shown = new Set(cols.map((x) => x.key)), hidden = fcols.filter((x) => !shown.has(x.key));
+    const label = (x) => x.iso ? `${sheetDate(x.iso)} (${WD[new Date(x.iso + 'T00:00:00Z').getUTCDay()]})` : (x.full || x.title);
+    let dlg = null;
+    const opt = (x) => h('option', { value: x.key }, `${label(x)}${st.filters[x.key] ? ' ▼' : ''}${sortLabel(x.key) ? ' ' + sortLabel(x.key) : ''}`);
+    const sel = h('select', { style: { width: '100%', padding: '4px' }, onchange: () => { const n = fcols.find((x) => x.key === sel.value); if (n && n.key !== c.key) { if (dlg) dlg.close(); openFilter(n); } } },
+      h('optgroup', { label: 'Widoczne' }, ...cols.map(opt)), ...(hidden.length ? [h('optgroup', { label: 'Ukryte (Urlopy / Godziny / Absencje)' }, ...hidden.map(opt))] : []));
+    sel.value = c.key;
+    const others = Object.keys(st.filters).filter((k) => k !== c.key).map((k) => fcols.find((x) => x.key === k)).filter(Boolean);
+    const picker = h('div', { style: { border: '1px solid #ccc', background: '#f6f8fc', padding: '6px', marginBottom: '6px' } },
+      h('div', { style: { fontWeight: 700, fontSize: '12px', marginBottom: '4px' } }, 'Kolumna do filtrowania (także ukryte):'), sel,
+      others.length ? h('div', { class: 'muted', style: { fontSize: '11px', marginTop: '3px' } }, 'Inne filtry: ' + others.map((x) => x.iso ? sheetDate(x.iso) : x.title).join(', ')) : null);
+    dlg = columnFilterDialog({ top: picker, title: label(c) + (shown.has(c.key) ? '' : ' (kolumna ukryta)'), options: filterOptions(all, fcols, st.filters, getV, c), activeFilter: st.filters[c.key], activeSort: cur ? cur.ascending : null,
+      onApply: (filter, sort) => {
+        if (filter) st.filters[c.key] = filter; else delete st.filters[c.key];
+        st.sorts = st.sorts.filter((x) => x.key !== c.key); if (sort !== null) st.sorts.unshift({ key: c.key, ascending: sort });
+        saveFilters(st); draw();
+      } });
+  }
+
+  const setZoom = (v) => { st.zoom = Math.max(50, Math.min(200, v)); lsSet('grafik.zoom', st.zoom); zoomLabel.textContent = st.zoom + '%'; draw(); };
+  body.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(st.zoom + (e.deltaY < 0 ? 10 : -10)); } }, { passive: false });
+  const tick = setInterval(() => { if (!el.isConnected) { cleanup(); return; } if (!st.editing) draw(); }, 5 * 60000);   // kolory „teraz” i „minione”
+  function cleanup() {
+    document.removeEventListener('copy', onCopy); document.removeEventListener('cut', onCut); document.removeEventListener('paste', onPaste);
+    clearInterval(tick); if (st.watcher) { st.watcher.stop(); st.watcher = null; }
+  }
+
+  el.style.display = 'flex'; el.style.flexDirection = 'column'; el.style.gap = '6px';
+  el.append(h('div', { class: 'row panel' }, 'Od', fromIn, 'do', toIn,
+    preset('Teraz', 'teraz', 'Od 3 dni wstecz do 7 dni naprzód (jak w arkuszu)'),
+    preset('Miesiąc', 'miesiac'),
+    preset('Tydzień', 'tydzien', 'Bieżący tydzień (pon–niedz)'),
+    preset('Rok', 'rok'),
+    monthBtn, weekBtn,
+    h('button', { class: 'btn small', title: 'Cofnij (Ctrl+Z)', onclick: () => undoRedo(st.undo, st.redo) }, '↶'), h('button', { class: 'btn small', title: 'Ponów (Ctrl+Y)', onclick: () => undoRedo(st.redo, st.undo) }, '↷'),
+    ...groupBtns,
+    // wysyłka do karty G – na żądanie (MASTER, GOD); świeci, gdy są zmiany do wysłania
+    acc.manage ? syncButton('grafik', 'G', { h, toast, confirmBox }, { range: true }) : null,
+    (() => { const t = 'Wyczyść filtry i sortowanie'; const b = h('button', { class: 'btn small', title: t, 'aria-label': t, style: { width: '30px', height: '30px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }, onclick: () => { st.filters = {}; st.sorts = []; saveFilters(st); draw(); } }); b.append(iconSvg('broom')); return b; })(),
+    h('span', { class: 'grow' }), info), body);
+  zoomLabel.textContent = st.zoom + '%';
+  start();
+  return cleanup;
+}

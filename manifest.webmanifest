@@ -1,0 +1,12 @@
+{
+  "name": "ZKS PO",
+  "short_name": "ZKS PO",
+  "description": "Skaner i komunikator ZKS PO (wersja na iPhone'a)",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#333333",
+  "theme_color": "#333333",
+  "icons": [{ "src": "img/icon.png", "sizes": "512x512", "type": "image/png" }]
+}
